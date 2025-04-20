@@ -1,5 +1,6 @@
 //! Development tools for the game. This plugin is only enabled in dev builds.
 
+use avian3d::prelude::{AngularVelocity, ExternalTorque};
 use bevy::{
     dev_tools::ui_debug_overlay::{DebugUiPlugin, UiDebugOptions},
     input::common_conditions::input_just_pressed,
@@ -7,7 +8,7 @@ use bevy::{
     ecs::event::EventReader,
     window::PrimaryWindow,
 };
-use crate::player::controller::MovementAction; // Import MovementAction
+use crate::player::{controller::MovementAction, Player}; // Import MovementAction
 use bevy_egui::{egui, EguiContext}; // Import egui and EguiContext
 
 // Resource to store the latest movement info for debugging
@@ -15,6 +16,8 @@ use bevy_egui::{egui, EguiContext}; // Import egui and EguiContext
 struct DebugMovementInfo {
     last_move_direction: Option<Vec2>,
     jumped_this_frame: bool,
+    external_torque: Option<Vec3>,
+    angular_velocity: Option<Vec3>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -26,6 +29,7 @@ pub(crate) fn plugin(app: &mut App) {
        .add_systems(Update, (
            toggle_system, 
            read_movement_actions, 
+           read_angular_movement_info,
            inspector_ui.run_if(is_debug_ui_enabled)
         ));
 }
@@ -65,15 +69,22 @@ fn read_movement_actions(
     move_info.last_move_direction = latest_move;
 }
 
+fn read_angular_movement_info(mut move_info: ResMut<DebugMovementInfo>, query: Query<(&ExternalTorque, &AngularVelocity), With<Player>>) {
+    if let Ok((torque, angular_velocity)) = query.get_single() {
+        move_info.external_torque = Some(**torque);
+        move_info.angular_velocity = Some(**angular_velocity);
+    }
+}
+
 fn inspector_ui(world: &mut World) {
     // Fetch DebugMovementInfo first
     // Use query to avoid borrowing the whole world if DebugMovementInfo doesn't exist yet
     let move_info_exists = world.contains_resource::<DebugMovementInfo>();
-    let (last_move_direction, jumped_this_frame) = if move_info_exists {
+    let (last_move_direction, jumped_this_frame, external_torque, angular_velocity) = if move_info_exists {
         let move_info = world.resource::<DebugMovementInfo>();
-        (move_info.last_move_direction, move_info.jumped_this_frame)
+        (move_info.last_move_direction, move_info.jumped_this_frame, move_info.external_torque, move_info.angular_velocity)
     } else {
-        (None, false)
+        (None, false, None, None)
     };
 
     let Ok(egui_context) = world
@@ -82,6 +93,7 @@ fn inspector_ui(world: &mut World) {
     else {
         return;
     };
+
     let mut egui_context = egui_context.clone();
 
 
@@ -96,6 +108,17 @@ fn inspector_ui(world: &mut World) {
             }
             ui.label(format!("Jumped: {}", jumped_this_frame));
             ui.separator();
+
+            if let Some(torque) = external_torque {
+                ui.label(format!("External Torque: {:.2}, {:.2}, {:.2}", torque.x, torque.y, torque.z));
+            } else {
+                ui.label("External Torque: None");
+            }
+            if let Some(angular_velocity) = angular_velocity {
+                ui.label(format!("Angular Velocity: {:.2}, {:.2}, {:.2}", angular_velocity.x, angular_velocity.y, angular_velocity.z));
+            } else {
+                ui.label("Angular Velocity: None");
+            }
         });
     });
 }

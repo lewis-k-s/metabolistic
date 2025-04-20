@@ -1,11 +1,11 @@
+use crate::player::Player;
 use avian3d::{math::*, prelude::*};
+use bevy::color::palettes::basic::{BLUE, GREEN, RED, YELLOW};
+use bevy::color::LinearRgba;
+use bevy::gizmos::gizmos::Gizmos;
 use bevy::{ecs::query::Has, prelude::*};
 use leafwing_input_manager::prelude::*;
-use crate::player::Player;
 use std::f32::consts::PI;
-use bevy::gizmos::gizmos::Gizmos;
-use bevy::color::palettes::basic::{YELLOW, RED, GREEN, BLUE};
-use bevy::color::LinearRgba;
 
 pub struct CharacterControllerPlugin;
 
@@ -15,25 +15,16 @@ pub enum Action {
     #[actionlike(DualAxis)]
     Move,
     #[actionlike(DualAxis)]
-    Pan
+    Pan,
 }
 
 impl Action {
     pub fn input_map() -> InputMap<Self> {
-        let dpad = VirtualDPad::new(
-            KeyCode::KeyW,
-            KeyCode::KeyS,
-            KeyCode::KeyA,
-            KeyCode::KeyD,
-        );
+        let dpad = VirtualDPad::new(KeyCode::KeyW, KeyCode::KeyS, KeyCode::KeyA, KeyCode::KeyD);
 
-        InputMap::new(
-            [
-                (Action::Jump, KeyCode::Space),
-            ]
-        )
-        .with_dual_axis(Action::Move, dpad)
-        .with_dual_axis(Action::Pan, MouseMove::default())
+        InputMap::new([(Action::Jump, KeyCode::Space)])
+            .with_dual_axis(Action::Move, dpad)
+            .with_dual_axis(Action::Pan, MouseMove::default())
     }
 }
 
@@ -41,17 +32,7 @@ impl Plugin for CharacterControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<MovementAction>()
             .add_plugins(InputManagerPlugin::<Action>::default())
-            .add_systems(
-                Update,
-                (
-                    pan_input,
-                    movement_input,
-                    update_grounded,
-                    movement,
-                apply_movement_damping,
-            )
-                .chain(),
-        );
+            .add_systems(Update, (movement_input, update_grounded, movement).chain());
     }
 }
 
@@ -74,37 +55,32 @@ pub struct Grounded;
 #[derive(Component)]
 pub struct MovementAcceleration(Scalar);
 
-/// The damping factor used for slowing down movement.
-#[derive(Component)]
-pub struct MovementDampingFactor(Scalar);
-
 /// The strength of a jump.
 #[derive(Component)]
 pub struct JumpImpulse(Scalar);
 
 /// The maximum angle a slope can have for a character controller
-/// to be able to climb and jump. If the slope is steeper than this angle,
-/// the character will slide down.
 #[derive(Component)]
 pub struct MaxSlopeAngle(Scalar);
 
-/// A bundle that contains the components needed for a basic
 /// kinematic character controller.
 #[derive(Bundle)]
 pub struct CharacterControllerBundle {
     character_controller: CharacterController,
     rigid_body: RigidBody,
     collider: Collider,
+    friction: Friction,
+    external_torque: ExternalTorque,
     ground_caster: ShapeCaster,
     locked_axes: LockedAxes,
     movement: MovementBundle,
 }
 
-/// A bundle that contains components for character movement.
+/// character movement.
 #[derive(Bundle)]
 pub struct MovementBundle {
     acceleration: MovementAcceleration,
-    damping: MovementDampingFactor,
+    damping: AngularDamping,
     jump_impulse: JumpImpulse,
     max_slope_angle: MaxSlopeAngle,
 }
@@ -118,7 +94,7 @@ impl MovementBundle {
     ) -> Self {
         Self {
             acceleration: MovementAcceleration(acceleration),
-            damping: MovementDampingFactor(damping),
+            damping: AngularDamping(damping),
             jump_impulse: JumpImpulse(jump_impulse),
             max_slope_angle: MaxSlopeAngle(max_slope_angle),
         }
@@ -127,7 +103,7 @@ impl MovementBundle {
 
 impl Default for MovementBundle {
     fn default() -> Self {
-        Self::new(30.0, 0.9, 7.0, PI * 0.45)
+        Self::new(1.0, 0.9, 7.0, PI * 0.45)
     }
 }
 
@@ -141,6 +117,12 @@ impl CharacterControllerBundle {
             character_controller: CharacterController,
             rigid_body: RigidBody::Dynamic,
             collider,
+            friction: Friction {
+                static_coefficient: 0.9,
+                dynamic_coefficient: 0.9,
+                combine_rule: CoefficientCombine::Average,
+            },
+            external_torque: ExternalTorque::ZERO,
             ground_caster: ShapeCaster::new(
                 caster_shape,
                 Vector::ZERO,
@@ -148,7 +130,7 @@ impl CharacterControllerBundle {
                 Dir3::NEG_Y,
             )
             .with_max_distance(0.2),
-            locked_axes: LockedAxes::ROTATION_LOCKED,
+            locked_axes: LockedAxes::new(),
             movement: MovementBundle::default(),
         }
     }
@@ -169,31 +151,23 @@ impl CharacterControllerBundle {
 /// local to the player perspective because we query for camera. Then the event reader is 'global'
 fn movement_input(
     mut movement_event_writer: EventWriter<MovementAction>,
-    player_query: Query<(&ActionState<Action>, &Children, &GlobalTransform), With<Player>>,
+    player_query: Query<(&ActionState<Action>, &GlobalTransform), With<Player>>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
-    mut gizmos: Gizmos
+    mut gizmos: Gizmos,
 ) {
-    let Ok((action_state, children, player_transform)) = player_query.get_single() else {
+    let Ok((action_state, player_transform)) = player_query.get_single() else {
         return;
     };
 
-    let mut camera_transform = None;
-    for &child in children.iter() {
-        if let Ok(transform) = camera_query.get(child) {
-            camera_transform = Some(transform);
-            break;
-        }
-    }
-
-    let Some(camera_transform) = camera_transform else {
-        error!("Player has no Camera3d child");
+    let Ok(camera_transform) = camera_query.get_single() else {
+        error!("No Camera3d found");
         return;
     };
 
     let forward = camera_transform.forward().xz().normalize_or_zero();
     let right = camera_transform.right().xz().normalize_or_zero();
 
-    // floating camera gizmo
+    // floating camera gizmo (relative to player)
     let start = player_transform.translation() + Vec3::Y;
     let fwdcam = start + Vec3::new(forward.x, 0.0, forward.y);
     let rightcam = start + Vec3::new(right.x, 0.0, right.y);
@@ -204,13 +178,14 @@ fn movement_input(
 
     let input_direction = action_state.axis_pair(&Action::Move);
 
-    // raw input gizmo
-    let start = player_transform.translation();
-    let end = start + Vec3::new(input_direction.x, 0.0, input_direction.y) * 2.0;
-    gizmos.line(start, end, LinearRgba::from(BLUE));
+    // // raw input gizmo
+    // let start = player_transform.translation();
+    // let end = start + Vec3::new(input_direction.x, 0.0, input_direction.y) * 2.0;
+    // gizmos.line(start, end, LinearRgba::from(BLUE));
 
     if input_direction != Vector2::ZERO {
-        let move_direction = (forward * input_direction.y + right * input_direction.x).normalize_or_zero();
+        let move_direction =
+            (forward * input_direction.y + right * input_direction.x).normalize_or_zero();
 
         if move_direction != Vector2::ZERO {
             movement_event_writer.send(MovementAction::Move(move_direction));
@@ -256,25 +231,33 @@ fn update_grounded(
 
 /// Responds to [`MovementAction`] events and moves character controllers accordingly.
 fn movement(
-    time: Res<Time>,
     mut movement_event_reader: EventReader<MovementAction>,
     mut controllers: Query<(
         &MovementAcceleration,
         &JumpImpulse,
+        &mut ExternalTorque,
         &mut LinearVelocity,
         Has<Grounded>,
     )>,
 ) {
-    let delta_time = time.delta_secs().adjust_precision();
-
-    for event in movement_event_reader.read() {
-        for (movement_acceleration, jump_impulse, mut linear_velocity, is_grounded) in
-            &mut controllers
-        {
+    let mut active_spin = false;
+    for (
+        movement_acceleration,
+        jump_impulse,
+        mut external_torque,
+        mut linear_velocity,
+        is_grounded,
+    ) in &mut controllers
+    {
+        for event in movement_event_reader.read() {
             match event {
                 MovementAction::Move(direction) => {
-                    linear_velocity.x += direction.x * movement_acceleration.0 * delta_time;
-                    linear_velocity.z += direction.y * movement_acceleration.0 * delta_time;
+                    external_torque
+                        .apply_torque(
+                            Vec3::new(direction.y, 0.0, -direction.x) * movement_acceleration.0,
+                        )
+                        .with_persistence(false);
+                    active_spin = true;
                 }
                 MovementAction::Jump => {
                     if is_grounded {
@@ -283,50 +266,8 @@ fn movement(
                 }
             }
         }
-    }
-}
-
-/// Slows down movement in the XZ plane.
-fn apply_movement_damping(mut query: Query<(&MovementDampingFactor, &mut LinearVelocity)>) {
-    for (damping_factor, mut linear_velocity) in &mut query {
-        // We could use `LinearDamping`, but we don't want to dampen movement along the Y axis
-        linear_velocity.x *= damping_factor.0;
-        linear_velocity.z *= damping_factor.0;
-    }
-}
-
-fn pan_input(
-    player_query: Query<(&ActionState<Action>, &Children), With<Player>>,
-    mut camera_query: Query<&mut Transform, With<Camera3d>>,
-) {
-    const CAMERA_ROTATE_RATE: f32 = 0.005;
-    const CAMERA_DISTANCE: f32 = 4.272; // sqrt(1.5*1.5 + 4.0*4.0)
-
-    let Ok((action_state, children)) = player_query.get_single() else {
-        return;
-    };
-
-    for &child in children.iter() {
-        if let Ok(mut camera_transform) = camera_query.get_mut(child) {
-            let camera_pan_vector = action_state.axis_pair(&Action::Pan);
-
-            if camera_pan_vector.length_squared() > 0.0 {
-                let delta = camera_pan_vector * CAMERA_ROTATE_RATE;
-
-                camera_transform.rotate_local_y(-delta.x);
-
-                let current_pitch = camera_transform.rotation.to_euler(EulerRot::YXZ).1;
-                let max_pitch = PI / 2.0 - 0.01;
-                let min_pitch = -PI / 2.0 + 0.01;
-
-                let pitch_change = -delta.y;
-                let new_pitch = (current_pitch + pitch_change).clamp(min_pitch, max_pitch);
-                let actual_pitch_rotation = Quat::from_rotation_x(new_pitch - current_pitch);
-
-                camera_transform.rotate_local(actual_pitch_rotation);
-
-                camera_transform.translation = camera_transform.back() * CAMERA_DISTANCE;
-            }
+        if !active_spin {
+            external_torque.set_torque(Vec3::ZERO);
         }
     }
 }

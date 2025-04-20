@@ -32,15 +32,10 @@ pub fn spawn_player(
         player_transform,
         InputManagerBundle::with_map(controller::Action::input_map()),
         controller::CharacterControllerBundle::new(Collider::sphere(radius)).with_movement(
-            30.0,
-            0.9,
+            0.5,
+            5.0,
             7.0,
             PI * 0.45,
         ),
-    )).with_children(|parent| {
-        parent.spawn((
-            Camera3d::default(),
-            Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ));
-    });
+    ));
 }

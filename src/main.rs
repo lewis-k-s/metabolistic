@@ -5,6 +5,7 @@ mod dev_tools;
 mod inspector;
 mod debug;
 mod player;
+mod camera;
 // mod molecules;
 
 fn main() {
@@ -13,6 +14,7 @@ fn main() {
         .add_plugins(PhysicsPlugins::default())
         .add_plugins(PhysicsDebugPlugin::default())
         .add_plugins(player::PlayerPlugin)
+        .add_plugins(camera::CameraPlugin)
         .add_plugins(dev_tools::plugin)
         .add_plugins(debug::plugin)
         .add_plugins(inspector::plugin)
@@ -33,6 +35,11 @@ fn setup(
         MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
         RigidBody::Static,
         Collider::cuboid(floor_size / 2.0, 0.1, floor_size / 2.0),
+        Friction {
+            dynamic_coefficient: 1.0,
+            static_coefficient: 1.0,
+            combine_rule: CoefficientCombine::Multiply,
+        },
     ));
 
     commands.spawn( (        
@@ -43,6 +50,11 @@ fn setup(
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
     ));
+
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 500.0,
+    });
 }
 
 // UPDATE

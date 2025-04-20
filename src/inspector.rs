@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContext, EguiPlugin};
-use bevy_inspector_egui::quick::FilterQueryInspectorPlugin;
 use bevy_inspector_egui::DefaultInspectorConfigPlugin;
 
 /// Plugin for adding inspector functionality to debug builds
