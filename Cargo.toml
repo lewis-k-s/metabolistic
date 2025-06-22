@@ -3,6 +3,10 @@ name = "metabolistic3d"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "metabolistic3d"
+path = "src/lib.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -93,3 +97,6 @@ inherits = "release"
 opt-level = 3
 # Keep debug information in the binary.
 strip = "none"
+
+[dev-dependencies]
+# Add test-specific dependencies if needed in the future

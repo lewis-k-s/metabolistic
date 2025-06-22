@@ -8,13 +8,14 @@ use crate::player::Player; // Import Player marker component
 #[derive(Resource, Default)]
 struct LastCameraFocus(Vec3);
 
-pub struct CameraPlugin;
+/// Plugin that provides camera systems but doesn't spawn cameras
+/// Cameras should be spawned by individual scenes
+pub struct CameraSystemsPlugin;
 
-impl Plugin for CameraPlugin {
+impl Plugin for CameraSystemsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LastCameraFocus>() // Initialize the resource
-           .add_systems(Startup, spawn_camera)
-           .add_systems(Update, (pan_camera_input.before(follow_player), follow_player)); // Ensure pan runs before follow
+        app.init_resource::<LastCameraFocus>()
+           .add_systems(Update, (pan_camera_input.before(follow_player), follow_player));
     }
 }
 
@@ -36,14 +37,14 @@ impl Default for FollowCamera {
     }
 }
 
-// Startup system to spawn the camera
-fn spawn_camera(mut commands: Commands) {
+/// Utility function to spawn a 3D follow camera
+pub fn spawn_3d_camera(commands: &mut Commands) -> Entity {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         FollowCamera::default(),
-        InputManagerBundle::with_map(Action::input_map()), // Add input map for pan
-    ));
+        InputManagerBundle::with_map(Action::input_map()),
+    )).id()
 }
 
 // System to handle camera panning based on mouse input

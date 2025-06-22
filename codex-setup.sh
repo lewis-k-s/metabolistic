@@ -16,13 +16,9 @@ export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 export PKG_CONFIG_ALLOW_SYSTEM_LIBS=1
 export PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1
 
-# Always use headless features since this is for codex environment
-export CARGO_FEATURES="--no-default-features --features headless"
-
 echo "Environment setup:"
 echo "  - PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
 echo "  - Rust version: ${CODEX_ENV_RUST_VERSION:-default}"
-echo "  - Build features: $CARGO_FEATURES"
 
 # Check if Cargo.toml exists
 if [ ! -f "Cargo.toml" ]; then
@@ -39,8 +35,8 @@ else
     echo "!! ALSA library not found, but proceeding with headless build"
 fi
 
-echo "Running cargo check with headless features..."
-cargo check $CARGO_FEATURES
+echo "Running cargo check"
+cargo check
 
 echo "✅ Headless build successful!"
 echo "Project setup complete!"
