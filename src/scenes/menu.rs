@@ -38,6 +38,7 @@ fn setup_menu(mut commands: Commands) {
     info!("Controls:");
     info!("  Press '1' for 3D rolling scene");
     info!("  Press '2' for 2D top-down scene");
+    info!("  Press '3' for Genome Editor");
 }
 
 /// Handle menu-specific input
@@ -49,6 +50,8 @@ fn menu_input(
         next_state.set(GameState::Scene3D);
     } else if input.just_pressed(KeyCode::Digit2) {
         next_state.set(GameState::Scene2D);
+    } else if input.just_pressed(KeyCode::Digit3) {
+        next_state.set(GameState::GenomeEditing);
     }
 }
 

@@ -31,6 +31,14 @@ pub fn state_transition_input(
             info!("Switching to 2D scene");
         }
     }
+
+    // Press '3' for genome editing scene
+    if input.just_pressed(KeyCode::Digit3) {
+        if current_state.get() != &GameState::GenomeEditing {
+            next_state.set(GameState::GenomeEditing);
+            info!("Opening genome editor");
+        }
+    }
     
     // Press 'Escape' for main menu
     if input.just_pressed(KeyCode::Escape) {

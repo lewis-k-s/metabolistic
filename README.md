@@ -63,6 +63,7 @@ The development build includes:
 - **Movement**: WASD or arrow keys
 - **Camera**: Mouse look
 - **Debug**: F12 for inspector (development mode)
+- **Genome Editor**: Press `3` in-game to open the circular genome view
 
 ### Technical Documentation
 
