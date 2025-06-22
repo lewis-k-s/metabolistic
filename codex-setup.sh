@@ -36,7 +36,7 @@ else
 fi
 
 echo "Running cargo check"
-cargo check
+cargo check || echo "Check failed" && exit 1
 
 echo "✅ Headless build successful!"
 echo "Project setup complete!"
