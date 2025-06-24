@@ -1,6 +1,6 @@
 use crate::player::Player;
 use avian3d::{math::*, prelude::*};
-use bevy::color::palettes::basic::{BLUE, GREEN, RED, YELLOW};
+use bevy::color::palettes::basic::{GREEN, RED, YELLOW};
 use bevy::color::LinearRgba;
 use bevy::gizmos::gizmos::Gizmos;
 use bevy::{ecs::query::Has, prelude::*};

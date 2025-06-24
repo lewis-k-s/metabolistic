@@ -37,11 +37,12 @@
 //! - Press 'K' to spawn new metabolic block entities
 
 use bevy::prelude::*;
-use std::collections::HashMap;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Represents the different types of metabolic blocks that can be encoded in the genome
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Component, Serialize, Deserialize)]
 pub enum BlockKind {
     LightCapture,
     SugarCatabolism,
@@ -57,8 +58,28 @@ pub enum BlockKind {
     Polymerization,
 }
 
+impl BlockKind {
+    /// Human-readable description of each metabolic block
+    pub fn description(&self) -> &'static str {
+        match self {
+            BlockKind::LightCapture => "Capture light to produce ATP and NADPH",
+            BlockKind::SugarCatabolism => "Break down sugars into pyruvate",
+            BlockKind::OrganicAcidOxidation => "Oxidize organic acids via the TCA cycle",
+            BlockKind::Respiration => "Use NADH to generate large amounts of ATP",
+            BlockKind::Fermentation => "Anaerobic ATP production with redox balance",
+            BlockKind::NitrogenSulfurAssimilation => "Assimilate nitrogen and sulfur sources",
+            BlockKind::AminoAcidBiosynthesis => "Produce amino acids from precursors",
+            BlockKind::LipidMetabolism => "Synthesize and degrade fatty acids",
+            BlockKind::NucleotideCofactorSynthesis => "Generate nucleotides and cofactors",
+            BlockKind::SecondaryMetabolites => "Produce pigments and toxins",
+            BlockKind::AromaticPrecursorSynthesis => "Create aromatic precursors",
+            BlockKind::Polymerization => "Polymerize lignin and other biopolymers",
+        }
+    }
+}
+
 /// The state of a gene tile in the genome
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GeneState {
     /// Gene is present but not expressed (no enzyme production)
     Silent,
@@ -82,7 +103,72 @@ pub struct Genome {
     previous_table: HashMap<BlockKind, GeneState>,
 }
 
+/// Serializable representation of a gene
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneRecord {
+    pub kind: BlockKind,
+    pub state: GeneState,
+    pub description: String,
+}
+
+/// Data format used to save or load a genome in JSON form
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenomeSaveData {
+    pub genes: Vec<GeneRecord>,
+}
+
+impl From<&Genome> for GenomeSaveData {
+    fn from(genome: &Genome) -> Self {
+        let genes = genome
+            .table
+            .iter()
+            .map(|(kind, state)| GeneRecord {
+                kind: *kind,
+                state: state.clone(),
+                description: kind.description().to_string(),
+            })
+            .collect();
+        Self { genes }
+    }
+}
+
+impl From<GenomeSaveData> for Genome {
+    fn from(data: GenomeSaveData) -> Self {
+        let table = data
+            .genes
+            .into_iter()
+            .map(|record| (record.kind, record.state))
+            .collect();
+        Genome {
+            table,
+            previous_table: HashMap::new(),
+        }
+    }
+}
+
+impl GenomeSaveData {
+    /// Serialize the genome to a JSON string
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Deserialize a genome from a JSON string
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+}
+
 impl Genome {
+    /// Convert this genome into JSON using `GenomeSaveData`
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        GenomeSaveData::from(self).to_json()
+    }
+
+    /// Create a genome from a JSON string produced by [`GenomeSaveData`]
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        GenomeSaveData::from_json(json).map(Into::into)
+    }
+
     /// Add a new gene tile to the genome
     pub fn add_gene(&mut self, block_kind: BlockKind) {
         self.table.insert(block_kind, GeneState::Silent);

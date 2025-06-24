@@ -19,6 +19,7 @@ pub enum GameState {
     MainMenu,
     Scene3D,
     Scene2D,
+    GenomeEditing,
 }
 
 /// Main app configuration
@@ -49,6 +50,7 @@ impl MetabolisticApp {
             .add_plugins(scenes::menu::MainMenuPlugin)
             .add_plugins(scenes::scene_3d::Scene3DPlugin)
             .add_plugins(scenes::scene_2d::Scene2DPlugin)
+            .add_plugins(scenes::genome_edit::GenomeEditPlugin)
             
             // Shared systems that run in multiple states
             .add_systems(Startup, shared::setup_shared_resources)
