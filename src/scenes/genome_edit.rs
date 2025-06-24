@@ -45,10 +45,8 @@ fn setup_genome_scene(
     });
 
     commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-            ..default()
-        },
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         GenomeSceneEntity,
     ));
 
@@ -64,12 +62,10 @@ fn setup_genome_scene(
         let x = radius * angle.cos();
         let z = radius * angle.sin();
         commands.spawn((
-            PbrBundle {
-                mesh: Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(0.5)))),
-                material: MeshMaterial3d(materials.add(StandardMaterial::from(Color::WHITE))),
-                transform: Transform::from_xyz(x, 1.0, z),
-                ..default()
-            },
+            Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(0.5)))),
+            MeshMaterial3d(materials.add(StandardMaterial::from(Color::WHITE))),
+            Transform::from_xyz(x, 1.0, z),
+            GlobalTransform::default(),
             Name::new(format!("{:?}", block)),
             GenomeBlockVisual { index: i },
             GenomeSceneEntity,
