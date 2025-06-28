@@ -5,6 +5,7 @@ use avian3d::prelude::*;
 // Import all modules
 pub mod dev_tools;
 pub mod inspector;
+pub mod molecules;
 pub mod debug;
 pub mod player;
 pub mod camera;
@@ -39,6 +40,7 @@ impl MetabolisticApp {
             
             // Shared systems (available in all states)
             .add_plugins(genome::GenomePlugin)
+            .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(dev_tools::plugin)
             .add_plugins(debug::plugin)
             .add_plugins(inspector::plugin)
@@ -77,6 +79,7 @@ impl MetabolisticApp {
             
             // Only add plugins that don't require graphics/windowing
             .add_plugins(genome::GenomePlugin)
+            .add_plugins(molecules::CurrencyPlugin)
             
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);
