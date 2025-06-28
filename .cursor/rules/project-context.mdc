@@ -6,7 +6,14 @@ alwaysApply: true
 # Metabolistic: a game and cellular biology simulator
 
 ### Helpful context files
+<<<<<<< HEAD
 - [AGENTS.md](mdc:AGENTS.md) is the primary starting point for LLMs in the codebase. It collects info from other documentation into one space.
 - [README.md](mdc:README.md) is for humans and contains information on how to build and run the project. Consider updating it after any major changes.
 - [BEVYCONTEXT.md](mdc:BEVYCONTEXT.md) contains context for the API of the game engine Bevy.
 - [Summary.md](mdc:Summary.md) is something of a game design doc and has information on different processing blocks, currencies.o
+=======
+- [AGENTS.md](mdc:AGENTS.md) is the primary starting point for LLMs in the codebase. It collects info from other     documentation into one space.
+[README.md](mdc:README.md) is for humans and contains information on how to build and run the project. Consider updating it after any major changes.
+- [BEVYCONTEXT.md](mdc:BEVYCONTEXT.md) contains context for the API of the game engine Bevy.
+- [Summary.md](mdc:Summary.md) is something of a game design doc and has information on different processing blocks, currencies.
+>>>>>>> fermentation

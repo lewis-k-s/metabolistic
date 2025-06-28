@@ -2,13 +2,13 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
-// Import all modules
+pub mod inspector;
+pub mod blocks;
 pub mod camera;
 pub mod debug;
 pub mod dev_tools;
-pub mod blocks;
 
-pub mod inspector;
+pub mod molecules;
 pub mod player;
 pub mod scenes;
 pub mod shared;
@@ -36,7 +36,9 @@ impl MetabolisticApp {
             // State management
             .init_state::<GameState>()
             // Shared systems (available in all states)
+            .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
+            .add_plugins(blocks::fermentation::FermentationPlugin)
             .add_plugins(dev_tools::plugin)
             .add_plugins(debug::plugin)
             .add_plugins(inspector::plugin)
@@ -69,7 +71,9 @@ impl MetabolisticApp {
             // State management
             .init_state::<GameState>()
             // Only add plugins that don't require graphics/windowing
+            .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
+            .add_plugins(blocks::fermentation::FermentationPlugin)
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);
 
