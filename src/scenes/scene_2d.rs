@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use crate::GameState;
+use crate::blocks::genome::BlockKind;
 
 /// 2D top-down pseudo scene plugin
 pub struct Scene2DPlugin;
@@ -81,9 +82,9 @@ fn setup_2d_scene(
     });
     
     // Spawn initial metabolic block entities for this scene
-    let sugar_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::SugarCatabolism);
-    let fermentation_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::Fermentation);
-    let amino_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::AminoAcidBiosynthesis);
+    let sugar_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::SugarCatabolism);
+    let fermentation_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::Fermentation);
+    let amino_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::AminoAcidBiosynthesis);
     
     // Mark them as part of this scene for cleanup
     commands.entity(sugar_entity).insert(Scene2DEntity);

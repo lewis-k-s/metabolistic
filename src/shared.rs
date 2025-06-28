@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::{GameState, genome};
+use crate::{GameState, blocks::genome};
 
 /// Shared resources and systems that persist across all game states
 pub fn setup_shared_resources(mut commands: Commands) {
