@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use avian3d::prelude::*;
 use crate::{GameState, player, camera};
+use crate::blocks::genome::BlockKind;
 
 /// 3D rolling scene plugin
 pub struct Scene3DPlugin;
@@ -70,9 +71,9 @@ fn setup_3d_scene(
     commands.entity(camera_entity).insert((Camera3D, Scene3DEntity));
     
     // Spawn initial metabolic block entities for this scene
-    let sugar_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::SugarCatabolism);
-    let fermentation_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::Fermentation);
-    let amino_entity = crate::genome::spawn_metabolic_block(&mut commands, crate::genome::BlockKind::AminoAcidBiosynthesis);
+    let sugar_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::SugarCatabolism);
+    let fermentation_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::Fermentation);
+    let amino_entity = crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::AminoAcidBiosynthesis);
     
     // Mark them as part of this scene for cleanup
     commands.entity(sugar_entity).insert(Scene3DEntity);

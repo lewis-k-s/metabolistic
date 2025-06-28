@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::math::primitives::Cuboid;
 use bevy::prelude::{Mesh3d, MeshMaterial3d};
 use bevy::color::palettes::basic::YELLOW;
-use crate::{GameState, genome::{self, BlockKind}};
+use crate::{GameState, blocks::genome::{self, BlockKind}};
 
 /// Genome editing scene plugin
 pub struct GenomeEditPlugin;
