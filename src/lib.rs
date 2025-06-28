@@ -38,6 +38,7 @@ impl MetabolisticApp {
             // Shared systems (available in all states)
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
+            .add_plugins(blocks::fermentation::FermentationPlugin)
             .add_plugins(dev_tools::plugin)
             .add_plugins(debug::plugin)
             .add_plugins(inspector::plugin)
@@ -72,6 +73,7 @@ impl MetabolisticApp {
             // Only add plugins that don't require graphics/windowing
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
+            .add_plugins(blocks::fermentation::FermentationPlugin)
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);
 
