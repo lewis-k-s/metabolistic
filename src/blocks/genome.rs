@@ -1,7 +1,7 @@
 //! # Genome Processing Block System
 //!
-//! This module implements the genome as a highly privileged processing block that manages 
-//! other metabolic processing blocks in the cellular simulation. It serves as the "tech-tree forge" 
+//! This module implements the genome as a highly privileged processing block that manages
+//! other metabolic processing blocks in the cellular simulation. It serves as the "tech-tree forge"
 //! where players can earn, configure, or discard entire metabolic loops.
 //!
 //! ## Core Concepts
@@ -15,9 +15,9 @@
 //! ## Usage
 //!
 //! Add the `GenomePlugin` to your Bevy app and use the genome system:
-//! ```rust
-//! use metabolistic3d::genome::{Genome, BlockKind};
-//! 
+//! ```rust,no_run
+//! use metabolistic3d::blocks::genome::{Genome, BlockKind};
+//!
 //! // Create and manipulate a genome
 //! let mut genome = Genome::default();
 //! genome.add_gene(BlockKind::SugarCatabolism);
@@ -260,11 +260,11 @@ impl Genome {
 
         for (block_kind, current_state) in &self.table {
             let previous_state = self.previous_table.get(block_kind);
-            
+
             match (previous_state, current_state) {
                 // Gene became expressed
-                (Some(GeneState::Silent | GeneState::Mutated), GeneState::Expressed) |
-                (None, GeneState::Expressed) => {
+                (Some(GeneState::Silent | GeneState::Mutated), GeneState::Expressed)
+                | (None, GeneState::Expressed) => {
                     enabled.push(*block_kind);
                 }
                 // Gene stopped being expressed
@@ -274,7 +274,6 @@ impl Genome {
                 _ => {} // No change in expression status
             }
         }
-
         GenomeDiff { enabled, disabled }
     }
 }
@@ -340,8 +339,7 @@ pub struct GenomePlugin;
 
 impl Plugin for GenomePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .insert_resource(Genome::default())
+        app.insert_resource(Genome::default())
             .insert_resource(GenomeOperationCosts::default())
             .add_event::<GenomeDiffEvent>()
             .add_systems(PreUpdate, poll_genome_diff)
@@ -351,12 +349,9 @@ impl Plugin for GenomePlugin {
 }
 
 /// System that compares current vs. previous genome snapshot and emits only the delta
-fn poll_genome_diff(
-    mut genome: ResMut<Genome>,
-    mut diff_writer: EventWriter<GenomeDiffEvent>,
-) {
+pub fn poll_genome_diff(mut genome: ResMut<Genome>, mut diff_writer: EventWriter<GenomeDiffEvent>) {
     let diff = genome.compute_diff();
-    
+
     if !diff.enabled.is_empty() || !diff.disabled.is_empty() {
         diff_writer.send(GenomeDiffEvent {
             enabled: diff.enabled,
@@ -369,7 +364,7 @@ fn poll_genome_diff(
 }
 
 /// System that receives genome diff events and toggles metabolic blocks accordingly
-fn apply_genome_diff(
+pub fn apply_genome_diff(
     mut diff_reader: EventReader<GenomeDiffEvent>,
     mut metabolic_blocks: Query<(&mut Enabled, &MetabolicBlock)>,
 ) {
@@ -379,7 +374,7 @@ fn apply_genome_diff(
                 enabled.0 = true;
                 info!("Enabled metabolic block: {:?}", metabolic_block.block_kind);
             }
-            
+
             if diff.disabled.contains(&metabolic_block.block_kind) {
                 enabled.0 = false;
                 info!("Disabled metabolic block: {:?}", metabolic_block.block_kind);
@@ -389,15 +384,12 @@ fn apply_genome_diff(
 }
 
 /// System that occasionally mutates genes to create gameplay challenges
-fn random_mutation_system(
-    mut genome: ResMut<Genome>,
-    time: Res<Time>,
-) {
+pub fn random_mutation_system(mut genome: ResMut<Genome>, time: Res<Time>) {
     // Simple mutation system - in real implementation this would be more sophisticated
     const MUTATION_CHANCE_PER_SECOND: f32 = 0.01; // 1% chance per second per gene
-    
+
     let delta_time = time.delta_secs();
-    
+
     for (block_kind, _state) in genome.table.clone().iter() {
         if thread_rng().gen::<f32>() < MUTATION_CHANCE_PER_SECOND * delta_time {
             genome.mutate_gene(*block_kind);
@@ -409,20 +401,22 @@ fn random_mutation_system(
 /// Helper function to create a basic genome with some starting genes
 pub fn create_starter_genome() -> Genome {
     let mut genome = Genome::default();
-    
+
     // Add some basic metabolic pathways as starter genes
     genome.add_gene(BlockKind::SugarCatabolism);
     genome.add_gene(BlockKind::Fermentation);
     genome.add_gene(BlockKind::AminoAcidBiosynthesis);
-    
+
     genome
 }
 
 /// Helper function to spawn a metabolic block entity
 pub fn spawn_metabolic_block(commands: &mut Commands, block_kind: BlockKind) -> Entity {
-    commands.spawn((
-        MetabolicBlock { block_kind },
-        Enabled::default(),
-        Name::new(format!("Metabolic Block: {:?}", block_kind)),
-    )).id()
-} 
+    commands
+        .spawn((
+            MetabolicBlock { block_kind },
+            Enabled::default(),
+            Name::new(format!("Metabolic Block: {:?}", block_kind)),
+        ))
+        .id()
+}

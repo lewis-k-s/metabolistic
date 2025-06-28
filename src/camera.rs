@@ -1,8 +1,8 @@
-use bevy::prelude::*;
-use std::f32::consts::PI;
-use leafwing_input_manager::prelude::*; // Added for ActionState
 use crate::player::controller::Action; // Added for Action enum
-use crate::player::Player; // Import Player marker component
+use crate::player::Player;
+use bevy::prelude::*;
+use leafwing_input_manager::prelude::*; // Added for ActionState
+use std::f32::consts::PI; // Import Player marker component
 
 // Resource to store the last known focus point for the camera
 #[derive(Resource, Default)]
@@ -14,8 +14,10 @@ pub struct CameraSystemsPlugin;
 
 impl Plugin for CameraSystemsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LastCameraFocus>()
-           .add_systems(Update, (pan_camera_input.before(follow_player), follow_player));
+        app.init_resource::<LastCameraFocus>().add_systems(
+            Update,
+            (pan_camera_input.before(follow_player), follow_player),
+        );
     }
 }
 
@@ -23,7 +25,7 @@ impl Plugin for CameraSystemsPlugin {
 #[derive(Component)]
 pub struct FollowCamera {
     pub distance: f32,
-    pub target: Option<Entity>, // Optionally follow a target entity
+    pub target: Option<Entity>,    // Optionally follow a target entity
     pub target_focus_offset: Vec3, // Offset from target's center to look at
 }
 
@@ -39,12 +41,14 @@ impl Default for FollowCamera {
 
 /// Utility function to spawn a 3D follow camera
 pub fn spawn_3d_camera(commands: &mut Commands) -> Entity {
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        FollowCamera::default(),
-        InputManagerBundle::with_map(Action::input_map()),
-    )).id()
+    commands
+        .spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+            FollowCamera::default(),
+            InputManagerBundle::with_map(Action::input_map()),
+        ))
+        .id()
 }
 
 // System to handle camera panning based on mouse input
@@ -64,7 +68,8 @@ fn pan_camera_input(
             // Determine the focus point for rotation
             let focus_point = if let Some(target_entity) = follow_camera.target {
                 // If following a target, try to get its position
-                player_query.get(target_entity)
+                player_query
+                    .get(target_entity)
                     .map(|tf| tf.translation() + follow_camera.target_focus_offset)
                     .unwrap_or_else(|_| last_focus.0) // Fallback to last known focus if target exists but query fails
             } else {
@@ -119,7 +124,8 @@ fn follow_player(
 
                 // Calculate the desired camera position based on its current rotation (from panning)
                 // and the required distance from the focus point.
-                let desired_position = focus_point + (camera_transform.back() * follow_camera.distance);
+                let desired_position =
+                    focus_point + (camera_transform.back() * follow_camera.distance);
 
                 // Smoothly interpolate (lerp) the camera's position towards the desired position
                 let lerped_position = camera_transform.translation.lerp(
@@ -133,4 +139,4 @@ fn follow_player(
             }
         }
     }
-} 
+}

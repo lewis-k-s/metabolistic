@@ -1,12 +1,12 @@
+use crate::{blocks::genome, GameState};
 use bevy::prelude::*;
-use crate::{GameState, genome};
 
 /// Shared resources and systems that persist across all game states
 pub fn setup_shared_resources(mut commands: Commands) {
     // Initialize genome with starter genes
     let starter_genome = genome::create_starter_genome();
     commands.insert_resource(starter_genome);
-    
+
     // Note: Metabolic block entities will be spawned by individual scenes as needed
 }
 
@@ -23,7 +23,7 @@ pub fn state_transition_input(
             info!("Switching to 3D scene");
         }
     }
-    
+
     // Press '2' for 2D scene
     if input.just_pressed(KeyCode::Digit2) {
         if current_state.get() != &GameState::Scene2D {
@@ -39,7 +39,7 @@ pub fn state_transition_input(
             info!("Opening genome editor");
         }
     }
-    
+
     // Press 'Escape' for main menu
     if input.just_pressed(KeyCode::Escape) {
         if current_state.get() != &GameState::MainMenu {
@@ -63,7 +63,7 @@ pub fn genome_demo_system(
             warn!("Failed to express SugarCatabolism gene - already expressed or not present");
         }
     }
-    
+
     // Press 'H' to silence fermentation gene
     if input.just_pressed(KeyCode::KeyH) {
         if genome.silence_gene(genome::BlockKind::Fermentation) {
@@ -72,16 +72,16 @@ pub fn genome_demo_system(
             warn!("Failed to silence Fermentation gene - not expressed or not present");
         }
     }
-    
+
     // Press 'J' to add a new gene
     if input.just_pressed(KeyCode::KeyJ) {
         genome.add_gene(genome::BlockKind::LightCapture);
         info!("Added LightCapture gene to genome!");
     }
-    
+
     // Press 'K' to spawn metabolic block entities
     if input.just_pressed(KeyCode::KeyK) {
         genome::spawn_metabolic_block(&mut commands, genome::BlockKind::Respiration);
         info!("Spawned Respiration metabolic block entity!");
     }
-} 
+}

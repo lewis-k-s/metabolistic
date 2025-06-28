@@ -43,9 +43,10 @@ src/
 ├── debug.rs          # Debug utilities and visualization
 ├── dev_tools.rs      # Development tools and helpers
 ├── inspector.rs      # Runtime inspection systems
-├── genome.rs         # Genetic/cellular components
 ├── molecules.rs      # Molecular entities and chemistry systems
 ├── shared.rs         # Shared utilities and components
+├── blocks/           # Primary metabolistic processing blocks
+    ├── genome.rs     # Manages the cell genome (state of expression of other blocks)
 ├── player/           # Player controller and movement systems
 ├── scenes/           # Scene management (menu, 2D, 3D scenes)
 └── terrain/          # Terrain generation and management
@@ -141,16 +142,5 @@ Core metabolic currencies that flow between blocks:
 - Use Bevy's query system efficiently (avoid unnecessary `Entity` iteration)
 - Implement error handling for asset loading and system failures
 - Follow the principle of least privilege for mutable access
-
-### Biological Accuracy
-- Refer to `Summary.md` for scientifically accurate metabolic pathway information
-- Maintain the educational value while keeping gameplay engaging
-- Balance realism with playability (simplify complex biochemistry appropriately)
-
-### Integration Testing
-- Test new metabolic blocks in isolation before integration
-- Verify currency flow between blocks works correctly
-- Ensure 3D visualization doesn't break with new components
-- Test both development and release builds
 
 This context should help you understand the project architecture and contribute effectively to the Metabolistic3D codebase. 

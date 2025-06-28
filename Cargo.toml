@@ -102,4 +102,4 @@ opt-level = 3
 strip = "none"
 
 [dev-dependencies]
-# Add test-specific dependencies if needed in the future
+env_logger = "0.11"

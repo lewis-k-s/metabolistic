@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use avian3d::prelude::*;
+use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use std::f32::consts::PI;
 pub mod controller;
@@ -11,9 +11,8 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app
-        .add_plugins(controller::CharacterControllerPlugin)
-        .add_systems(Startup, spawn_player);
+        app.add_plugins(controller::CharacterControllerPlugin)
+            .add_systems(Startup, spawn_player);
     }
 }
 
