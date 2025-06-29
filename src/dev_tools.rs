@@ -1,14 +1,14 @@
 //! Development tools for the game. This plugin is only enabled in dev builds.
 
+use crate::player::{controller::MovementAction, Player}; // Import MovementAction
 use avian3d::prelude::{AngularVelocity, ExternalTorque};
 use bevy::{
     dev_tools::ui_debug_overlay::{DebugUiPlugin, UiDebugOptions},
+    ecs::event::EventReader,
     input::common_conditions::input_just_pressed,
     prelude::*,
-    ecs::event::EventReader,
     window::PrimaryWindow,
 };
-use crate::player::{controller::MovementAction, Player}; // Import MovementAction
 use bevy_egui::{egui, EguiContext}; // Import egui and EguiContext
 
 // Resource to store the latest movement info for debugging
@@ -25,13 +25,16 @@ pub(crate) fn plugin(app: &mut App) {
 
     // Toggle the debug overlay for UI.
     app.add_plugins(DebugUiPlugin)
-       .init_resource::<DebugMovementInfo>() // Initialize the resource
-       .add_systems(Update, (
-           toggle_system, 
-           read_movement_actions, 
-           read_angular_movement_info,
-           inspector_ui.run_if(is_debug_ui_enabled)
-        ));
+        .init_resource::<DebugMovementInfo>() // Initialize the resource
+        .add_systems(
+            Update,
+            (
+                toggle_system,
+                read_movement_actions,
+                read_angular_movement_info,
+                inspector_ui.run_if(is_debug_ui_enabled),
+            ),
+        );
 }
 
 const TOGGLE_KEY: KeyCode = KeyCode::Backquote;
@@ -69,7 +72,10 @@ fn read_movement_actions(
     move_info.last_move_direction = latest_move;
 }
 
-fn read_angular_movement_info(mut move_info: ResMut<DebugMovementInfo>, query: Query<(&ExternalTorque, &AngularVelocity), With<Player>>) {
+fn read_angular_movement_info(
+    mut move_info: ResMut<DebugMovementInfo>,
+    query: Query<(&ExternalTorque, &AngularVelocity), With<Player>>,
+) {
     if let Ok((torque, angular_velocity)) = query.get_single() {
         move_info.external_torque = Some(**torque);
         move_info.angular_velocity = Some(**angular_velocity);
@@ -80,12 +86,18 @@ fn inspector_ui(world: &mut World) {
     // Fetch DebugMovementInfo first
     // Use query to avoid borrowing the whole world if DebugMovementInfo doesn't exist yet
     let move_info_exists = world.contains_resource::<DebugMovementInfo>();
-    let (last_move_direction, jumped_this_frame, external_torque, angular_velocity) = if move_info_exists {
-        let move_info = world.resource::<DebugMovementInfo>();
-        (move_info.last_move_direction, move_info.jumped_this_frame, move_info.external_torque, move_info.angular_velocity)
-    } else {
-        (None, false, None, None)
-    };
+    let (last_move_direction, jumped_this_frame, external_torque, angular_velocity) =
+        if move_info_exists {
+            let move_info = world.resource::<DebugMovementInfo>();
+            (
+                move_info.last_move_direction,
+                move_info.jumped_this_frame,
+                move_info.external_torque,
+                move_info.angular_velocity,
+            )
+        } else {
+            (None, false, None, None)
+        };
 
     let Ok(egui_context) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
@@ -95,7 +107,6 @@ fn inspector_ui(world: &mut World) {
     };
 
     let mut egui_context = egui_context.clone();
-
 
     egui::Window::new("Debug Info").show(egui_context.get_mut(), |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -110,12 +121,18 @@ fn inspector_ui(world: &mut World) {
             ui.separator();
 
             if let Some(torque) = external_torque {
-                ui.label(format!("External Torque: {:.2}, {:.2}, {:.2}", torque.x, torque.y, torque.z));
+                ui.label(format!(
+                    "External Torque: {:.2}, {:.2}, {:.2}",
+                    torque.x, torque.y, torque.z
+                ));
             } else {
                 ui.label("External Torque: None");
             }
             if let Some(angular_velocity) = angular_velocity {
-                ui.label(format!("Angular Velocity: {:.2}, {:.2}, {:.2}", angular_velocity.x, angular_velocity.y, angular_velocity.z));
+                ui.label(format!(
+                    "Angular Velocity: {:.2}, {:.2}, {:.2}",
+                    angular_velocity.x, angular_velocity.y, angular_velocity.z
+                ));
             } else {
                 ui.label("Angular Velocity: None");
             }

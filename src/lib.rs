@@ -2,12 +2,12 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
-// Import all modules
+pub mod inspector;
 pub mod blocks;
 pub mod camera;
 pub mod debug;
 pub mod dev_tools;
-pub mod inspector;
+
 pub mod molecules;
 pub mod player;
 pub mod scenes;
