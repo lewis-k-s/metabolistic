@@ -4,10 +4,19 @@
 //! consumption logic works as expected within a minimal Bevy app environment.
 
 use metabolistic3d::molecules::{
-    try_consume_currency, ATP, CarbonSkeletons, Currency, CurrencyPlugin, ReducingPower,
+    try_consume_currency, ATP, CarbonSkeletons, Currency, CurrencyPlugin, ReducingPower, Pyruvate, OrganicWaste
 };
 use metabolistic3d::MetabolisticApp;
 use bevy::prelude::*;
+
+
+
+
+
+
+
+
+
 
 /// A system that simulates a block consuming a fixed amount of ATP on every update.
 fn atp_consuming_system(atp: ResMut<ATP>) {
