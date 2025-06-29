@@ -45,16 +45,26 @@ pub struct CarbonSkeletons(pub f32);
 
 // --- Currency Trait & Implementations ---
 
+/// An enum representing the different types of metabolic currencies.
+/// This is used as a key in `FluxProfile` to define the input/output of each currency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Currency {
+    ATP,
+    ReducingPower,
+    AcetylCoA,
+    CarbonSkeletons,
+}
+
 /// A trait for generic operations on currency resources.
 /// This allows the `try_consume_currency` function to work with any currency type.
-pub trait Currency: Resource + Default + std::fmt::Debug {
+pub trait CurrencyResource: Resource + Default + std::fmt::Debug {
     /// Returns the current amount of the currency.
     fn amount(&self) -> f32;
     /// Sets the amount of the currency.
     fn set_amount(&mut self, value: f32);
 }
 
-impl Currency for ATP {
+impl CurrencyResource for ATP {
     fn amount(&self) -> f32 {
         self.0
     }
@@ -63,7 +73,7 @@ impl Currency for ATP {
     }
 }
 
-impl Currency for ReducingPower {
+impl CurrencyResource for ReducingPower {
     fn amount(&self) -> f32 {
         self.0
     }
@@ -72,7 +82,7 @@ impl Currency for ReducingPower {
     }
 }
 
-impl Currency for AcetylCoA {
+impl CurrencyResource for AcetylCoA {
     fn amount(&self) -> f32 {
         self.0
     }
@@ -81,7 +91,7 @@ impl Currency for AcetylCoA {
     }
 }
 
-impl Currency for CarbonSkeletons {
+impl CurrencyResource for CarbonSkeletons {
     fn amount(&self) -> f32 {
         self.0
     }
@@ -137,7 +147,7 @@ impl Plugin for CurrencyPlugin {
 ///     }
 /// }
 /// ```
-pub fn try_consume_currency<T: Currency>(
+pub fn try_consume_currency<T: CurrencyResource>(
     mut currency: ResMut<T>,
     amount: f32,
     consumer_name: &str,

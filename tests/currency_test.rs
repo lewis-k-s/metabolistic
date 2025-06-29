@@ -4,7 +4,7 @@
 //! consumption logic works as expected within a minimal Bevy app environment.
 
 use metabolistic3d::molecules::{
-    try_consume_currency, ATP, CarbonSkeletons, Currency, CurrencyPlugin, ReducingPower,
+    try_consume_currency, ATP, CarbonSkeletons, CurrencyPlugin, ReducingPower, CurrencyResource
 };
 use metabolistic3d::MetabolisticApp;
 use bevy::prelude::*;

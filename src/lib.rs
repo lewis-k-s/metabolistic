@@ -12,6 +12,7 @@ pub mod molecules;
 pub mod player;
 pub mod scenes;
 pub mod shared;
+pub mod metabolism;
 
 /// Game states for scene management
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -39,6 +40,7 @@ impl MetabolisticApp {
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::fermentation::FermentationPlugin)
+            .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(dev_tools::plugin)
             .add_plugins(debug::plugin)
             .add_plugins(inspector::plugin)
@@ -74,6 +76,7 @@ impl MetabolisticApp {
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::fermentation::FermentationPlugin)
+            .add_plugins(metabolism::MetabolicFlowPlugin)
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);
 
