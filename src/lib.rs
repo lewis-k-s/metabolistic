@@ -41,6 +41,7 @@ impl MetabolisticApp {
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::fermentation::FermentationPlugin)
             .add_plugins(blocks::fat_storage::FatStoragePlugin)
+            .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(dev_tools::plugin)
             .add_plugins(debug::plugin)
@@ -78,6 +79,7 @@ impl MetabolisticApp {
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::fermentation::FermentationPlugin)
             .add_plugins(blocks::fat_storage::FatStoragePlugin)
+            .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);

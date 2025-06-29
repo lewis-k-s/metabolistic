@@ -60,6 +60,16 @@ pub struct StorageBeads(pub f32);
 #[derive(Resource, Debug, Default)]
 pub struct LipidToxicityThreshold(pub f32);
 
+/// **Pyruvate**
+/// A key input for fermentation and the TCA cycle.
+#[derive(Resource, Debug, Default)]
+pub struct Pyruvate(pub f32);
+
+/// **Organic Waste (Ethanol, Lactate, Acetate)**
+/// Byproducts of fermentation that can become toxic if not managed.
+#[derive(Resource, Debug, Default)]
+pub struct OrganicWaste(pub f32);
+
 // --- Components ---
 
 /// Represents the total mass of the cell, affecting physical properties like speed and drag.
@@ -144,6 +154,24 @@ impl CurrencyResource for FreeFattyAcids {
     }
 }
 
+impl CurrencyResource for Pyruvate {
+    fn amount(&self) -> f32 {
+        self.0
+    }
+    fn set_amount(&mut self, value: f32) {
+        self.0 = value;
+    }
+}
+
+impl CurrencyResource for OrganicWaste {
+    fn amount(&self) -> f32 {
+        self.0
+    }
+    fn set_amount(&mut self, value: f32) {
+        self.0 = value;
+    }
+}
+
 // --- Plugin for Initialization ---
 
 /// A Bevy `Plugin` that initializes all the currency resources.
@@ -158,9 +186,11 @@ impl Plugin for CurrencyPlugin {
             .init_resource::<CarbonSkeletons>()
             .init_resource::<FreeFattyAcids>()
             .init_resource::<StorageBeads>()
-            .init_resource::<LipidToxicityThreshold>();
+            .init_resource::<LipidToxicityThreshold>()
+            .init_resource::<Pyruvate>()
+            .init_resource::<OrganicWaste>();
 
-        debug!("CurrencyPlugin loaded: Initialized ATP, ReducingPower, AcetylCoA, CarbonSkeletons, FreeFattyAcids, StorageBeads, and LipidToxicityThreshold resources.");
+        debug!("CurrencyPlugin loaded: Initialized ATP, ReducingPower, AcetylCoA, CarbonSkeletons, FreeFattyAcids, StorageBeads, LipidToxicityThreshold, Pyruvate, and OrganicWaste resources.");
     }
 }
 
