@@ -82,11 +82,16 @@ The development build includes:
 ```
 src/
 ├── main.rs           # Application entry point and setup
-├── player/           # Player controller and movement
-├── camera/           # Camera systems
-├── debug/            # Debug utilities
-├── dev_tools/        # Development tools
-├── inspector/        # Runtime inspection tools
-├── molecules.rs      # Molecular entities and systems
+├── lib.rs            # Library root
+├── camera.rs         # Camera systems and controls
+├── debug.rs          # Debug utilities and visualization
+├── dev_tools.rs      # Development tools and helpers
+├── inspector.rs      # Runtime inspection systems
+├── molecules.rs      # Molecular entities and chemistry systems
+├── shared.rs         # Shared utilities and components
+├── blocks/           # Primary metabolistic processing blocks
+    ├── genome.rs     # Manages the cell genome (state of expression of other blocks)
+├── player/           # Player controller and movement systems
+├── scenes/           # Scene management (menu, 2D, 3D scenes)
 └── terrain/          # Terrain generation and management
 ```

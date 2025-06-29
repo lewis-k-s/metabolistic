@@ -1,73 +1,122 @@
-use crate::GameState;
 use bevy::prelude::*;
 
-/// Main menu plugin that manages the main menu state
+use crate::GameState;
+
 pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::MainMenu), setup_menu)
-            .add_systems(Update, menu_input.run_if(in_state(GameState::MainMenu)))
+            .add_systems(Update, button_system.run_if(in_state(GameState::MainMenu)))
             .add_systems(OnExit(GameState::MainMenu), cleanup_menu);
     }
 }
 
-/// Marker component for menu entities
 #[derive(Component)]
-struct MenuEntity;
+struct MenuUIRoot;
 
-/// Setup the main menu UI
+#[derive(Component)]
+enum MenuButton {
+    Scene3D,
+    Scene2D,
+    GenomeEditing,
+}
+
 fn setup_menu(mut commands: Commands) {
-    info!("Setting up main menu");
+    commands.spawn((Camera2d, MenuUIRoot));
 
-    // Spawn a simple camera for the menu
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-        MenuEntity,
-    ));
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            MenuUIRoot,
+        ))
+        .with_children(|parent| {
+            // Title
+            parent.spawn((
+                Text::new("Metabolistic3D"),
+                TextFont {
+                    font_size: 80.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
 
-    // Add some ambient light for visibility
-    commands.insert_resource(AmbientLight {
-        color: Color::WHITE,
-        brightness: 300.0,
-    });
+            // Spacer
+            parent.spawn(Node {
+                height: Val::Px(64.0),
+                ..default()
+            });
 
-    info!("Main menu setup complete");
-    info!("Controls:");
-    info!("  Press '1' for 3D rolling scene");
-    info!("  Press '2' for 2D top-down scene");
-    info!("  Press '3' for Genome Editor");
+            // Scene buttons
+            create_button(parent, "3D Scene", MenuButton::Scene3D);
+            create_button(parent, "2D Scene", MenuButton::Scene2D);
+            create_button(parent, "Genome Editor", MenuButton::GenomeEditing);
+        });
 }
 
-/// Handle menu-specific input
-fn menu_input(input: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameState>>) {
-    if input.just_pressed(KeyCode::Digit1) {
-        next_state.set(GameState::Scene3D);
-    } else if input.just_pressed(KeyCode::Digit2) {
-        next_state.set(GameState::Scene2D);
-    } else if input.just_pressed(KeyCode::Digit3) {
-        next_state.set(GameState::GenomeEditing);
-    }
+fn create_button(parent: &mut ChildBuilder, text: &str, button_type: MenuButton) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(250.0),
+                height: Val::Px(65.0),
+                margin: UiRect::all(Val::Px(10.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+            button_type,
+        ))
+        .with_children(|p| {
+            p.spawn((
+                Text::new(text),
+                TextFont {
+                    font_size: 40.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+            ));
+        });
 }
 
-/// Clean up menu entities when leaving the menu state
-fn cleanup_menu(
-    mut commands: Commands,
-    menu_entities: Query<Entity, With<MenuEntity>>,
-    camera_entities: Query<Entity, (With<Camera3d>, Without<MenuEntity>)>,
+fn button_system(
+    mut interaction_query: Query<
+        (&Interaction, &MenuButton, &mut BackgroundColor),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut next_state: ResMut<NextState<GameState>>,
 ) {
-    info!("Cleaning up main menu");
-
-    // Remove menu-specific entities
-    for entity in menu_entities.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-
-    // Remove any stray cameras that might not be marked with MenuEntity
-    for entity in camera_entities.iter() {
-        if let Some(entity_commands) = commands.get_entity(entity) {
-            entity_commands.despawn_recursive();
+    for (interaction, menu_button, mut color) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                *color = Color::srgb(0.35, 0.75, 0.35).into();
+                match menu_button {
+                    MenuButton::Scene3D => next_state.set(GameState::Scene3D),
+                    MenuButton::Scene2D => next_state.set(GameState::Scene2D),
+                    MenuButton::GenomeEditing => next_state.set(GameState::GenomeEditing),
+                }
+            }
+            Interaction::Hovered => {
+                *color = Color::srgb(0.25, 0.25, 0.25).into();
+            }
+            Interaction::None => {
+                *color = Color::srgb(0.15, 0.15, 0.15).into();
+            }
         }
+    }
+}
+
+fn cleanup_menu(mut commands: Commands, query: Query<Entity, With<MenuUIRoot>>) {
+    for entity in query.iter() {
+        commands.entity(entity).despawn_recursive();
     }
 }
