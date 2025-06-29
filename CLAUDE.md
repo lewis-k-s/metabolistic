@@ -104,3 +104,6 @@ For development in containers or headless environments, use the provided setup s
 ```
 
 This installs necessary audio system dependencies and configures the environment for both full and headless builds.
+
+## Development Warnings
+- Do not attempt cargo run because it will launch the UI

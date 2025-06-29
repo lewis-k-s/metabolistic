@@ -43,6 +43,41 @@ pub struct AcetylCoA(pub f32);
 #[derive(Resource, Debug, Default)]
 pub struct CarbonSkeletons(pub f32);
 
+/// **Free Fatty Acids**
+/// Represents free fatty acids available for various metabolic processes,
+/// including storage or oxidation.
+#[derive(Resource, Debug, Default)]
+pub struct FreeFattyAcids(pub f32);
+
+/// **Storage Beads**
+/// Represents fatty acids stored in a compact, inert form (e.g., triacylglycerol beads).
+/// Can be mobilized back into FreeFattyAcids.
+#[derive(Resource, Debug, Default)]
+pub struct StorageBeads(pub f32);
+
+/// Defines the threshold of FreeFattyAcids above which the polymerization system
+/// should automatically activate to prevent cellular damage.
+#[derive(Resource, Debug, Default)]
+pub struct LipidToxicityThreshold(pub f32);
+
+// --- Components ---
+
+/// Represents the total mass of the cell, affecting physical properties like speed and drag.
+#[derive(Component, Debug)]
+pub struct CellMass {
+    pub base: f32,
+    pub extra: f32,
+}
+
+/// Manages the polymerization and depolymerization of storage molecules (e.g., fatty acid beads).
+#[derive(Component, Debug)]
+pub struct PolyMer {
+    pub capacity: f32,
+    pub target_fill: f32,
+    pub poly_rate: f32,
+    pub lipo_rate: f32,
+}
+
 // --- Currency Trait & Implementations ---
 
 /// An enum representing the different types of metabolic currencies.
@@ -100,6 +135,15 @@ impl CurrencyResource for CarbonSkeletons {
     }
 }
 
+impl CurrencyResource for FreeFattyAcids {
+    fn amount(&self) -> f32 {
+        self.0
+    }
+    fn set_amount(&mut self, value: f32) {
+        self.0 = value;
+    }
+}
+
 // --- Plugin for Initialization ---
 
 /// A Bevy `Plugin` that initializes all the currency resources.
@@ -111,9 +155,12 @@ impl Plugin for CurrencyPlugin {
         app.init_resource::<ATP>()
             .init_resource::<ReducingPower>()
             .init_resource::<AcetylCoA>()
-            .init_resource::<CarbonSkeletons>();
+            .init_resource::<CarbonSkeletons>()
+            .init_resource::<FreeFattyAcids>()
+            .init_resource::<StorageBeads>()
+            .init_resource::<LipidToxicityThreshold>();
 
-        debug!("CurrencyPlugin loaded: Initialized ATP, ReducingPower, AcetylCoA, and CarbonSkeletons resources.");
+        debug!("CurrencyPlugin loaded: Initialized ATP, ReducingPower, AcetylCoA, CarbonSkeletons, FreeFattyAcids, StorageBeads, and LipidToxicityThreshold resources.");
     }
 }
 
@@ -162,6 +209,7 @@ pub fn try_consume_currency<T: CurrencyResource>(
 
     let available = currency.amount();
     let currency_name = std::any::type_name::<T>().split("::").last().unwrap_or("UnknownCurrency");
+    println!("try_consume_currency: Consumer: {}, Currency: {}, Available: {}, Amount: {}", consumer_name, currency_name, available, amount);
 
     if available >= amount {
         debug!(

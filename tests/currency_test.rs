@@ -4,7 +4,8 @@
 //! consumption logic works as expected within a minimal Bevy app environment.
 
 use metabolistic3d::molecules::{
-    try_consume_currency, ATP, CarbonSkeletons, CurrencyPlugin, ReducingPower, CurrencyResource
+    try_consume_currency, ATP, CarbonSkeletons, CurrencyPlugin, ReducingPower, CurrencyResource,
+    FreeFattyAcids, StorageBeads, LipidToxicityThreshold, CellMass, PolyMer
 };
 use metabolistic3d::MetabolisticApp;
 use bevy::prelude::*;
@@ -126,4 +127,115 @@ fn test_cannot_consume_negative_currency() {
         amount_after_attempt, 50.0,
         "Currency amount should not change after attempting to consume a negative value"
     );
+}
+
+/// Tests that the polymerization system activates when FreeFattyAcids exceed the LipidToxicityThreshold.
+#[test]
+fn test_polymerization_on_toxicity_threshold() {
+    // --- Setup ---
+    let mut app = MetabolisticApp::new_headless();
+    
+
+    // Initialize resources and components
+    app.world_mut().insert_resource(FreeFattyAcids(100.0));
+    app.world_mut().insert_resource(StorageBeads(0.0));
+    app.world_mut().insert_resource(ATP(10.0)); // Enough ATP for polymerization
+    app.world_mut().insert_resource(LipidToxicityThreshold(50.0));
+
+    // --- Initial State Verification ---
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 100.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 0.0);
+
+    // --- Run Simulation ---
+    println!("FreeFattyAcids before update: {}", app.world().resource::<FreeFattyAcids>().0);
+    app.update();
+    println!("FreeFattyAcids after update: {}", app.world().resource::<FreeFattyAcids>().0);
+
+    // --- Verification ---
+    // Expected FFA after polymerization: 100 (initial) - 20 (poly_rate) = 80
+    // Expected StorageBeads: 0 (initial) + 20 (poly_rate) = 20
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 80.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 20.0);
+}
+
+/// Tests the interaction between polymerization and lipolysis systems.
+/// This reproduces the original issue where both systems run simultaneously.
+#[test]
+fn test_polymerization_with_lipolysis_entity() {
+    // --- Setup ---
+    let mut app = MetabolisticApp::new_headless();
+    
+    // Initialize resources
+    app.world_mut().insert_resource(FreeFattyAcids(100.0));
+    app.world_mut().insert_resource(StorageBeads(10.0)); // Some existing beads
+    app.world_mut().insert_resource(ATP(10.0));
+    app.world_mut().insert_resource(LipidToxicityThreshold(50.0));
+
+    // Spawn an entity with PolyMer component (this enables lipolysis)
+    app.world_mut().spawn((
+        CellMass { base: 1.0, extra: 0.0 },
+        PolyMer {
+            capacity: 100.0,
+            target_fill: 50.0,
+            poly_rate: 20.0,
+            lipo_rate: 5.0, // This will add 5.0 FFA back
+        },
+    ));
+
+    // --- Initial State Verification ---
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 100.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 10.0);
+
+    // --- Run Simulation ---
+    println!("FreeFattyAcids before update: {}", app.world().resource::<FreeFattyAcids>().0);
+    println!("StorageBeads before update: {}", app.world().resource::<StorageBeads>().0);
+    app.update();
+    println!("FreeFattyAcids after update: {}", app.world().resource::<FreeFattyAcids>().0);
+    println!("StorageBeads after update: {}", app.world().resource::<StorageBeads>().0);
+
+    // --- Expected behavior after fix: Only polymerization runs ---
+    // Polymerization: 100 - 20 = 80 FFA, +20 StorageBeads
+    // Lipolysis: DOES NOT RUN because FFA (80) > threshold (50)
+    // Net result: 80 FFA, 30 StorageBeads
+    
+    // This test verifies the fix prevents conflicting system execution
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 80.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 30.0);
+}
+
+/// Tests that lipolysis works correctly when FreeFattyAcids are below the toxicity threshold.
+#[test]
+fn test_lipolysis_when_safe() {
+    // --- Setup ---
+    let mut app = MetabolisticApp::new_headless();
+    
+    // Initialize resources - FFA below threshold
+    app.world_mut().insert_resource(FreeFattyAcids(30.0)); // Below threshold of 50
+    app.world_mut().insert_resource(StorageBeads(20.0)); // Some beads to mobilize
+    app.world_mut().insert_resource(ATP(10.0));
+    app.world_mut().insert_resource(LipidToxicityThreshold(50.0));
+
+    // Spawn an entity with PolyMer component
+    app.world_mut().spawn((
+        CellMass { base: 1.0, extra: 10.0 },
+        PolyMer {
+            capacity: 100.0,
+            target_fill: 50.0,
+            poly_rate: 20.0,
+            lipo_rate: 5.0,
+        },
+    ));
+
+    // --- Initial State Verification ---
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 30.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 20.0);
+
+    // --- Run Simulation ---
+    app.update();
+
+    // --- Verification ---
+    // Polymerization: DOES NOT RUN because FFA (30) < threshold (50)
+    // Lipolysis: 30 + 5 = 35 FFA, 20 - 5 = 15 StorageBeads
+    assert_eq!(app.world().resource::<FreeFattyAcids>().0, 35.0);
+    assert_eq!(app.world().resource::<StorageBeads>().0, 15.0);
 }
