@@ -10,14 +10,15 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 
 ### Core Structure
 - **Library-based architecture**: Main logic in `src/lib.rs` with binary entry point in `src/main.rs`
+- **Dual-app pattern**: `MetabolisticApp::new()` for full game, `MetabolisticApp::new_headless()` for testing
 - **Plugin-based system**: Uses Bevy's plugin architecture for modular game systems
 - **State management**: Implements game states (MainMenu, Scene3D, Scene2D, GenomeEditing) with proper transitions
 - **ECS pattern**: Leverages Bevy's Entity-Component-System for game logic
 
 ### Key Modules
-- `blocks/`: Metabolic pathway implementations (fermentation, genome editing)
+- `blocks/`: Metabolic pathway implementations (fermentation, fat_storage, vesicle_export, genome)
 - `molecules.rs`: Currency system for ATP, NADH/NADPH, and metabolic precursors
-- `metabolism/`: Core metabolic flow simulation
+- `metabolism/`: Core metabolic flow simulation and graph management
 - `scenes/`: Different game views (3D world, 2D flowmap, genome editor, menu)
 - `player/`: Player controller and movement systems
 - `camera.rs`: Camera management across different scenes
@@ -28,7 +29,9 @@ The app uses a plugin-based architecture where each major system is implemented 
 - `CurrencyPlugin`: Manages ATP, NADH, and other metabolic currencies
 - `GenomePlugin`: Handles genome editing and visualization
 - `FermentationPlugin`: Implements fermentation metabolic pathways
-- `MetabolicFlowPlugin`: Core metabolic simulation engine
+- `FatStoragePlugin`: Manages lipid storage and fatty acid metabolism
+- `VesicleExportPlugin`: Handles cellular export mechanisms
+- `MetabolicFlowPlugin`: Core metabolic simulation engine and graph management
 - Scene-specific plugins for different game states
 
 ## Development Commands
@@ -43,6 +46,8 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Run all tests**: `cargo test`
 - **Run specific test**: `cargo test <test_name>`
 - **Headless tests**: `cargo test --features headless`
+- **Property-based tests**: Uses `proptest` for invariant testing (see tests/currency_invariants.rs)
+- **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
 - `full` (default): Complete build with graphics, audio, and UI
@@ -73,37 +78,45 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Currency systems use shared resources accessible across plugins
 - State transitions managed through `NextState<GameState>` resource
 - Asset loading handled through Bevy's `AssetServer`
+- MetabolicGraph and FluxResult resources track metabolic calculations
+- FlowDirty resource triggers metabolic graph rebuilds when set to true
 
 ### Error Handling
 - Tests use `Result` types with proper error propagation
 - Headless mode available for testing without graphics/audio dependencies
 - Setup script (`codex-setup.sh`) handles environment dependencies
+- Integration tests verify app startup and multi-frame operation
 
 ## Metabolic System Design
 
 The game implements a sparse metabolic network with:
-- **Currency Hub**: ATP, NADH/NADPH, Acetyl-CoA, Carbon Skeletons
-- **Metabolic Blocks**: Light Capture, Sugar Catabolism, Respiration, Fermentation, etc.
+- **Currency Hub**: ATP, NADH/NADPH, Acetyl-CoA, Carbon Skeletons, ReducingPower
+- **Metabolic Blocks**: Light Capture, Sugar Catabolism, Respiration, Fermentation, Fat Storage, Vesicle Export
+- **Genome Control**: Blocks can be Silent, Active, or Mutated based on gene expression
+- **Flow Calculation**: MetabolicGraph manages flux calculations and currency balancing
 - **Minimal Cross-talk**: Only essential metabolites flow between blocks
 - **Real Biochemistry**: Based on actual cellular metabolism pathways
 
 ## Testing Strategy
 
-The codebase includes comprehensive testing:
-- Unit tests for individual components and systems
-- Integration tests for plugin interactions
-- Headless app creation for testing without graphics dependencies
-- Currency system validation tests
-- State management verification
-
-## Environment Setup
-
-For development in containers or headless environments, use the provided setup script:
-```bash
-./codex-setup.sh
-```
-
-This installs necessary audio system dependencies and configures the environment for both full and headless builds.
+The codebase includes comprehensive testing with multiple categories:
+- **Unit tests**: Individual components and systems (embedded in module files)
+- **Integration tests**: Cross-plugin interactions (tests/integration_test.rs)
+- **Property-based tests**: Invariant testing using proptest (tests/*_invariants.rs)
+- **Metabolic tests**: Currency flows, genome manipulation, fermentation (tests/metabolic_*.rs)
+- **Precision tests**: Numerical accuracy and temporal consistency
+- **Headless testing**: All tests run without graphics dependencies using MetabolisticApp::new_headless()
 
 ## Development Warnings
-- Do not attempt cargo run because it will launch the UI
+- **Do not run `cargo run`** in development environments - it will launch the full UI
+- **Use headless mode** for testing: `MetabolisticApp::new_headless()` in tests
+- **GPU/Graphics dependencies**: Full build requires graphics drivers; use `--features headless` for CI/containers
+- **Audio dependencies**: Full build requires ALSA/audio libraries; use setup script for containers (`codex-setup.sh`)
+
+# As you progress incrementally, run limited tests with tags on your specific block or feature
+
+# After every major change, run the tests with `cargo test`
+
+# If you need code documentation use context7
+
+# Use `rg` instead of `grep` in general
