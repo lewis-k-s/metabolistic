@@ -17,6 +17,78 @@ pub struct MetabolicBlock;
 #[derive(Component, Default, Debug, Clone)]
 pub struct FluxProfile(pub HashMap<Currency, f32>);
 
+impl FluxProfile {
+    /// Set demand (consumption) for a specific currency
+    /// Demand is represented as a negative value in the flux profile
+    pub fn set_demand(&mut self, currency: Currency, amount: f32) {
+        self.0.insert(currency, -amount.abs());
+    }
+    
+    /// Set production for a specific currency
+    /// Production is represented as a positive value in the flux profile
+    pub fn set_production(&mut self, currency: Currency, amount: f32) {
+        self.0.insert(currency, amount.abs());
+    }
+    
+    /// Check if this profile has demand (consumption) for a given currency
+    /// Returns true if the currency exists and has a negative value
+    pub fn has_demand_for(&self, currency: Currency) -> bool {
+        self.0.get(&currency).map_or(false, |&amount| amount < 0.0)
+    }
+    
+    /// Get the demand amount for a specific currency
+    /// Returns the absolute value of consumption, or 0.0 if no demand
+    pub fn get_demand(&self, currency: Currency) -> f32 {
+        self.0.get(&currency)
+            .map(|&amount| if amount < 0.0 { -amount } else { 0.0 })
+            .unwrap_or(0.0)
+    }
+    
+    /// Check if this profile produces a given currency
+    /// Returns true if the currency exists and has a positive value
+    pub fn produces(&self, currency: Currency) -> bool {
+        self.0.get(&currency).map_or(false, |&amount| amount > 0.0)
+    }
+    
+    /// Get the production amount for a specific currency
+    /// Returns the production amount, or 0.0 if no production
+    pub fn get_production(&self, currency: Currency) -> f32 {
+        self.0.get(&currency)
+            .map(|&amount| if amount > 0.0 { amount } else { 0.0 })
+            .unwrap_or(0.0)
+    }
+    
+    /// Get all currencies this profile has demand for
+    pub fn get_demanded_currencies(&self) -> Vec<Currency> {
+        self.0.iter()
+            .filter_map(|(&currency, &amount)| {
+                if amount < 0.0 { Some(currency) } else { None }
+            })
+            .collect()
+    }
+    
+    /// Get all currencies this profile produces
+    pub fn get_produced_currencies(&self) -> Vec<Currency> {
+        self.0.iter()
+            .filter_map(|(&currency, &amount)| {
+                if amount > 0.0 { Some(currency) } else { None }
+            })
+            .collect()
+    }
+    
+    /// Clear all flux values
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+    
+    /// Scale all flux values by a factor
+    pub fn scale(&mut self, factor: f32) {
+        for amount in self.0.values_mut() {
+            *amount *= factor;
+        }
+    }
+}
+
 // --- Resources ---
 
 /// Dense vectors of nodes & edges used by solver.

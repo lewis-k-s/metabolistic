@@ -40,6 +40,8 @@ proptest! {
         currency_pools.set(Currency::FreeFattyAcids, 0.0);  // Disable fat storage
         currency_pools.set(Currency::StorageBeads, 0.0);
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Configure genome: enable fermentation, disable competing systems
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -120,6 +122,8 @@ proptest! {
         currency_pools.set(Currency::StorageBeads, 10.0);
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Express fermentation gene to enable the automatically spawned block
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -189,6 +193,8 @@ proptest! {
         currency_pools.set(Currency::StorageBeads, 5.0);
         app.world_mut().insert_resource(LipidToxicityThreshold(50.0)); // Low threshold
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Express fermentation gene to enable the block
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -206,10 +212,10 @@ proptest! {
             },
             {
                 let mut flux_profile = metabolistic3d::metabolism::FluxProfile::default();
-                flux_profile.0.insert(Currency::Pyruvate, -1.0);
-                flux_profile.0.insert(Currency::ReducingPower, -1.0);
-                flux_profile.0.insert(Currency::ATP, 1.0);
-                flux_profile.0.insert(Currency::OrganicWaste, 1.0);
+                flux_profile.set_demand(Currency::Pyruvate, 1.0);
+                flux_profile.set_demand(Currency::ReducingPower, 1.0);
+                flux_profile.set_production(Currency::ATP, 1.0);
+                flux_profile.set_production(Currency::OrganicWaste, 1.0);
                 flux_profile
             },
         ));
@@ -275,6 +281,8 @@ proptest! {
         currency_pools.set(Currency::ATP, 0.0);
         currency_pools.set(Currency::OrganicWaste, 0.0);
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Express fermentation gene to enable the block
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -292,10 +300,10 @@ proptest! {
             },
             {
                 let mut flux_profile = metabolistic3d::metabolism::FluxProfile::default();
-                flux_profile.0.insert(Currency::Pyruvate, -1.0);
-                flux_profile.0.insert(Currency::ReducingPower, -1.0);
-                flux_profile.0.insert(Currency::ATP, 1.0);
-                flux_profile.0.insert(Currency::OrganicWaste, 1.0);
+                flux_profile.set_demand(Currency::Pyruvate, 1.0);
+                flux_profile.set_demand(Currency::ReducingPower, 1.0);
+                flux_profile.set_production(Currency::ATP, 1.0);
+                flux_profile.set_production(Currency::OrganicWaste, 1.0);
                 flux_profile
             },
         ));
@@ -369,6 +377,8 @@ proptest! {
         currency_pools.set(Currency::StorageBeads, 20.0);
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Express fermentation gene to enable the block
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -386,10 +396,10 @@ proptest! {
             },
             {
                 let mut flux_profile = metabolistic3d::metabolism::FluxProfile::default();
-                flux_profile.0.insert(Currency::Pyruvate, -1.0);
-                flux_profile.0.insert(Currency::ReducingPower, -1.0);
-                flux_profile.0.insert(Currency::ATP, 1.0);
-                flux_profile.0.insert(Currency::OrganicWaste, 1.0);
+                flux_profile.set_demand(Currency::Pyruvate, 1.0);
+                flux_profile.set_demand(Currency::ReducingPower, 1.0);
+                flux_profile.set_production(Currency::ATP, 1.0);
+                flux_profile.set_production(Currency::OrganicWaste, 1.0);
                 flux_profile
             },
         ));
@@ -501,6 +511,8 @@ proptest! {
         currency_pools.set(Currency::StorageBeads, 20.0);
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
         
+        // Legacy fermentation system has been removed - now using only flux profile system
+        
         // Express fermentation gene to enable the block
         {
             let mut genome = app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>();
@@ -518,10 +530,10 @@ proptest! {
             },
             {
                 let mut flux_profile = metabolistic3d::metabolism::FluxProfile::default();
-                flux_profile.0.insert(Currency::Pyruvate, -1.0);
-                flux_profile.0.insert(Currency::ReducingPower, -1.0);
-                flux_profile.0.insert(Currency::ATP, 1.0);
-                flux_profile.0.insert(Currency::OrganicWaste, 1.0);
+                flux_profile.set_demand(Currency::Pyruvate, 1.0);
+                flux_profile.set_demand(Currency::ReducingPower, 1.0);
+                flux_profile.set_production(Currency::ATP, 1.0);
+                flux_profile.set_production(Currency::OrganicWaste, 1.0);
                 flux_profile
             },
         ));

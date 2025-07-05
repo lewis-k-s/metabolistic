@@ -35,12 +35,14 @@ fn test_fermentation_produces_and_consumes() {
         genome.add_gene(BlockKind::Fermentation);
         genome.express_gene(BlockKind::Fermentation);
     }
+    
+    // Trigger metabolic graph rebuild to process gene expression changes
+    app.world_mut().resource_mut::<metabolistic3d::metabolism::FlowDirty>().0 = true;
 
     // --- Run Simulation ---
     let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
     app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-    app.update();
-    app.world_mut().run_schedule(FixedUpdate);
+    app.update(); // This runs the MetabolicSchedule through MetabolicFlowPlugin
 
     // --- Verification ---
     // Check CurrencyPools for the actual results since that's where changes are applied
@@ -54,8 +56,7 @@ fn test_fermentation_produces_and_consumes() {
 
     // Run again to ensure continuous operation
     app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-    app.update();
-    app.world_mut().run_schedule(FixedUpdate);
+    app.update(); // This runs the MetabolicSchedule through MetabolicFlowPlugin
     
     let currency_pools = app.world().resource::<CurrencyPools>();
     assert!((currency_pools.get(Currency::OrganicWaste) - 2.0).abs() < 1e-6,
