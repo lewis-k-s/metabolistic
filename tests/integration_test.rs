@@ -1,6 +1,6 @@
 use metabolistic3d::MetabolisticApp;
 use metabolistic3d::metabolism::*;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GeneState, spawn_metabolic_block};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GeneState};
 use metabolistic3d::molecules::Currency;
 use std::collections::HashMap;
 
@@ -372,13 +372,13 @@ fn test_flux_calculation_with_different_gene_states() {
     let flux_result = app.world().resource::<FluxResult>();
     
     // Active block should have full flux (10.0)
-    assert_eq!(flux_result.0.get(&active_block), Some(&10.0));
+    assert_eq!(flux_result.entity_flux.get(&active_block), Some(&10.0));
     
     // Mutated block should have reduced flux (50% = 5.0)
-    assert_eq!(flux_result.0.get(&mutated_block), Some(&5.0));
+    assert_eq!(flux_result.entity_flux.get(&mutated_block), Some(&5.0));
     
     // Silent block should have zero flux
-    assert_eq!(flux_result.0.get(&silent_block), Some(&0.0));
+    assert_eq!(flux_result.entity_flux.get(&silent_block), Some(&0.0));
 }
 
 #[test]
@@ -433,10 +433,10 @@ fn test_complex_genome_manipulation_sequence() {
     
     // Verify expressed genes are active
     let flux_result = app.world().resource::<FluxResult>();
-    assert_eq!(flux_result.0.get(&blocks[0]), Some(&8.0)); // SugarCatabolism active
-    assert_eq!(flux_result.0.get(&blocks[2]), Some(&8.0)); // LightCapture active
-    assert_eq!(flux_result.0.get(&blocks[1]), Some(&0.0)); // Fermentation silent
-    assert_eq!(flux_result.0.get(&blocks[3]), Some(&0.0)); // Respiration silent
+    assert_eq!(flux_result.entity_flux.get(&blocks[0]), Some(&8.0)); // SugarCatabolism active
+    assert_eq!(flux_result.entity_flux.get(&blocks[2]), Some(&8.0)); // LightCapture active
+    assert_eq!(flux_result.entity_flux.get(&blocks[1]), Some(&0.0)); // Fermentation silent
+    assert_eq!(flux_result.entity_flux.get(&blocks[3]), Some(&0.0)); // Respiration silent
     
     // Step 2: Mutate an active gene
     {
@@ -450,7 +450,7 @@ fn test_complex_genome_manipulation_sequence() {
     
     // Verify mutation affects flux
     let flux_result = app.world().resource::<FluxResult>();
-    assert_eq!(flux_result.0.get(&blocks[0]), Some(&4.0)); // SugarCatabolism mutated (50%)
+    assert_eq!(flux_result.entity_flux.get(&blocks[0]), Some(&4.0)); // SugarCatabolism mutated (50%)
     
     // Step 3: Express another gene
     {
@@ -464,7 +464,7 @@ fn test_complex_genome_manipulation_sequence() {
     
     // Verify new gene is active
     let flux_result = app.world().resource::<FluxResult>();
-    assert_eq!(flux_result.0.get(&blocks[1]), Some(&8.0)); // Fermentation now active
+    assert_eq!(flux_result.entity_flux.get(&blocks[1]), Some(&8.0)); // Fermentation now active
     
     // Step 4: Silence an active gene
     {
@@ -478,7 +478,7 @@ fn test_complex_genome_manipulation_sequence() {
     
     // Verify silenced gene has no flux
     let flux_result = app.world().resource::<FluxResult>();
-    assert_eq!(flux_result.0.get(&blocks[2]), Some(&0.0)); // LightCapture now silent
+    assert_eq!(flux_result.entity_flux.get(&blocks[2]), Some(&0.0)); // LightCapture now silent
     
     // Final verification: Check genome state
     let genome = app.world().resource::<Genome>();

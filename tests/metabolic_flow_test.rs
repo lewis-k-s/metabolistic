@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::ecs::system::SystemState;
 use metabolistic3d::metabolism::*;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent, GeneState};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent, MetabolicUpdateEvent};
 use metabolistic3d::molecules::Currency;
 
 #[test]
@@ -47,6 +47,7 @@ fn test_rebuild_graph_system() {
     app.add_plugins(MinimalPlugins);
     app.add_plugins(MetabolicFlowPlugin);
     app.add_event::<GenomeDiffEvent>();
+    app.add_event::<MetabolicUpdateEvent>();
     app.world_mut().insert_resource(Genome::default());
 
     // Spawn some nodes and edges
@@ -132,17 +133,17 @@ fn test_solve_flux_system() {
     // Run the solve_flux_system directly
     {
         let mut world = app.world_mut();
-        let mut system_state: SystemState<(Res<MetabolicGraph>, ResMut<FluxResult>, Query<(&MetabolicNode, &FluxProfile)>)> = SystemState::new(&mut world);
-        let (metabolic_graph, mut flux_result, query_blocks) = system_state.get_mut(&mut world);
-        solve_flux_system(metabolic_graph, flux_result, query_blocks);
+        let mut system_state: SystemState<(Res<MetabolicGraph>, ResMut<FluxResult>, Res<CurrencyPools>, Query<(&MetabolicNode, &FluxProfile)>)> = SystemState::new(&mut world);
+        let (metabolic_graph, flux_result, currency_pools, query_blocks) = system_state.get_mut(&mut world);
+        solve_flux_system(metabolic_graph, flux_result, currency_pools, query_blocks);
         system_state.apply(&mut world);
     }
 
     let flux_result = app.world().resource::<FluxResult>();
 
-    assert_eq!(flux_result.0.get(&active_node), Some(&5.0));
-    assert_eq!(flux_result.0.get(&mutated_node), Some(&4.0));
-    assert_eq!(flux_result.0.get(&silent_node), Some(&0.0));
+    assert_eq!(flux_result.entity_flux.get(&active_node), Some(&5.0));
+    assert_eq!(flux_result.entity_flux.get(&mutated_node), Some(&4.0));
+    assert_eq!(flux_result.entity_flux.get(&silent_node), Some(&0.0));
 }
 
 #[test]
@@ -157,7 +158,7 @@ fn test_apply_flux_results_system() {
     let node_entity = app.world_mut().spawn((MetabolicNode { kind: BlockKind::Fermentation, status: BlockStatus::Active }, MetabolicBlock, FluxProfile(vec![(Currency::ATP, 5.5)].into_iter().collect()))).id();
 
     // Manually set FluxResult
-    app.world_mut().resource_mut::<FluxResult>().0.insert(node_entity, 5.5);
+    app.world_mut().resource_mut::<FluxResult>().entity_flux.insert(node_entity, 5.5);
 
     // Run the apply_flux_results_system directly
     {

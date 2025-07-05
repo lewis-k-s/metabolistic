@@ -276,6 +276,17 @@ impl Genome {
         }
         GenomeDiff { enabled, disabled }
     }
+    
+    /// Check if any gene state has changed (used for metabolic system updates)
+    pub fn has_any_changes(&self) -> bool {
+        for (block_kind, current_state) in &self.table {
+            let previous_state = self.previous_table.get(block_kind);
+            if previous_state.map_or(true, |prev| prev != current_state) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// Event containing changes in gene expression that affect metabolic blocks
@@ -284,6 +295,10 @@ pub struct GenomeDiffEvent {
     pub enabled: Vec<BlockKind>,
     pub disabled: Vec<BlockKind>,
 }
+
+/// Event triggered when any genome state changes, requiring metabolic system updates
+#[derive(Event, Debug)]
+pub struct MetabolicUpdateEvent;
 
 /// A differential summary of genome changes
 #[derive(Debug)]
@@ -322,6 +337,15 @@ pub struct GenomeOperationCosts {
     pub editing_reducing_power_cost: f32,
 }
 
+/// Trait for implementing different mutation strategies
+pub trait MutationStrategy: Send + Sync {
+    /// Determines if a gene should mutate based on the strategy's logic
+    fn should_mutate(&mut self, block_kind: BlockKind, delta_time: f32) -> bool;
+    
+    /// Determines what the mutated gene state should be
+    fn get_mutation_target(&mut self, block_kind: BlockKind) -> GeneState;
+}
+
 impl Default for GenomeOperationCosts {
     fn default() -> Self {
         Self {
@@ -334,6 +358,73 @@ impl Default for GenomeOperationCosts {
     }
 }
 
+/// Random mutation strategy that uses thread_rng() for mutations
+/// This preserves the current random mutation behavior for gameplay
+pub struct RandomMutationStrategy {
+    /// Mutation chance per second per gene
+    pub mutation_rate: f32,
+}
+
+impl Default for RandomMutationStrategy {
+    fn default() -> Self {
+        Self {
+            mutation_rate: 0.01, // 1% chance per second per gene
+        }
+    }
+}
+
+impl MutationStrategy for RandomMutationStrategy {
+    fn should_mutate(&mut self, _block_kind: BlockKind, delta_time: f32) -> bool {
+        thread_rng().gen::<f32>() < self.mutation_rate * delta_time
+    }
+    
+    fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
+        GeneState::Mutated
+    }
+}
+
+/// Deterministic mutation strategy that never mutates genes
+/// This provides predictable behavior for testing
+pub struct DeterministicMutationStrategy;
+
+impl MutationStrategy for DeterministicMutationStrategy {
+    fn should_mutate(&mut self, _block_kind: BlockKind, _delta_time: f32) -> bool {
+        false // Never mutate in deterministic mode
+    }
+    
+    fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
+        GeneState::Mutated // This shouldn't be called since should_mutate returns false
+    }
+}
+
+/// Resource containing the mutation strategy configuration
+#[derive(Resource)]
+pub struct MutationConfig {
+    pub strategy: Box<dyn MutationStrategy>,
+}
+
+impl MutationConfig {
+    /// Create a new mutation config with a random strategy (default for gameplay)
+    pub fn random() -> Self {
+        Self {
+            strategy: Box::new(RandomMutationStrategy::default()),
+        }
+    }
+    
+    /// Create a new mutation config with a deterministic strategy (default for testing)
+    pub fn deterministic() -> Self {
+        Self {
+            strategy: Box::new(DeterministicMutationStrategy),
+        }
+    }
+}
+
+impl Default for MutationConfig {
+    fn default() -> Self {
+        Self::random()
+    }
+}
+
 /// Plugin that manages the genome system
 pub struct GenomePlugin;
 
@@ -341,22 +432,34 @@ impl Plugin for GenomePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Genome::default())
             .insert_resource(GenomeOperationCosts::default())
+            .insert_resource(MutationConfig::default())
             .add_event::<GenomeDiffEvent>()
+            .add_event::<MetabolicUpdateEvent>()
             .add_systems(PreUpdate, poll_genome_diff)
             .add_systems(Update, apply_genome_diff)
-            .add_systems(PostUpdate, random_mutation_system);
+            .add_systems(PostUpdate, mutation_system);
     }
 }
 
 /// System that compares current vs. previous genome snapshot and emits only the delta
-pub fn poll_genome_diff(mut genome: ResMut<Genome>, mut diff_writer: EventWriter<GenomeDiffEvent>) {
+pub fn poll_genome_diff(
+    mut genome: ResMut<Genome>, 
+    mut diff_writer: EventWriter<GenomeDiffEvent>,
+    mut metabolic_diff_writer: EventWriter<MetabolicUpdateEvent>
+) {
     let diff = genome.compute_diff();
 
+    // Send expression change events (for existing systems)
     if !diff.enabled.is_empty() || !diff.disabled.is_empty() {
         diff_writer.send(GenomeDiffEvent {
             enabled: diff.enabled,
             disabled: diff.disabled,
         });
+    }
+
+    // Send metabolic update events for ANY genome changes (including Silent <-> Mutated)
+    if genome.has_any_changes() {
+        metabolic_diff_writer.send(MetabolicUpdateEvent);
     }
 
     // Update the previous state snapshot for next frame
@@ -383,17 +486,31 @@ pub fn apply_genome_diff(
     }
 }
 
-/// System that occasionally mutates genes to create gameplay challenges
-pub fn random_mutation_system(mut genome: ResMut<Genome>, time: Res<Time>) {
-    // Simple mutation system - in real implementation this would be more sophisticated
-    const MUTATION_CHANCE_PER_SECOND: f32 = 0.01; // 1% chance per second per gene
-
+/// System that applies mutations according to the configured strategy
+pub fn mutation_system(
+    mut genome: ResMut<Genome>, 
+    mut mutation_config: ResMut<MutationConfig>,
+    time: Res<Time>
+) {
     let delta_time = time.delta_secs();
 
     for (block_kind, _state) in genome.table.clone().iter() {
-        if thread_rng().gen::<f32>() < MUTATION_CHANCE_PER_SECOND * delta_time {
-            genome.mutate_gene(*block_kind);
-            warn!("Gene {:?} has mutated!", block_kind);
+        if mutation_config.strategy.should_mutate(*block_kind, delta_time) {
+            let target_state = mutation_config.strategy.get_mutation_target(*block_kind);
+            match target_state {
+                GeneState::Mutated => {
+                    genome.mutate_gene(*block_kind);
+                    warn!("Gene {:?} has mutated!", block_kind);
+                }
+                GeneState::Silent => {
+                    genome.silence_gene(*block_kind);
+                    warn!("Gene {:?} has been silenced!", block_kind);
+                }
+                GeneState::Expressed => {
+                    genome.express_gene(*block_kind);
+                    warn!("Gene {:?} has been expressed!", block_kind);
+                }
+            }
         }
     }
 }

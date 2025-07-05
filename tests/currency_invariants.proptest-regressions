@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3d218265780e66b0321c77e1ec26afdd2c0292f6edd8fcfb315062dee80a4ab4 # shrinks to initial_ffa = 243.1867, initial_storage = 0.0, toxicity_threshold = 10.0, poly_rate = 1.0, simulation_steps = 14

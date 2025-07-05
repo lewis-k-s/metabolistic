@@ -1,5 +1,7 @@
+use crate::molecules::Currency;
+use crate::metabolism::{CurrencyPools, FluxProfile, MetabolicBlock, MetabolicNode, BlockStatus};
+use crate::blocks::genome::BlockKind;
 use bevy::prelude::*;
-use crate::molecules::{ATP, Pyruvate, ReducingPower, OrganicWaste, try_consume_currency};
 
 #[derive(Component)]
 pub struct FermentationBlock;
@@ -18,35 +20,60 @@ impl Plugin for FermentationPlugin {
 }
 
 fn spawn_fermentation_block(mut commands: Commands) {
-    commands.spawn(FermentationBlock);
-    println!("FermentationBlock spawned!");
+    let mut flux_profile = FluxProfile::default();
+    // Define the fermentation flux profile: consumes Pyruvate and ReducingPower, produces ATP and OrganicWaste
+    flux_profile.0.insert(Currency::Pyruvate, -1.0);       // Consumes 1 unit of Pyruvate
+    flux_profile.0.insert(Currency::ReducingPower, -1.0);  // Consumes 1 unit of ReducingPower
+    flux_profile.0.insert(Currency::ATP, 1.0);             // Produces 1 unit of ATP
+    flux_profile.0.insert(Currency::OrganicWaste, 1.0);    // Produces 1 unit of OrganicWaste
+    
+    commands.spawn((
+        FermentationBlock,
+        MetabolicBlock,
+        MetabolicNode {
+            kind: BlockKind::Fermentation,
+            status: BlockStatus::Silent, // Will be updated by genome system
+        },
+        flux_profile,
+    ));
+    println!("FermentationBlock spawned with FluxProfile!");
 }
 
 fn fermentation_system(
     fermentation_rate: Res<FermentationRate>,
-    pyruvate: ResMut<Pyruvate>,
-    reducing_power: ResMut<ReducingPower>,
-    mut atp: ResMut<ATP>,
-    mut organic_waste: ResMut<OrganicWaste>,
+    currency_pools: Res<CurrencyPools>,
+    mut query_fermentation: Query<&mut FluxProfile, (With<FermentationBlock>, With<MetabolicNode>)>,
 ) {
     let rate = fermentation_rate.0;
 
-    // Inputs: Pyruvate + NADH (ReducingPower)
-    // Outputs: Small ATP + organic-waste
-
-    // For simplicity, let's assume a 1:1:1:1 ratio for now.
-    // Consume Pyruvate and ReducingPower
-    let consumed_pyruvate = rate;
-    let consumed_reducing_power = rate;
-
-    let produced_atp = rate * 0.5; // Small ATP yield
-    let produced_organic_waste = rate;
-
-    if try_consume_currency(pyruvate, consumed_pyruvate, "Fermentation") &&
-       try_consume_currency(reducing_power, consumed_reducing_power, "Fermentation")
-    {
-        atp.0 += produced_atp;
-        organic_waste.0 += produced_organic_waste;
-        // debug!("Fermentation: Produced {:.2} ATP, {:.2} OrganicWaste", produced_atp, produced_organic_waste);
+    for mut flux_profile in query_fermentation.iter_mut() {
+        // Check resource availability before setting flux profile
+        let pyruvate_available = currency_pools.get(Currency::Pyruvate);
+        let reducing_power_available = currency_pools.get(Currency::ReducingPower);
+        
+        // Calculate actual rate based on resource availability
+        let consumed_pyruvate = rate;
+        let consumed_reducing_power = rate;
+        
+        // Scale rate down if not enough resources
+        let actual_rate = if pyruvate_available >= consumed_pyruvate && reducing_power_available >= consumed_reducing_power {
+            rate
+        } else {
+            // Scale down based on most limiting resource
+            let pyruvate_ratio = if consumed_pyruvate > 0.0 { pyruvate_available / consumed_pyruvate } else { 1.0 };
+            let reducing_power_ratio = if consumed_reducing_power > 0.0 { reducing_power_available / consumed_reducing_power } else { 1.0 };
+            rate * pyruvate_ratio.min(reducing_power_ratio).min(1.0)
+        };
+        
+        // Update flux profile based on actual rate
+        if actual_rate > 0.0 {
+            flux_profile.0.insert(Currency::Pyruvate, -actual_rate);
+            flux_profile.0.insert(Currency::ReducingPower, -actual_rate);  
+            flux_profile.0.insert(Currency::ATP, actual_rate);
+            flux_profile.0.insert(Currency::OrganicWaste, actual_rate);
+        } else {
+            // No resources available, clear flux profile
+            flux_profile.0.clear();
+        }
     }
 }

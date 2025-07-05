@@ -1,3 +1,4 @@
+#[cfg(feature = "full")]
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
@@ -31,10 +32,14 @@ impl MetabolisticApp {
     pub fn new() -> App {
         let mut app = App::new();
 
-        app.add_plugins(DefaultPlugins)
-            .add_plugins(PhysicsPlugins::default())
-            .add_plugins(PhysicsDebugPlugin::default())
-            // State management
+        #[cfg(feature = "full")]
+        {
+            app.add_plugins(DefaultPlugins)
+                .add_plugins(PhysicsPlugins::default())
+                .add_plugins(PhysicsDebugPlugin::default());
+        }
+        
+        app // State management
             .init_state::<GameState>()
             // Shared systems (available in all states)
             .add_plugins(molecules::CurrencyPlugin)
@@ -42,23 +47,27 @@ impl MetabolisticApp {
             .add_plugins(blocks::fermentation::FermentationPlugin)
             .add_plugins(blocks::fat_storage::FatStoragePlugin)
             .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
-            .add_plugins(metabolism::MetabolicFlowPlugin)
-            .add_plugins(dev_tools::plugin)
-            .add_plugins(debug::plugin)
-            .add_plugins(inspector::plugin)
-            // Camera systems that work with any scene type
-            .add_plugins(camera::CameraSystemsPlugin)
-            // Scene-specific plugins
-            .add_plugins(scenes::menu::MainMenuPlugin)
-            .add_plugins(scenes::scene_3d::Scene3DPlugin)
-            .add_plugins(scenes::scene_2d::Scene2DPlugin)
-            .add_plugins(scenes::genome_edit::GenomeEditPlugin)
-            // Shared systems that run in multiple states
-            .add_systems(Startup, shared::setup_shared_resources)
-            .add_systems(
-                Update,
-                (shared::state_transition_input, shared::genome_demo_system),
-            );
+            .add_plugins(metabolism::MetabolicFlowPlugin);
+            
+        #[cfg(feature = "full")]
+        {
+            app.add_plugins(dev_tools::plugin)
+                .add_plugins(debug::plugin)
+                .add_plugins(inspector::plugin)
+                // Camera systems that work with any scene type
+                .add_plugins(camera::CameraSystemsPlugin)
+                // Scene-specific plugins
+                .add_plugins(scenes::menu::MainMenuPlugin)
+                .add_plugins(scenes::scene_3d::Scene3DPlugin)
+                .add_plugins(scenes::scene_2d::Scene2DPlugin)
+                .add_plugins(scenes::genome_edit::GenomeEditPlugin)
+                // Shared systems that run in multiple states
+                .add_systems(Startup, shared::setup_shared_resources)
+                .add_systems(
+                    Update,
+                    (shared::state_transition_input, shared::genome_demo_system),
+                );
+        }
 
         app
     }
@@ -81,6 +90,8 @@ impl MetabolisticApp {
             .add_plugins(blocks::fat_storage::FatStoragePlugin)
             .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
+            // Override with deterministic mutations for testing
+            .insert_resource(blocks::genome::MutationConfig::deterministic())
             // Only add shared systems that don't require input
             .add_systems(Startup, shared::setup_shared_resources);
 

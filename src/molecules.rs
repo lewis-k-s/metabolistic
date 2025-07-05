@@ -16,7 +16,7 @@
 //!     request and consume from the currency pools.
 
 use bevy::prelude::*;
-use tracing::{debug, warn};
+use tracing::debug;
 
 // --- Currency Resource Definitions ---
 
@@ -98,79 +98,83 @@ pub enum Currency {
     ReducingPower,
     AcetylCoA,
     CarbonSkeletons,
+    FreeFattyAcids,
+    StorageBeads,
+    Pyruvate,
+    OrganicWaste,
 }
 
-/// A trait for generic operations on currency resources.
-/// This allows the `try_consume_currency` function to work with any currency type.
-pub trait CurrencyResource: Resource + Default + std::fmt::Debug {
-    /// Returns the current amount of the currency.
-    fn amount(&self) -> f32;
-    /// Sets the amount of the currency.
-    fn set_amount(&mut self, value: f32);
-}
+// A trait for generic operations on currency resources.
+// This allows the `try_consume_currency` function to work with any currency type.
+// pub trait CurrencyResource: Resource + Default + std::fmt::Debug {
+//     /// Returns the current amount of the currency.
+//     fn amount(&self) -> f32;
+//     /// Sets the amount of the currency.
+//     fn set_amount(&mut self, value: f32);
+// }
 
-impl CurrencyResource for ATP {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for ATP {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for ReducingPower {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for ReducingPower {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for AcetylCoA {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for AcetylCoA {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for CarbonSkeletons {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for CarbonSkeletons {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for FreeFattyAcids {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for FreeFattyAcids {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for Pyruvate {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for Pyruvate {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
-impl CurrencyResource for OrganicWaste {
-    fn amount(&self) -> f32 {
-        self.0
-    }
-    fn set_amount(&mut self, value: f32) {
-        self.0 = value;
-    }
-}
+// impl CurrencyResource for OrganicWaste {
+//     fn amount(&self) -> f32 {
+//         self.0
+//     }
+//     fn set_amount(&mut self, value: f32) {
+//         self.0 = value;
+//     }
+// }
 
 // --- Plugin for Initialization ---
 
@@ -194,69 +198,3 @@ impl Plugin for CurrencyPlugin {
     }
 }
 
-// --- Utility Functions for Consumption ---
-
-/// Attempts to consume a specified `amount` of a given currency `T`.
-///
-/// This function is intended to be called from within a metabolic block's system.
-/// It handles checking for sufficient funds and provides debug logging for traceability.
-///
-/// # Arguments
-/// * `currency`: A `ResMut<T>` of the currency to consume.
-/// * `amount`: The `f32` amount to attempt to consume. Must be non-negative.
-/// * `consumer_name`: A string slice identifying the block or process attempting the consumption,
-///   used for logging purposes (e.g., "Glycolysis").
-///
-/// # Returns
-/// * `true` if the currency was successfully consumed.
-/// * `false` if the requested amount was greater than the available currency.
-///
-/// # Example
-/// ```rust,ignore
-/// fn glycolysis_system(mut atp: ResMut<ATP>) {
-///     // Glycolysis requires an initial investment of ATP.
-///     if try_consume_currency(atp, 2.0, "Glycolysis") {
-///         // Proceed with the rest of the glycolysis logic...
-///         info!("Glycolysis started successfully.");
-///     } else {
-///         // Not enough ATP to start glycolysis.
-///         warn!("Glycolysis stalled: Insufficient ATP.");
-///     }
-/// }
-/// ```
-pub fn try_consume_currency<T: CurrencyResource>(
-    mut currency: ResMut<T>,
-    amount: f32,
-    consumer_name: &str,
-) -> bool {
-    if amount < 0.0 {
-        warn!(
-            "Attempted to consume a negative amount of currency by '{}'. This is not allowed.",
-            consumer_name
-        );
-        return false;
-    }
-
-    let available = currency.amount();
-    let currency_name = std::any::type_name::<T>().split("::").last().unwrap_or("UnknownCurrency");
-    println!("try_consume_currency: Consumer: {}, Currency: {}, Available: {}, Amount: {}", consumer_name, currency_name, available, amount);
-
-    if available >= amount {
-        debug!(
-            "CONSUMPTION: '{}' consumed {:.2} {}. (Available: {:.2} -> {:.2})",
-            consumer_name,
-            amount,
-            currency_name,
-            available,
-            available - amount
-        );
-        currency.set_amount(available - amount);
-        true
-    } else {
-        debug!(
-            "CONSUMPTION_FAILED: '{}' requires {:.2} {}, but only {:.2} is available.",
-            consumer_name, amount, currency_name, available
-        );
-        false
-    }
-}

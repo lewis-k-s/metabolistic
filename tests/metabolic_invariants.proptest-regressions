@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 02605db379d6f6a5adf50a6cb6fda01456830d507efd7dc04abe80806f7d1f8d # shrinks to gene_operations = [(LightCapture, Expressed), (SugarCatabolism, Mutated)], consistency_check_steps = 10

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e690106fcd4685fc7c4e33d9d0420ea4ff9d366aadd83b9c840648b4fea9330d # shrinks to initial_pyruvate = 100.0, initial_rp = 100.0, simulation_steps = 10
+cc 1891b320414d5ce55b4ba4defdded1a6b8142122f732d6f5406609352229f22a # shrinks to fermentation_inputs = (50.0, 50.0), export_rate = 0.05, simulation_steps = 20

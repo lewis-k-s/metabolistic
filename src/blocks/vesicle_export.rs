@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use crate::molecules::OrganicWaste;
+use crate::molecules::Currency;
+use crate::metabolism::CurrencyPools;
 
 #[derive(Component)]
 pub struct VesicleExportBlock;
@@ -24,15 +25,16 @@ fn spawn_vesicle_export_block(mut commands: Commands) {
 
 fn vesicle_export_system(
     export_rate: Res<VesicleExportRate>,
-    mut organic_waste: ResMut<OrganicWaste>,
+    mut currency_pools: ResMut<CurrencyPools>,
 ) {
     let amount_to_export = export_rate.0;
+    let organic_waste = currency_pools.get(Currency::OrganicWaste);
 
-    if organic_waste.0 >= amount_to_export {
-        organic_waste.0 -= amount_to_export;
+    if organic_waste >= amount_to_export {
+        currency_pools.modify(Currency::OrganicWaste, -amount_to_export);
         // debug!("VesicleExport: Exported {:.2} OrganicWaste", amount_to_export);
     } else {
-        organic_waste.0 = 0.0;
-        // debug!("VesicleExport: Exported remaining {:.2} OrganicWaste", organic_waste.0);
+        currency_pools.set(Currency::OrganicWaste, 0.0);
+        // debug!("VesicleExport: Exported remaining {:.2} OrganicWaste", organic_waste);
     }
 }

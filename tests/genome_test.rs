@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent, GeneState, GenomeOperationCosts, poll_genome_diff, apply_genome_diff};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent, MetabolicUpdateEvent, GeneState, GenomeOperationCosts, poll_genome_diff, apply_genome_diff};
 
 fn setup_app() -> App {
     let mut app = App::new();
@@ -7,6 +7,7 @@ fn setup_app() -> App {
     app.insert_resource(Genome::default());
     app.insert_resource(GenomeOperationCosts::default());
     app.add_event::<GenomeDiffEvent>();
+    app.add_event::<MetabolicUpdateEvent>();
     app.add_systems(PreUpdate, poll_genome_diff);
     app.add_systems(Update, apply_genome_diff);
     app
