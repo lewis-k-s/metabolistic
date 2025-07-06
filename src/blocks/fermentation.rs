@@ -28,9 +28,8 @@ fn spawn_fermentation_block(mut commands: Commands) {
         MetabolicBlock,
         MetabolicNode {
             kind: BlockKind::Fermentation,
-            status: BlockStatus::Silent, // Will be updated by genome system
+            status: BlockStatus::Active,
         },
         flux_profile,
     ));
-    println!("FermentationBlock spawned with FluxProfile!");
 }

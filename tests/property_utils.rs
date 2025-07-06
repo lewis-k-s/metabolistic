@@ -232,3 +232,24 @@ macro_rules! proptest_over_time {
         }
     };
 }
+
+/// Creates a headless app and expresses the specified gene, running a few update cycles
+/// to ensure the block is spawned.
+pub fn app_with_expressed_gene(kind: BlockKind, updates: usize) -> App {
+    let mut app = MetabolisticApp::new_headless();
+    
+    // Express the gene
+    app.world_mut().resource_mut::<metabolistic3d::blocks::genome::Genome>()
+        .add_gene(kind)
+        .express_gene(kind);
+    
+    // Run the app for a few updates to ensure systems are initialized
+    for _ in 0..updates {
+        let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
+        app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
+        app.update();
+        app.world_mut().run_schedule(FixedUpdate);
+    }
+    
+    app
+}

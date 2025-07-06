@@ -20,7 +20,6 @@ impl Plugin for VesicleExportPlugin {
 
 fn spawn_vesicle_export_block(mut commands: Commands) {
     commands.spawn(VesicleExportBlock);
-    println!("VesicleExportBlock spawned!");
 }
 
 fn vesicle_export_system(

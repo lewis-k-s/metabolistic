@@ -31,7 +31,6 @@ fn polymerize_beads_system(
         if currency_pools.can_consume(Currency::FreeFattyAcids, ffa_to_polymerize) {
             currency_pools.modify(Currency::FreeFattyAcids, -ffa_to_polymerize);
             currency_pools.modify(Currency::StorageBeads, ffa_to_polymerize);
-            println!("System: Polymerized {:.2} FFA into storage beads", ffa_to_polymerize);
         }
     }
 }

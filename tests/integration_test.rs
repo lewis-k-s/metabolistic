@@ -131,7 +131,7 @@ fn test_genome_gene_expression_metabolic_activation() {
     // Express the gene
     {
         let mut genome = app.world_mut().resource_mut::<Genome>();
-        assert!(genome.express_gene(BlockKind::SugarCatabolism));
+        genome.express_gene(BlockKind::SugarCatabolism);
     }
     
     // Run update cycles to process genome diff events
@@ -243,7 +243,7 @@ fn test_genome_gene_silencing() {
     // Silence the gene
     {
         let mut genome = app.world_mut().resource_mut::<Genome>();
-        assert!(genome.silence_gene(BlockKind::LightCapture));
+        genome.silence_gene(BlockKind::LightCapture);
     }
     
     // Process the silencing

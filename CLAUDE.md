@@ -120,3 +120,5 @@ The codebase includes comprehensive testing with multiple categories:
 # If you need code documentation use context7
 
 # Use `rg` instead of `grep` in general
+
+# Run `cargo modules --lib` to see the up-to-date project structure

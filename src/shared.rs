@@ -57,20 +57,14 @@ pub fn genome_demo_system(
 ) {
     // Press 'G' to express sugar catabolism gene
     if input.just_pressed(KeyCode::KeyG) {
-        if genome.express_gene(genome::BlockKind::SugarCatabolism) {
-            info!("Expressed SugarCatabolism gene!");
-        } else {
-            warn!("Failed to express SugarCatabolism gene - already expressed or not present");
-        }
+        genome.express_gene(genome::BlockKind::SugarCatabolism);
+        info!("Expressed SugarCatabolism gene!");
     }
 
     // Press 'H' to silence fermentation gene
     if input.just_pressed(KeyCode::KeyH) {
-        if genome.silence_gene(genome::BlockKind::Fermentation) {
-            info!("Silenced Fermentation gene!");
-        } else {
-            warn!("Failed to silence Fermentation gene - not expressed or not present");
-        }
+        genome.silence_gene(genome::BlockKind::Fermentation);
+        info!("Silenced Fermentation gene!");
     }
 
     // Press 'J' to add a new gene

@@ -27,12 +27,12 @@ fn test_genome_diff_events_expression_and_silencing() {
 
     // Express a gene
     let mut genome = app.world_mut().resource_mut::<Genome>();
-    assert!(genome.express_gene(BlockKind::SugarCatabolism));
+    genome.express_gene(BlockKind::SugarCatabolism);
     assert_eq!(*genome.get_gene_state(&BlockKind::SugarCatabolism).unwrap(), GeneState::Expressed);
 
     // Express another gene
     let mut genome = app.world_mut().resource_mut::<Genome>();
-    assert!(genome.express_gene(BlockKind::LightCapture));
+    genome.express_gene(BlockKind::LightCapture);
     assert_eq!(*genome.get_gene_state(&BlockKind::LightCapture).unwrap(), GeneState::Expressed);
 
     // Run app update to trigger poll_genome_diff and emit event
@@ -55,7 +55,7 @@ fn test_genome_diff_events_expression_and_silencing() {
 
     // Silence a gene
     let mut genome = app.world_mut().resource_mut::<Genome>();
-    assert!(genome.silence_gene(BlockKind::SugarCatabolism));
+    genome.silence_gene(BlockKind::SugarCatabolism);
     assert_eq!(*genome.get_gene_state(&BlockKind::SugarCatabolism).unwrap(), GeneState::Silent);
 
     // Run app update to trigger poll_genome_diff and emit event
@@ -80,7 +80,7 @@ fn test_genome_diff_events_mutation_and_repair() {
 
     // Add and express a gene
     genome.add_gene(BlockKind::Fermentation);
-    assert!(genome.express_gene(BlockKind::Fermentation));
+    genome.express_gene(BlockKind::Fermentation);
 
     // Initial update to set previous state (Fermentation expressed)
     app.update();
@@ -130,7 +130,7 @@ fn test_genome_diff_events_mutation_and_repair() {
 
     // Now express the repaired gene
     let mut genome = app.world_mut().resource_mut::<Genome>();
-    assert!(genome.express_gene(BlockKind::Fermentation));
+    genome.express_gene(BlockKind::Fermentation);
     assert_eq!(*genome.get_gene_state(&BlockKind::Fermentation).unwrap(), GeneState::Expressed);
 
     // Run app update
@@ -154,7 +154,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
 
     // Add and express a gene
     genome.add_gene(BlockKind::Fermentation);
-    assert!(genome.express_gene(BlockKind::Fermentation));
+    genome.express_gene(BlockKind::Fermentation);
 
     // Initial update to set previous state (Fermentation expressed)
     app.update();

@@ -170,38 +170,29 @@ impl Genome {
     }
 
     /// Add a new gene tile to the genome
-    pub fn add_gene(&mut self, block_kind: BlockKind) {
+    pub fn add_gene(&mut self, block_kind: BlockKind) -> &mut Self {
         self.table.insert(block_kind, GeneState::Silent);
+        self
     }
 
     /// Express a gene (activate the metabolic block)
-    pub fn express_gene(&mut self, block_kind: BlockKind) -> bool {
+    pub fn express_gene(&mut self, block_kind: BlockKind) -> &mut Self {
         if let Some(state) = self.table.get_mut(&block_kind) {
-            match state {
-                GeneState::Silent => {
-                    *state = GeneState::Expressed;
-                    true
-                }
-                _ => false,
+            if *state == GeneState::Silent {
+                *state = GeneState::Expressed;
             }
-        } else {
-            false
         }
+        self
     }
 
     /// Silence a gene (deactivate the metabolic block)
-    pub fn silence_gene(&mut self, block_kind: BlockKind) -> bool {
+    pub fn silence_gene(&mut self, block_kind: BlockKind) -> &mut Self {
         if let Some(state) = self.table.get_mut(&block_kind) {
-            match state {
-                GeneState::Expressed => {
-                    *state = GeneState::Silent;
-                    true
-                }
-                _ => false,
+            if *state == GeneState::Expressed {
+                *state = GeneState::Silent;
             }
-        } else {
-            false
         }
+        self
     }
 
     /// Mutate a gene (temporarily disable it)
