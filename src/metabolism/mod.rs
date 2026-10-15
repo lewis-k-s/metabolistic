@@ -7,15 +7,17 @@
 //!
 //! The engine runs in `MetabolicSchedule`, one fixed tick at a time. A tick:
 //!
-//! 1. `MetabolicSet::Genome`: random mutations.
-//! 2. `MetabolicSet::Regulate`: regulated blocks set their drive or move pools
+//! 1. `MetabolicSet::Sense`: the cell reads the heat of the grid under it.
+//! 2. `MetabolicSet::Genome`: random mutations.
+//! 3. `MetabolicSet::Regulate`: regulated blocks set their drive or move pools
 //!    (for example fat storage and protein synthesis).
-//! 3. `MetabolicSet::Solve`: for each cell, `solve_tick` runs all blocks and
+//! 4. `MetabolicSet::Solve`: for each cell, `solve_tick` runs all blocks and
 //!    the cell's maintenance cost together.
-//! 4. `MetabolicSet::Build`: the cell uses the products of the tick. Protein
+//! 5. `MetabolicSet::Build`: the cell uses the products of the tick. Protein
 //!    synthesis advances the synthesis queue, and lipids repair the membrane.
-//! 5. `MetabolicSet::Exchange`: the cell exchanges waste and nutrients with the
-//!    outside pools.
+//! 6. `MetabolicSet::Exchange`: the cell and the `EnvGrid` swap minerals, heat
+//!    hurts the membrane, movement costs ATP, and the grid runs a step (see
+//!    `exchange`).
 //!
 //! In the game, `run_metabolic_schedule_timed` runs ticks from real time. Tests
 //! set `FlowmapTimingConfig::manual` and call `run_metabolic_tick` directly.
@@ -29,9 +31,11 @@ use bevy::prelude::*;
 
 use crate::blocks::genome::{BlockKind, GeneState};
 use crate::cell::{Cell, CellBlocks, CellSize, maintenance_atp_per_sec};
+use crate::envgrid::EnvGrid;
 use crate::environment::{Channel, LocalEnvironment, external_saturation};
+use crate::exchange;
 pub use crate::molecules::CurrencyPools; // Re-export for backward compatibility
-use crate::molecules::{Currency, EnvironmentalCurrencyPools};
+use crate::molecules::Currency;
 use crate::proteins::Proteome;
 pub use solver::{
     BlockInput, MAX_SUBSTEP, TickResult, block_demand, block_rates, dependency_lists, solve_order,
@@ -293,6 +297,7 @@ pub struct MetabolicSchedule;
 /// Ordered phases of a metabolic tick.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetabolicSet {
+    Sense,
     Genome,
     Regulate,
     Solve,
@@ -431,94 +436,10 @@ pub fn maintenance_profile(size: &CellSize) -> FluxProfile {
     profile
 }
 
-// Exchange rates with the environment. Placeholder tuning values, per second.
-const WASTE_LEAK_THRESHOLD: f32 = 20.0;
-const WASTE_LEAK_FRACTION_PER_SEC: f32 = 0.5;
-const CARBON_ABSORB_BELOW: f32 = 10.0;
-const CARBON_ABSORB_RATE: f32 = 10.0;
-const PYRUVATE_ABSORB_BELOW: f32 = 5.0;
-const PYRUVATE_ABSORB_RATE: f32 = 5.0;
-const ENV_WASTE_DECAY_FRACTION_PER_SEC: f32 = 0.1;
-const ENV_WASTE_TO_CARBON: f32 = 0.3;
-const ENV_CARBON_CAP: f32 = 100.0;
-const ENV_CARBON_REPLENISH: f32 = 5.0;
-const ENV_PYRUVATE_CAP: f32 = 20.0;
-const ENV_PYRUVATE_REPLENISH: f32 = 2.5;
-
 /// Fraction of a pool lost in `dt` seconds at a continuous rate `k` per second.
 /// Exact for any tick length, unlike `k * dt`.
 pub fn decay_fraction(k: f32, dt: f32) -> f32 {
     1.0 - (-k * dt).exp()
-}
-
-/// Cells leak waste into the environment when it builds up.
-pub fn cell_waste_export_system(
-    timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<&mut CurrencyPools, With<Cell>>,
-    mut env_pools: ResMut<EnvironmentalCurrencyPools>,
-) {
-    let dt = timing.target_delta();
-    for mut pools in &mut cells {
-        let waste = pools.get(Currency::Waste);
-        if waste > WASTE_LEAK_THRESHOLD {
-            let amount = waste * decay_fraction(WASTE_LEAK_FRACTION_PER_SEC, dt);
-            pools.modify(Currency::Waste, -amount);
-            env_pools.modify(Currency::Waste, amount);
-        }
-    }
-}
-
-/// Cells take up carbon skeletons and pyruvate from the environment when low.
-pub fn cell_nutrient_absorption_system(
-    timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<&mut CurrencyPools, With<Cell>>,
-    mut env_pools: ResMut<EnvironmentalCurrencyPools>,
-) {
-    let dt = timing.target_delta();
-    for mut pools in &mut cells {
-        for (currency, below, rate) in [
-            (
-                Currency::CarbonSkeletons,
-                CARBON_ABSORB_BELOW,
-                CARBON_ABSORB_RATE,
-            ),
-            (
-                Currency::Pyruvate,
-                PYRUVATE_ABSORB_BELOW,
-                PYRUVATE_ABSORB_RATE,
-            ),
-        ] {
-            let gap = below - pools.get(currency);
-            if gap > 0.0 {
-                // Cap at the gap so the result does not depend on tick length.
-                let amount = (rate * dt).min(gap).min(env_pools.get(currency));
-                if amount > 0.0 {
-                    pools.modify(currency, amount);
-                    env_pools.modify(currency, -amount);
-                }
-            }
-        }
-    }
-}
-
-/// Environmental waste decays into carbon, and outside nutrients replenish slowly.
-pub fn environmental_currency_processing_system(
-    timing: Res<FlowmapTimingConfig>,
-    mut env_pools: ResMut<EnvironmentalCurrencyPools>,
-) {
-    let dt = timing.target_delta();
-    let waste = env_pools.get(Currency::Waste);
-    if waste > 0.0 {
-        let decay = waste * decay_fraction(ENV_WASTE_DECAY_FRACTION_PER_SEC, dt);
-        env_pools.modify(Currency::Waste, -decay);
-        env_pools.modify(Currency::CarbonSkeletons, decay * ENV_WASTE_TO_CARBON);
-    }
-    if env_pools.get(Currency::CarbonSkeletons) < ENV_CARBON_CAP {
-        env_pools.modify(Currency::CarbonSkeletons, ENV_CARBON_REPLENISH * dt);
-    }
-    if env_pools.get(Currency::Pyruvate) < ENV_PYRUVATE_CAP {
-        env_pools.modify(Currency::Pyruvate, ENV_PYRUVATE_REPLENISH * dt);
-    }
 }
 
 // --- Plugin ---
@@ -532,6 +453,7 @@ impl Plugin for MetabolicFlowPlugin {
             .configure_sets(
                 MetabolicSchedule,
                 (
+                    MetabolicSet::Sense,
                     MetabolicSet::Genome,
                     MetabolicSet::Regulate,
                     MetabolicSet::Solve,
@@ -546,14 +468,26 @@ impl Plugin for MetabolicFlowPlugin {
             )
             .add_systems(
                 MetabolicSchedule,
+                exchange::sense_environment_system
+                    .in_set(MetabolicSet::Sense)
+                    .run_if(resource_exists::<EnvGrid>),
+            )
+            .add_systems(
+                MetabolicSchedule,
+                exchange::constant_supply_system
+                    .in_set(MetabolicSet::Sense)
+                    .run_if(not(resource_exists::<EnvGrid>)),
+            )
+            .add_systems(
+                MetabolicSchedule,
                 (
-                    cell_waste_export_system,
-                    cell_nutrient_absorption_system,
-                    environmental_currency_processing_system,
+                    exchange::mineral_exchange_system.run_if(resource_exists::<EnvGrid>),
+                    exchange::heat_damage_system,
+                    exchange::movement_cost_system,
+                    exchange::step_grid_system.run_if(resource_exists::<EnvGrid>),
                 )
                     .chain()
-                    .in_set(MetabolicSet::Exchange)
-                    .run_if(resource_exists::<EnvironmentalCurrencyPools>),
+                    .in_set(MetabolicSet::Exchange),
             )
             .add_systems(Update, run_metabolic_schedule_timed)
             .add_observer(crate::cell::despawn_blocks_of_removed_cell);

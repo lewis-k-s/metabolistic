@@ -3,21 +3,40 @@
 //! Some blocks take inputs from outside the cell, for example heat and
 //! minerals for chemosynthesis. These inputs are channels, not internal pools.
 //!
-//! `LocalEnvironment` holds the channel levels at one cell. In milestone M1 it
-//! is a constant supply: the blocks do not use it up. In M2, the spatial grid
-//! (`EnvGrid`) sets it from the grid cell under the body, and transporters move
-//! substances between the grid and the cell.
+//! `LocalEnvironment` holds the channel levels that the blocks of one cell can
+//! use. Without a grid (the M1 tests), it is a constant supply. In the game,
+//! the spatial grid (`envgrid::EnvGrid`) feeds it, and `exchange` moves
+//! substances between the grid and the cell:
+//!
+//! - Heat is a condition. It is the grid level under the body, and nothing
+//!   uses it up.
+//! - Minerals are a stock in the cell. Transporters take them from the grid,
+//!   and chemosynthesis uses them up.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// An outside channel. M2 adds Light/UV, OrganicCarbon, O2 and Water.
+/// An outside channel. M3 adds Light/UV, and later stages add OrganicCarbon,
+/// O2 and Water.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Channel {
     /// Heat from a vent.
     Heat,
     /// Reduced minerals (for example H2S) from a vent.
     Minerals,
+}
+
+impl Channel {
+    /// All channels, in a fixed order. `index` is the position in this list.
+    pub const ALL: [Channel; 2] = [Channel::Heat, Channel::Minerals];
+
+    /// Position of the channel in `ALL`. Layers of the grid use it.
+    pub const fn index(self) -> usize {
+        match self {
+            Channel::Heat => 0,
+            Channel::Minerals => 1,
+        }
+    }
 }
 
 /// The channel levels at one cell. A missing channel has level 0.

@@ -28,6 +28,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # These dependencies are only needed for full builds with UI
+# 2D physics for the player cell. Full builds only: `headless` must not need it.
+avian2d = { version = "0.7", optional = true, default-features = false, features = [
+  "2d",
+  "f32",
+  "parry-f32",
+  "parallel",
+] }
 bevy-inspector-egui = { version = "0.37", optional = true }
 # bevy-inspector-egui 0.37 needs bevy_egui 0.40 and egui 0.34.
 bevy_egui = { version = "0.40", optional = true }
@@ -48,6 +55,7 @@ full = [
   "bevy/default",
   "bevy/bevy_gizmos",
   "bevy/bevy_ui_debug",
+  "dep:avian2d",
   "dep:bevy-inspector-egui",
   "dep:bevy_egui",
   "dep:egui",

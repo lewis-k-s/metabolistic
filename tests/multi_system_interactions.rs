@@ -106,8 +106,6 @@ proptest! {
         let (toxicity_threshold, poly_rate, lipo_rate) = system_parameters;
         let mut app = MetabolisticApp::new_headless();
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
-        // No outside carbon, so lipid metabolism has no input.
-        app.world_mut().remove_resource::<EnvironmentalCurrencyPools>();
         let cell = spawn_test_cell(
             &mut app,
             &[BlockKind::Fermentation, BlockKind::LipidMetabolism, BlockKind::FatStorage],

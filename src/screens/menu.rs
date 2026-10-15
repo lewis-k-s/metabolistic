@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 
-use super::{label, screen_root};
+use super::{button, label, screen_root};
 use crate::GameState;
 
 pub(super) fn plugin(app: &mut App) {
@@ -57,40 +57,13 @@ fn spawn_settings_page(mut commands: Commands) {
     ));
 }
 
-const BUTTON_IDLE: Color = Color::srgb(0.15, 0.15, 0.15);
-const BUTTON_HOVERED: Color = Color::srgb(0.25, 0.25, 0.25);
-const BUTTON_PRESSED: Color = Color::srgb(0.35, 0.75, 0.35);
-
-fn button(text: &str, action: MenuAction) -> impl Bundle {
-    (
-        Button,
-        Node {
-            min_width: Val::Px(250.0),
-            height: Val::Px(65.0),
-            padding: UiRect::horizontal(Val::Px(20.0)),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(BUTTON_IDLE),
-        action,
-        children![label(text, 36.0)],
-    )
-}
-
 fn menu_buttons(
-    mut buttons: Query<(&Interaction, &MenuAction, &mut BackgroundColor), Changed<Interaction>>,
+    buttons: Query<(&Interaction, &MenuAction), Changed<Interaction>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut next_page: ResMut<NextState<MenuPage>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    for (interaction, action, mut color) in &mut buttons {
-        *color = match interaction {
-            Interaction::Pressed => BUTTON_PRESSED,
-            Interaction::Hovered => BUTTON_HOVERED,
-            Interaction::None => BUTTON_IDLE,
-        }
-        .into();
+    for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
             continue;
         }

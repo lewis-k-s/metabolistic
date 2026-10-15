@@ -1,0 +1,695 @@
+//! # Environment grid
+//!
+//! `EnvGrid` is a coarse grid with one `f32` layer for each `Channel`: heat and
+//! minerals now, light and UV in M3. Each channel has sources (emitters),
+//! diffusion, a drift and a decay. Cells sample the grid at their position and
+//! take minerals from it (see `exchange`).
+//!
+//! Bevy systems fetch data; the functions here change it. All step functions
+//! work on plain slices, so tests need no `App`.
+//!
+//! ## Step
+//!
+//! A step of `dt` seconds has equal sub-steps of at most `MAX_SUBSTEP` seconds.
+//! A sub-step of length `h` does these in order:
+//!
+//! 1. sources: add `emission x h`;
+//! 2. drift: move a fraction of each grid cell to its downwind neighbours;
+//! 3. diffusion: exchange a fraction of the difference with each neighbour;
+//! 4. decay: multiply by `exp(-decay x h)`.
+//!
+//! Drift and diffusion only move mass between grid cells, and the edge of the
+//! grid is closed (unless a channel opens its drift edges, so that a plume can
+//! leave the field). So with no sources and no decay, the total of a layer
+//! does not change. Levels never go below 0, because the moved fractions in each
+//! sub-step add up to at most 1.
+//!
+//! Ticks of 0.1 s, 0.2 s or 0.8 s all use sub-steps of 0.05 s, so the tick
+//! length does not change the result.
+
+use bevy::prelude::*;
+
+use crate::environment::Channel;
+
+/// Side of a grid cell in world units (pixels). The player radius is 30.
+/// **Playtest.**
+pub const CELL_SIZE: f32 = 32.0;
+
+/// Largest sub-step of `EnvGrid::step`, in seconds.
+pub const MAX_SUBSTEP: f32 = 0.05;
+
+/// Largest share of a grid cell that diffusion moves to one neighbour in one
+/// sub-step. With 4 neighbours, 0.25 keeps levels at 0 or more.
+const MAX_DIFFUSION_SHARE: f32 = 0.25;
+
+/// Width and height of a grid, in grid cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GridDims {
+    pub width: usize,
+    pub height: usize,
+}
+
+impl GridDims {
+    pub fn len(&self) -> usize {
+        self.width * self.height
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Index of the grid cell at column `x`, row `y`.
+    pub fn index(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+}
+
+/// How one channel moves in the grid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldParams {
+    /// Diffusion per second: the share of the level difference that goes to
+    /// each neighbour in one second. At most 5 (see `MAX_SUBSTEP`).
+    pub diffusion: f32,
+    /// Decay per second: the level falls like `exp(-decay x t)`.
+    pub decay: f32,
+    /// Drift in grid cells per second. Fast drift is capped at 1 cell per
+    /// sub-step.
+    pub drift: Vec2,
+    /// If true, drift carries content out of the grid at the downwind edges
+    /// (it is lost). If false, the edge is closed and content piles up there.
+    pub open_drift_edges: bool,
+}
+
+impl FieldParams {
+    /// No movement and no decay.
+    pub const STILL: FieldParams = FieldParams {
+        diffusion: 0.0,
+        decay: 0.0,
+        drift: Vec2::ZERO,
+        open_drift_edges: false,
+    };
+}
+
+// --- Pure step functions ---
+
+/// Number of equal sub-steps for a step of `dt` seconds.
+pub fn substep_count(dt: f32) -> u32 {
+    // The small margin stops float error from adding a step (0.2 / 0.05 > 4).
+    ((dt / MAX_SUBSTEP) - 1e-4).ceil().max(1.0) as u32
+}
+
+/// Adds `emission x h` to each grid cell.
+pub fn add_sources(layer: &mut [f32], emission: &[f32], h: f32) {
+    for (level, &rate) in layer.iter_mut().zip(emission) {
+        *level += rate * h;
+    }
+}
+
+/// Moves each grid cell's content downwind. `drift` is in grid cells per
+/// second. With `open_edges` false, content never leaves the grid: a cell at
+/// the edge keeps what would go out. With `open_edges` true, that content is
+/// lost.
+pub fn advect(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    drift: Vec2,
+    open_edges: bool,
+    h: f32,
+) {
+    let mut fx = drift.x.abs() * h;
+    let mut fy = drift.y.abs() * h;
+    let total = fx + fy;
+    if total <= 0.0 {
+        return;
+    }
+    if total > 1.0 {
+        fx /= total;
+        fy /= total;
+    }
+    let step_x: isize = if drift.x >= 0.0 { 1 } else { -1 };
+    let step_y: isize = if drift.y >= 0.0 { 1 } else { -1 };
+
+    scratch.clear();
+    scratch.resize(layer.len(), 0.0);
+    for y in 0..dims.height {
+        for x in 0..dims.width {
+            let i = dims.index(x, y);
+            let content = layer[i];
+            let mut stay = content;
+            let nx = x as isize + step_x;
+            if fx > 0.0 {
+                let inside = nx >= 0 && (nx as usize) < dims.width;
+                if inside || open_edges {
+                    let moved = content * fx;
+                    if inside {
+                        scratch[dims.index(nx as usize, y)] += moved;
+                    }
+                    stay -= moved;
+                }
+            }
+            let ny = y as isize + step_y;
+            if fy > 0.0 {
+                let inside = ny >= 0 && (ny as usize) < dims.height;
+                if inside || open_edges {
+                    let moved = content * fy;
+                    if inside {
+                        scratch[dims.index(x, ny as usize)] += moved;
+                    }
+                    stay -= moved;
+                }
+            }
+            scratch[i] += stay;
+        }
+    }
+    layer.copy_from_slice(scratch);
+}
+
+/// Diffusion. `share` is the part of the difference that each neighbour gets,
+/// at most `MAX_DIFFUSION_SHARE`. Edge cells have fewer neighbours, so the
+/// edge is closed.
+pub fn diffuse(layer: &mut [f32], scratch: &mut Vec<f32>, dims: GridDims, share: f32) {
+    let share = share.clamp(0.0, MAX_DIFFUSION_SHARE);
+    if share <= 0.0 {
+        return;
+    }
+    scratch.clear();
+    scratch.extend_from_slice(layer);
+    for y in 0..dims.height {
+        for x in 0..dims.width {
+            let i = dims.index(x, y);
+            let here = layer[i];
+            let mut flow = 0.0;
+            if x > 0 {
+                flow += layer[dims.index(x - 1, y)] - here;
+            }
+            if x + 1 < dims.width {
+                flow += layer[dims.index(x + 1, y)] - here;
+            }
+            if y > 0 {
+                flow += layer[dims.index(x, y - 1)] - here;
+            }
+            if y + 1 < dims.height {
+                flow += layer[dims.index(x, y + 1)] - here;
+            }
+            scratch[i] = here + share * flow;
+        }
+    }
+    layer.copy_from_slice(scratch);
+}
+
+/// Exact decay over `h` seconds.
+pub fn decay_layer(layer: &mut [f32], decay: f32, h: f32) {
+    if decay <= 0.0 {
+        return;
+    }
+    let keep = (-decay * h).exp();
+    for level in layer {
+        *level *= keep;
+    }
+}
+
+/// One step of `dt` seconds for one layer. See the module docs.
+pub fn step_layer(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    emission: &[f32],
+    params: &FieldParams,
+    dt: f32,
+) {
+    if dt <= 0.0 {
+        return;
+    }
+    let n = substep_count(dt);
+    let h = dt / n as f32;
+    for _ in 0..n {
+        add_sources(layer, emission, h);
+        advect(layer, scratch, dims, params.drift, params.open_drift_edges, h);
+        diffuse(layer, scratch, dims, params.diffusion * h);
+        decay_layer(layer, params.decay, h);
+    }
+}
+
+// --- Sampling ---
+
+/// The four grid cells around a world position, with bilinear weights that add
+/// up to 1. Grid cell `(x, y)` has its centre at `origin + (x + 0.5, y + 0.5) x
+/// CELL_SIZE`. Outside the grid the position is clamped to the nearest centre.
+pub fn bilinear_taps(dims: GridDims, origin: Vec2, pos: Vec2) -> [(usize, f32); 4] {
+    let max_x = dims.width.saturating_sub(1) as f32;
+    let max_y = dims.height.saturating_sub(1) as f32;
+    let gx = ((pos.x - origin.x) / CELL_SIZE - 0.5).clamp(0.0, max_x);
+    let gy = ((pos.y - origin.y) / CELL_SIZE - 0.5).clamp(0.0, max_y);
+    let x0 = gx.floor() as usize;
+    let y0 = gy.floor() as usize;
+    let x1 = (x0 + 1).min(dims.width.saturating_sub(1));
+    let y1 = (y0 + 1).min(dims.height.saturating_sub(1));
+    let tx = gx - x0 as f32;
+    let ty = gy - y0 as f32;
+    [
+        (dims.index(x0, y0), (1.0 - tx) * (1.0 - ty)),
+        (dims.index(x1, y0), tx * (1.0 - ty)),
+        (dims.index(x0, y1), (1.0 - tx) * ty),
+        (dims.index(x1, y1), tx * ty),
+    ]
+}
+
+/// The level of a layer at a world position (bilinear).
+pub fn sample_layer(layer: &[f32], dims: GridDims, origin: Vec2, pos: Vec2) -> f32 {
+    bilinear_taps(dims, origin, pos)
+        .iter()
+        .map(|&(i, w)| layer[i] * w)
+        .sum()
+}
+
+/// Removes up to `amount` from the grid cells around a world position, in
+/// proportion to the bilinear weights. A cell never goes below 0. Returns what
+/// was removed, so a caller can credit exactly that to a cell.
+pub fn take_from_layer(
+    layer: &mut [f32],
+    dims: GridDims,
+    origin: Vec2,
+    pos: Vec2,
+    amount: f32,
+) -> f32 {
+    if amount <= 0.0 {
+        return 0.0;
+    }
+    let mut taken = 0.0;
+    for (i, w) in bilinear_taps(dims, origin, pos) {
+        // Taps may repeat at the edge. Each one takes from the current level.
+        let part = (amount * w).min(layer[i]).max(0.0);
+        layer[i] -= part;
+        taken += part;
+    }
+    taken
+}
+
+// --- The resource ---
+
+/// The environment grid. One layer for each `Channel`.
+#[derive(Resource, Debug, Clone)]
+pub struct EnvGrid {
+    dims: GridDims,
+    /// World position of the lower-left corner of the grid.
+    origin: Vec2,
+    layers: [Vec<f32>; Channel::ALL.len()],
+    /// Emission per second for each grid cell and channel.
+    emission: [Vec<f32>; Channel::ALL.len()],
+    params: [FieldParams; Channel::ALL.len()],
+    scratch: Vec<f32>,
+}
+
+impl EnvGrid {
+    /// An empty grid of `width x height` grid cells. `origin` is the world
+    /// position of its lower-left corner.
+    pub fn new(width: usize, height: usize, origin: Vec2) -> Self {
+        let dims = GridDims { width, height };
+        let blank = || vec![0.0; dims.len()];
+        Self {
+            dims,
+            origin,
+            layers: [blank(), blank()],
+            emission: [blank(), blank()],
+            params: [FieldParams::STILL; Channel::ALL.len()],
+            scratch: Vec::new(),
+        }
+    }
+
+    /// A grid of `width x height` cells, centred on the world origin.
+    pub fn centered(width: usize, height: usize) -> Self {
+        let origin = -Vec2::new(width as f32, height as f32) * CELL_SIZE * 0.5;
+        Self::new(width, height, origin)
+    }
+
+    pub fn dims(&self) -> GridDims {
+        self.dims
+    }
+
+    pub fn origin(&self) -> Vec2 {
+        self.origin
+    }
+
+    /// Size of the grid in world units.
+    pub fn world_size(&self) -> Vec2 {
+        Vec2::new(self.dims.width as f32, self.dims.height as f32) * CELL_SIZE
+    }
+
+    /// World position of the centre of grid cell `(x, y)`.
+    pub fn cell_center(&self, x: usize, y: usize) -> Vec2 {
+        self.origin + (Vec2::new(x as f32, y as f32) + 0.5) * CELL_SIZE
+    }
+
+    pub fn params(&self, channel: Channel) -> &FieldParams {
+        &self.params[channel.index()]
+    }
+
+    pub fn set_params(&mut self, channel: Channel, params: FieldParams) {
+        self.params[channel.index()] = params;
+    }
+
+    /// The levels of one channel, row by row.
+    pub fn layer(&self, channel: Channel) -> &[f32] {
+        &self.layers[channel.index()]
+    }
+
+    /// The level of one channel in grid cell `(x, y)`.
+    pub fn level(&self, channel: Channel, x: usize, y: usize) -> f32 {
+        self.layers[channel.index()][self.dims.index(x, y)]
+    }
+
+    /// Sets the level of grid cell `(x, y)`. Negative levels become 0.
+    pub fn set_level(&mut self, channel: Channel, x: usize, y: usize, level: f32) {
+        let i = self.dims.index(x, y);
+        self.layers[channel.index()][i] = level.max(0.0);
+    }
+
+    /// The sum of one channel over the grid.
+    pub fn total(&self, channel: Channel) -> f32 {
+        self.layers[channel.index()].iter().sum()
+    }
+
+    /// The lowest level of one channel.
+    pub fn min_level(&self, channel: Channel) -> f32 {
+        self.layers[channel.index()]
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    /// Adds an emitter: `rate` per second in total, spread over the grid cells
+    /// within `radius` of `center`. The share of a cell falls off linearly
+    /// with distance. If no cell centre is within `radius`, the nearest cell
+    /// gets all of it.
+    pub fn add_emitter(&mut self, channel: Channel, center: Vec2, radius: f32, rate: f32) {
+        let mut weights: Vec<(usize, f32)> = Vec::new();
+        let mut nearest = (0, f32::INFINITY);
+        for y in 0..self.dims.height {
+            for x in 0..self.dims.width {
+                let distance = self.cell_center(x, y).distance(center);
+                let i = self.dims.index(x, y);
+                if distance < nearest.1 {
+                    nearest = (i, distance);
+                }
+                if distance < radius {
+                    weights.push((i, 1.0 - distance / radius));
+                }
+            }
+        }
+        if weights.is_empty() {
+            weights.push((nearest.0, 1.0));
+        }
+        let sum: f32 = weights.iter().map(|&(_, w)| w).sum();
+        let emission = &mut self.emission[channel.index()];
+        for (i, w) in weights {
+            emission[i] += rate * w / sum;
+        }
+    }
+
+    /// Total emission per second of one channel.
+    pub fn emission_total(&self, channel: Channel) -> f32 {
+        self.emission[channel.index()].iter().sum()
+    }
+
+    /// The level of a channel at a world position (bilinear).
+    pub fn sample(&self, channel: Channel, pos: Vec2) -> f32 {
+        sample_layer(&self.layers[channel.index()], self.dims, self.origin, pos)
+    }
+
+    /// Removes up to `amount` of a channel around a world position. Returns
+    /// what was removed.
+    pub fn take(&mut self, channel: Channel, pos: Vec2, amount: f32) -> f32 {
+        take_from_layer(
+            &mut self.layers[channel.index()],
+            self.dims,
+            self.origin,
+            pos,
+            amount,
+        )
+    }
+
+    /// Runs all channels for `dt` seconds.
+    pub fn step(&mut self, dt: f32) {
+        for channel in Channel::ALL {
+            let i = channel.index();
+            step_layer(
+                &mut self.layers[i],
+                &mut self.scratch,
+                self.dims,
+                &self.emission[i],
+                &self.params[i],
+                dt,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    const DIMS: GridDims = GridDims {
+        width: 12,
+        height: 9,
+    };
+
+    /// A layer with some uneven content.
+    fn lumpy() -> Vec<f32> {
+        (0..DIMS.len())
+            .map(|i| ((i * 37) % 11) as f32 * 3.0)
+            .collect()
+    }
+
+    fn sum(layer: &[f32]) -> f32 {
+        layer.iter().sum()
+    }
+
+    #[test]
+    fn diffusion_conserves_the_total_and_levels_out() {
+        let mut layer = lumpy();
+        let mut scratch = Vec::new();
+        let before = sum(&layer);
+        for _ in 0..500 {
+            diffuse(&mut layer, &mut scratch, DIMS, 0.2);
+        }
+        assert_abs_diff_eq!(sum(&layer), before, epsilon = before * 1e-4);
+        let mean = before / DIMS.len() as f32;
+        for level in &layer {
+            assert_abs_diff_eq!(*level, mean, epsilon = mean * 0.05);
+        }
+    }
+
+    #[test]
+    fn drift_conserves_the_total_and_moves_mass_downwind() {
+        let mut layer = vec![0.0; DIMS.len()];
+        layer[DIMS.index(2, 4)] = 100.0;
+        let mut scratch = Vec::new();
+        for _ in 0..40 {
+            advect(&mut layer, &mut scratch, DIMS, Vec2::new(2.0, 0.0), false, 0.1);
+        }
+        assert_abs_diff_eq!(sum(&layer), 100.0, epsilon = 1e-3);
+        let centre: f32 = (0..DIMS.width)
+            .map(|x| x as f32 * layer[DIMS.index(x, 4)])
+            .sum::<f32>()
+            / 100.0;
+        assert!(centre > 5.0, "mass moved to +x, centre at {centre}");
+        // The edge is closed: the right column holds what arrived.
+        assert!(layer[DIMS.index(DIMS.width - 1, 4)] > 1.0);
+    }
+
+    #[test]
+    fn open_edges_let_mass_leave_but_never_go_negative() {
+        let mut layer = vec![5.0; DIMS.len()];
+        let mut scratch = Vec::new();
+        for _ in 0..100 {
+            advect(&mut layer, &mut scratch, DIMS, Vec2::new(3.0, 1.0), true, 0.1);
+            assert!(layer.iter().all(|&v| v >= 0.0));
+        }
+        assert!(sum(&layer) < 1.0, "everything drifted out: {}", sum(&layer));
+    }
+
+    #[test]
+    fn fast_drift_is_capped_and_stays_positive() {
+        let mut layer = lumpy();
+        let before = sum(&layer);
+        let mut scratch = Vec::new();
+        advect(&mut layer, &mut scratch, DIMS, Vec2::new(-50.0, 30.0), false, 0.05);
+        assert_abs_diff_eq!(sum(&layer), before, epsilon = before * 1e-5);
+        assert!(layer.iter().all(|&v| v >= 0.0));
+    }
+
+    #[test]
+    fn no_sources_and_no_decay_conserve_the_total() {
+        let params = FieldParams {
+            diffusion: 2.0,
+            decay: 0.0,
+            drift: Vec2::new(1.5, -0.7),
+            open_drift_edges: false,
+        };
+        let mut layer = lumpy();
+        let emission = vec![0.0; DIMS.len()];
+        let mut scratch = Vec::new();
+        let before = sum(&layer);
+        for _ in 0..200 {
+            step_layer(&mut layer, &mut scratch, DIMS, &emission, &params, 0.2);
+        }
+        assert_abs_diff_eq!(sum(&layer), before, epsilon = before * 1e-4);
+    }
+
+    #[test]
+    fn levels_never_go_negative() {
+        // Strong diffusion and drift, a spike, and decay.
+        let params = FieldParams {
+            diffusion: 5.0,
+            decay: 0.3,
+            drift: Vec2::new(30.0, 30.0),
+            open_drift_edges: true,
+        };
+        let mut layer = vec![0.0; DIMS.len()];
+        layer[DIMS.index(5, 5)] = 1000.0;
+        let emission = vec![0.0; DIMS.len()];
+        let mut scratch = Vec::new();
+        for dt in [0.05, 0.2, 1.0, 3.0] {
+            for _ in 0..20 {
+                step_layer(&mut layer, &mut scratch, DIMS, &emission, &params, dt);
+                assert!(layer.iter().all(|&v| v >= 0.0 && v.is_finite()));
+            }
+        }
+    }
+
+    #[test]
+    fn decay_is_exact() {
+        let mut layer = vec![8.0; DIMS.len()];
+        let emission = vec![0.0; DIMS.len()];
+        let params = FieldParams {
+            decay: 0.5,
+            ..FieldParams::STILL
+        };
+        let mut scratch = Vec::new();
+        step_layer(&mut layer, &mut scratch, DIMS, &emission, &params, 2.0);
+        assert_abs_diff_eq!(layer[0], 8.0 * (-1.0f32).exp(), epsilon = 1e-4);
+    }
+
+    #[test]
+    fn source_and_decay_reach_the_balance() {
+        // One emitter, no movement: the level goes to emission / decay.
+        let mut layer = vec![0.0; 4];
+        let dims = GridDims {
+            width: 2,
+            height: 2,
+        };
+        let emission = vec![3.0, 0.0, 0.0, 0.0];
+        let params = FieldParams {
+            decay: 0.5,
+            ..FieldParams::STILL
+        };
+        let mut scratch = Vec::new();
+        for _ in 0..200 {
+            step_layer(&mut layer, &mut scratch, dims, &emission, &params, 0.2);
+        }
+        // Steady state of a source with exact decay: about E / k (the source
+        // is added before the decay in each sub-step, so a little above).
+        assert_abs_diff_eq!(layer[0], 6.0, epsilon = 0.2);
+    }
+
+    #[test]
+    fn tick_length_does_not_change_the_result() {
+        let params = FieldParams {
+            diffusion: 1.5,
+            decay: 0.1,
+            drift: Vec2::new(1.0, 0.5),
+            open_drift_edges: false,
+        };
+        let mut emission = vec![0.0; DIMS.len()];
+        emission[DIMS.index(3, 3)] = 5.0;
+        let run = |dt: f32, steps: usize| {
+            let mut layer = lumpy();
+            let mut scratch = Vec::new();
+            for _ in 0..steps {
+                step_layer(&mut layer, &mut scratch, DIMS, &emission, &params, dt);
+            }
+            layer
+        };
+        let one = run(1.0, 1);
+        for (dt, steps) in [(0.5, 2), (0.2, 5), (0.1, 10), (0.05, 20)] {
+            let other = run(dt, steps);
+            for (a, b) in one.iter().zip(&other) {
+                assert_abs_diff_eq!(*a, *b, epsilon = 1e-3 + a.abs() * 1e-4);
+            }
+        }
+    }
+
+    #[test]
+    fn sample_is_bilinear_and_exact_at_centres() {
+        let origin = Vec2::new(-100.0, -50.0);
+        let dims = GridDims {
+            width: 3,
+            height: 2,
+        };
+        let layer = vec![0.0, 10.0, 20.0, 30.0, 40.0, 50.0];
+        let centre = |x: usize, y: usize| {
+            origin + (Vec2::new(x as f32, y as f32) + 0.5) * CELL_SIZE
+        };
+        assert_abs_diff_eq!(sample_layer(&layer, dims, origin, centre(1, 0)), 10.0);
+        assert_abs_diff_eq!(sample_layer(&layer, dims, origin, centre(2, 1)), 50.0);
+        // Halfway between two centres in x, and in y.
+        let mid_x = (centre(0, 0) + centre(1, 0)) * 0.5;
+        assert_abs_diff_eq!(sample_layer(&layer, dims, origin, mid_x), 5.0, epsilon = 1e-4);
+        let mid_y = (centre(0, 0) + centre(0, 1)) * 0.5;
+        assert_abs_diff_eq!(sample_layer(&layer, dims, origin, mid_y), 15.0, epsilon = 1e-4);
+        // Outside the grid it clamps to the nearest centre.
+        assert_abs_diff_eq!(
+            sample_layer(&layer, dims, origin, Vec2::new(1e6, 1e6)),
+            50.0
+        );
+        assert_abs_diff_eq!(
+            sample_layer(&layer, dims, origin, Vec2::new(-1e6, -1e6)),
+            0.0
+        );
+    }
+
+    #[test]
+    fn take_removes_what_it_returns_and_never_goes_below_zero() {
+        let origin = Vec2::ZERO;
+        let dims = GridDims {
+            width: 3,
+            height: 3,
+        };
+        let mut layer = vec![1.0; 9];
+        let pos = Vec2::new(1.5, 1.5) * CELL_SIZE; // the centre cell
+        let before = sum(&layer);
+        let got = take_from_layer(&mut layer, dims, origin, pos, 0.4);
+        assert_abs_diff_eq!(got, 0.4, epsilon = 1e-5);
+        assert_abs_diff_eq!(sum(&layer), before - got, epsilon = 1e-5);
+        // Ask for more than the grid holds.
+        let got = take_from_layer(&mut layer, dims, origin, pos, 100.0);
+        assert!(got < 100.0);
+        assert!(layer.iter().all(|&v| v >= 0.0));
+        assert_eq!(take_from_layer(&mut layer, dims, origin, pos, -1.0), 0.0);
+    }
+
+    #[test]
+    fn emitter_adds_its_rate_and_the_grid_total_follows() {
+        let mut grid = EnvGrid::centered(10, 10);
+        grid.add_emitter(Channel::Minerals, Vec2::new(10.0, 10.0), 90.0, 4.0);
+        assert_abs_diff_eq!(grid.emission_total(Channel::Minerals), 4.0, epsilon = 1e-4);
+        // An emitter smaller than a grid cell still goes into one cell.
+        grid.add_emitter(Channel::Heat, Vec2::new(5.0, 5.0), 1.0, 2.0);
+        assert_abs_diff_eq!(grid.emission_total(Channel::Heat), 2.0, epsilon = 1e-4);
+        grid.step(1.0);
+        assert_abs_diff_eq!(grid.total(Channel::Minerals), 4.0, epsilon = 1e-3);
+        assert!(grid.min_level(Channel::Minerals) >= 0.0);
+    }
+
+    #[test]
+    fn grid_samples_a_set_level_at_the_cell_centre() {
+        let mut grid = EnvGrid::centered(4, 4);
+        grid.set_level(Channel::Heat, 2, 1, 9.0);
+        let pos = grid.cell_center(2, 1);
+        assert_abs_diff_eq!(grid.sample(Channel::Heat, pos), 9.0, epsilon = 1e-5);
+        assert_eq!(grid.sample(Channel::Minerals, pos), 0.0);
+        assert_eq!(grid.world_size(), Vec2::new(128.0, 128.0));
+    }
+}

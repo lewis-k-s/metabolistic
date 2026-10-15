@@ -11,7 +11,7 @@ use metabolistic3d::cell::{CellBlocks, is_alive};
 use metabolistic3d::environment::LocalEnvironment;
 use metabolistic3d::membrane::Membrane;
 use metabolistic3d::metabolism::{BlockTurnover, CurrencyPools};
-use metabolistic3d::molecules::{Currency, EnvironmentalCurrencyPools};
+use metabolistic3d::molecules::Currency;
 use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::proteins::{
     MembraneProtein, ProteinTarget, Proteome, QueueProtein, RecycleProtein, SynthesisQueue,
@@ -23,11 +23,9 @@ mod common;
 use common::*;
 
 /// A vent cell with the starter genome and proteome and small pools. The app
-/// has no outside pools, so the vent supply is the only food.
+/// has no grid, so the constant supply in `env` is the only food.
 fn vent_cell(env: LocalEnvironment) -> (App, Entity) {
     let mut app = MetabolisticApp::new_headless();
-    app.world_mut()
-        .remove_resource::<EnvironmentalCurrencyPools>();
     let cell = {
         let mut commands = app.world_mut().commands();
         spawn_local_player_cell(&mut commands, create_starter_genome()).1
@@ -129,8 +127,6 @@ fn two_pathways_share_an_input_in_proportion_to_their_enzymes() {
     // reducing power are plentiful. With many enzymes, the carbon demand in
     // one sub-step is more than the pool holds, so the blocks must share it.
     let mut app = MetabolisticApp::new_headless();
-    app.world_mut()
-        .remove_resource::<EnvironmentalCurrencyPools>();
     let cell = spawn_test_cell(
         &mut app,
         &[BlockKind::AminoAcidBiosynthesis, BlockKind::LipidMetabolism],

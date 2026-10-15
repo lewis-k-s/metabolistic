@@ -1,6 +1,6 @@
 //! # Internal pools (currencies)
 //!
-//! A cell keeps nine internal pools. See `docs/gameplay-roadmap.md`, section
+//! A cell keeps ten internal pools. See `docs/gameplay-roadmap.md`, section
 //! "Internal pools".
 //!
 //! | Group | Pools |
@@ -9,14 +9,15 @@
 //! | Carbon hub | Pyruvate, CarbonSkeletons (includes acetyl-CoA) |
 //! | Building | AminoAcids (proteins), Nucleotides (genome repair), Lipids (membrane repair and growth) |
 //! | Cofactor | Metals (Fe-S clusters) |
+//! | Intake | Minerals (the stock that transporters fill from the grid) |
 //! | Waste | Waste |
 //!
 //! Lipids have a stored form, `StoredLipids` (lipid beads), on the cell. Fat
 //! storage moves lipids between the pool and the store.
 //!
 //! - **CurrencyPools (Component)**: the pools of one cell.
-//! - **EnvironmentalCurrencyPools (Resource)**: global outside pools. The
-//!   spatial grid replaces them in milestone M2.
+//!
+//! Outside conditions are not pools: the spatial grid (`envgrid`) holds them.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -43,11 +44,14 @@ pub enum Currency {
     Metals,
     /// Metabolic byproducts. Toxic when they collect.
     Waste,
+    /// Reduced minerals (for example H2S) that the cell took in. Chemosynthesis
+    /// uses them. Transporters fill this pool from the `EnvGrid`.
+    Minerals,
 }
 
 impl Currency {
     /// All pools, in a fixed order.
-    pub const ALL: [Currency; 9] = [
+    pub const ALL: [Currency; 10] = [
         Currency::ATP,
         Currency::ReducingPower,
         Currency::Pyruvate,
@@ -57,6 +61,7 @@ impl Currency {
         Currency::Lipids,
         Currency::Metals,
         Currency::Waste,
+        Currency::Minerals,
     ];
 }
 
@@ -100,6 +105,7 @@ impl CurrencyPools {
             (Currency::Lipids, 20.0),
             (Currency::Metals, 5.0),
             (Currency::Waste, 0.0),
+            (Currency::Minerals, 10.0),
         ]);
         Self { pools }
     }
@@ -109,45 +115,6 @@ impl CurrencyPools {
 /// this store and the `Lipids` pool. Beads are not toxic.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
 pub struct StoredLipids(pub f32);
-
-/// Global outside pools. M2 replaces this resource with the spatial grid.
-#[derive(Resource, Default, Debug, Clone)]
-pub struct EnvironmentalCurrencyPools {
-    pub pools: HashMap<Currency, f32>,
-}
-
-impl EnvironmentalCurrencyPools {
-    /// The amount in an outside pool. A missing pool holds 0.
-    pub fn get(&self, currency: Currency) -> f32 {
-        self.pools.get(&currency).copied().unwrap_or(0.0)
-    }
-
-    /// Sets an outside pool. Negative amounts become 0.
-    pub fn set(&mut self, currency: Currency, amount: f32) {
-        self.pools.insert(currency, amount.max(0.0));
-    }
-
-    /// Adds `delta` to an outside pool (subtracts if negative).
-    pub fn modify(&mut self, currency: Currency, delta: f32) {
-        let current = self.get(currency);
-        self.set(currency, current + delta);
-    }
-
-    /// True if the outside pool holds at least `amount`.
-    pub fn can_consume(&self, currency: Currency, amount: f32) -> bool {
-        self.get(currency) >= amount
-    }
-
-    /// Start amounts for the outside pools.
-    pub fn with_defaults() -> Self {
-        let pools = HashMap::from([
-            (Currency::Waste, 0.0),
-            (Currency::CarbonSkeletons, 50.0),
-            (Currency::Pyruvate, 10.0),
-        ]);
-        Self { pools }
-    }
-}
 
 /// Free lipid level above which fat storage stores lipids as beads, to protect
 /// the cell from lipid toxicity. Below it, fat storage releases them.
@@ -160,15 +127,14 @@ impl Default for LipidToxicityThreshold {
     }
 }
 
-/// Adds the outside pools and the lipid toxicity threshold. Cell pools are
-/// components, not resources.
+/// Adds the lipid toxicity threshold. Cell pools are components, not
+/// resources.
 pub struct CurrencyPlugin;
 
 impl Plugin for CurrencyPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<EnvironmentalCurrencyPools>()
-            .init_resource::<LipidToxicityThreshold>();
+        app.init_resource::<LipidToxicityThreshold>();
 
-        debug!("CurrencyPlugin loaded: EnvironmentalCurrencyPools and LipidToxicityThreshold.");
+        debug!("CurrencyPlugin loaded: LipidToxicityThreshold.");
     }
 }

@@ -147,8 +147,6 @@ proptest! {
             (Currency::Waste, initial_waste),
         ]);
         no_maintenance(&mut app, cell);
-        // No uptake from the outside pools.
-        app.world_mut().remove_resource::<EnvironmentalCurrencyPools>();
         let initial = cell_snapshot(&app, cell);
         let waste_index = Currency::ALL.iter().position(|&c| c == Currency::Waste).unwrap();
 

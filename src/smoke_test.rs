@@ -2,17 +2,23 @@
 //!
 //! The app waits for `Loading` to open the menu by itself, then visits every
 //! screen and menu page, holds W on the Run screen, saves a screenshot per
-//! step, logs the run player's position, then exits. A panic or a missing
-//! resource fails the run. Screenshots go to `METABOLISTIC_SMOKE_DIR`
-//! (default `target/smoke`).
+//! step, logs the player cell's position and pools, then exits. A panic or a
+//! missing resource fails the run. So do these, on the Run screen: the player
+//! dies, or the player does not move while W is held. Screenshots go to
+//! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
 
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
 use std::path::PathBuf;
 
 use crate::GameState;
+use crate::cell::Cell;
+use crate::environment::{Channel, LocalEnvironment};
+use crate::membrane::Membrane;
+use crate::metabolism::CurrencyPools;
+use crate::molecules::Currency;
+use crate::player::{ControlledCell, LocalPlayer};
 use crate::screens::menu::MenuPage;
-use crate::screens::run::RunPlayer;
 
 /// Frames to stay in each state before the screenshot. The first frames compile
 /// shaders, so the first state gets more.
@@ -25,13 +31,18 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 5] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 6] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Run, None),
     (GameState::Manage, None),
+    (GameState::RunOver, None),
     (GameState::Menu, Some(MenuPage::Main)),
 ];
+
+/// The player must move at least this far (pixels) while W is held on the
+/// Run screen.
+const MIN_RUN_DISTANCE: f32 = 40.0;
 
 /// True when the smoke test is requested by environment variable.
 pub fn requested() -> bool {
@@ -51,6 +62,7 @@ pub fn plugin(app: &mut App) {
         frames_in_step: 0,
         loading_frames: 0,
         screenshot_requested_at: None,
+        run_start: None,
     })
     .add_systems(Update, drive_smoke_test)
     .add_systems(OnEnter(GameState::Run), hold_forward)
@@ -64,6 +76,8 @@ struct SmokeTest {
     frames_in_step: u32,
     loading_frames: u32,
     screenshot_requested_at: Option<u32>,
+    /// Where the player cell was when the Run screen settled.
+    run_start: Option<Vec2>,
 }
 
 #[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
@@ -73,7 +87,8 @@ fn drive_smoke_test(
     page: Option<Res<State<MenuPage>>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut next_page: ResMut<NextState<MenuPage>>,
-    players: Query<&Transform, With<RunPlayer>>,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    cells: Query<(&Transform, &CurrencyPools, &Membrane, &LocalEnvironment), With<Cell>>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -87,6 +102,18 @@ fn drive_smoke_test(
         return;
     }
     let (target, target_page) = SEQUENCE[smoke.step].clone();
+    // The sequence moves to `RunOver` by itself. Reaching it earlier means the
+    // player died.
+    let run_over_step = SEQUENCE
+        .iter()
+        .position(|(state, _)| *state == GameState::RunOver)
+        .expect("the sequence visits RunOver");
+    assert!(
+        *state.get() != GameState::RunOver || smoke.step >= run_over_step,
+        "smoke test: the player died (step {}, {:?})",
+        smoke.step,
+        target
+    );
     if *state.get() != target {
         next_state.set(target);
         return;
@@ -102,6 +129,14 @@ fn drive_smoke_test(
         None => format!("{target:?}"),
     };
     smoke.frames_in_step += 1;
+    // The start of the Run step: the world has just spawned. Skip the first
+    // frames, so that physics has the cell in place.
+    if target == GameState::Run && smoke.run_start.is_none() && smoke.frames_in_step >= 5 {
+        smoke.run_start = players
+            .iter()
+            .find_map(|controlled| cells.get(controlled.0).ok())
+            .map(|(transform, ..)| transform.translation.truncate());
+    }
 
     let hold = FRAMES_PER_STATE
         + if smoke.step == 0 {
@@ -115,8 +150,35 @@ fn drive_smoke_test(
 
     match smoke.screenshot_requested_at {
         None => {
-            for transform in &players {
-                info!("smoke test: {name} player at {:.1?}", transform.translation);
+            for (transform, pools, membrane, env) in players
+                .iter()
+                .filter_map(|controlled| cells.get(controlled.0).ok())
+            {
+                info!(
+                    "smoke test: {name} player at {:.1?} ATP {:.1} membrane {:.1} minerals {:.1} heat {:.1}",
+                    transform.translation.truncate(),
+                    pools.get(Currency::ATP),
+                    membrane.integrity,
+                    pools.get(Currency::Minerals),
+                    env.get(Channel::Heat),
+                );
+                if target == GameState::Run {
+                    let start = smoke.run_start.expect("smoke test: no player cell on the Run screen");
+                    let moved = start.distance(transform.translation.truncate());
+                    info!("smoke test: the player moved {moved:.1} px while W was held");
+                    assert!(
+                        moved >= MIN_RUN_DISTANCE,
+                        "smoke test: the player moved only {moved:.1} px with W held"
+                    );
+                }
+            }
+            if target == GameState::Run {
+                assert!(
+                    players
+                        .iter()
+                        .any(|controlled| cells.get(controlled.0).is_ok()),
+                    "smoke test: the Run screen has no player cell"
+                );
             }
             let path = smoke.dir.join(format!("{}-{name}.png", smoke.step));
             info!("smoke test: screenshot {}", path.display());

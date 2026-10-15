@@ -12,14 +12,20 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - **Library-based architecture**: Main logic in `src/lib.rs` with binary entry point in `src/main.rs`
 - **Dual-app pattern**: `MetabolisticApp::new()` for full game, `MetabolisticApp::new_headless()` for testing
 - **Plugin-based system**: Uses Bevy's plugin architecture for modular game systems
-- **Screens**: `GameState` has one variant per screen: `Loading` -> `Menu` -> `Run` / `Manage`. The game is 2D only.
+- **Screens**: `GameState` has one variant per screen: `Loading` -> `Menu` -> `Run` / `Manage` -> `RunOver`. The game is 2D only. The computed state `InRun` covers Run and Manage: the world (grid and player cell) lives exactly while `InRun` is active.
 - **ECS pattern**: Leverages Bevy's Entity-Component-System for game logic
 
 ### Key Modules
 - `blocks/`: Metabolic pathway implementations (fermentation, fat_storage, vesicle_export, genome)
-- `molecules.rs`: Currency system for ATP, NADH/NADPH, and metabolic precursors
+- `molecules.rs`: Currency system for the 9 internal pools
+- `envgrid.rs`: `EnvGrid`, the spatial grid (Heat, Minerals): pure diffusion, drift, source and decay steps, sampling
+- `exchange.rs`: grid <-> cell exchange (mineral uptake, heat damage, movement ATP cost) in the metabolic tick
+- `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
+- `level.rs`: the hand-built vent field
+- `run.rs`: death detection and `RunSummary`
+- `world/`: the run world (full only): grid texture, vents, player body (avian2d), camera, HUD
 - `metabolism/`: Core metabolic flow simulation and graph management
-- `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`), the shared 2D camera, and UI helpers
+- `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`, `run_over`), the shared 2D camera, and UI helpers
 - `player/`: The player-cell link (`LocalPlayer`, `ControlledCell`) and spawn helpers
 - `shared.rs`: Starter cell and screen navigation (`navigate`, a pure function)
 
@@ -44,7 +50,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 
 ### Smoke Test (full game)
-- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the run player's position, and exits. A panic fails the run (non-zero exit).
+- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
 - Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
 - Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
 

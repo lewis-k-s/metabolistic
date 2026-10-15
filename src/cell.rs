@@ -13,6 +13,9 @@
 //! - `CellSize`: sets membrane slots and maintenance cost
 //! - `Membrane`: membrane integrity
 //! - `LocalEnvironment`: outside channel levels at the cell
+//! - `Transform`: the position in the world (`EnvGrid` is sampled there)
+//! - `MoveInput`, `ThrustEffort`: the wanted direction, and the thrust used
+//! - `ExchangeStats`: minerals taken from the grid and used
 //!
 //! Each metabolic block is a separate entity with `OwnedBy(cell)`. The block
 //! sync system in `blocks` keeps `CellBlocks` in line with the genome. When a
@@ -24,9 +27,11 @@ use std::f32::consts::PI;
 
 use crate::blocks::genome::{BlockKind, Genome};
 use crate::environment::LocalEnvironment;
+use crate::exchange::ExchangeStats;
 use crate::membrane::Membrane;
 use crate::metabolism::{CurrencyPools, MetabolicGraph};
 use crate::molecules::{Currency, StoredLipids};
+use crate::movement::{MoveInput, ThrustEffort};
 use crate::proteins::{Proteome, SynthesisQueue};
 
 /// Marker for a cell entity. Adding it also adds the cell's data components.
@@ -42,9 +47,46 @@ use crate::proteins::{Proteome, SynthesisQueue};
     SynthesisQueue,
     CellSize,
     Membrane,
-    LocalEnvironment
+    LocalEnvironment,
+    Transform,
+    MoveInput,
+    ThrustEffort,
+    ExchangeStats,
+    DamageTaken
 )]
 pub struct Cell;
+
+/// Where membrane damage came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DamageSource {
+    /// Heat above `exchange::HEAT_DAMAGE_THRESHOLD`.
+    Heat,
+}
+
+/// Membrane damage that a cell took, by source, since it was spawned. It lets
+/// the run-over screen say what did the most harm.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
+pub struct DamageTaken {
+    pub heat: f32,
+}
+
+impl DamageTaken {
+    /// Records `amount` of damage from `source`.
+    pub fn add(&mut self, source: DamageSource, amount: f32) {
+        match source {
+            DamageSource::Heat => self.heat += amount.max(0.0),
+        }
+    }
+
+    /// The source that did the most damage. `None` if there was none.
+    pub fn main_source(&self) -> Option<DamageSource> {
+        let all = [(DamageSource::Heat, self.heat)];
+        all.into_iter()
+            .filter(|&(_, amount)| amount > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(source, _)| source)
+    }
+}
 
 /// The metabolic block entities that a cell owns, keyed by block kind.
 #[derive(Component, Default, Debug, Clone)]
@@ -73,10 +115,11 @@ impl CellBlocks {
 pub struct OwnedBy(pub Entity);
 
 /// Size of a cell. A bigger cell has more membrane area for membrane proteins,
-/// but it costs more ATP to maintain. (In M2 it also sets mass and drag.)
+/// but it costs more ATP to maintain. It also sets mass and drag (see
+/// `movement`).
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct CellSize {
-    /// Radius in world units.
+    /// Radius in size units. One unit is `movement::PIXELS_PER_SIZE_UNIT` pixels.
     pub radius: f32,
 }
 
@@ -102,9 +145,35 @@ pub fn maintenance_atp_per_sec(size: &CellSize) -> f32 {
     MAINTENANCE_ATP_PER_AREA * PI * size.radius.max(0.0).powi(2)
 }
 
+/// ATP at or below this counts as 0. In a cold zone, the grid still gives a
+/// tiny heat and tiny chemosynthesis, so ATP stays a little above 0 and never
+/// reaches it exactly.
+pub const STARVATION_ATP: f32 = 0.01;
+
+/// Why a cell died.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeathCause {
+    /// ATP reached 0.
+    Starved,
+    /// Membrane integrity reached 0 (for example from heat).
+    MembraneBroken,
+}
+
+/// The cause of death, or `None` while the cell is alive. A cell is alive while
+/// it has ATP and an intact membrane. If both fail, the membrane counts.
+pub fn death_cause(pools: &CurrencyPools, membrane: &Membrane) -> Option<DeathCause> {
+    if membrane.integrity <= 0.0 {
+        Some(DeathCause::MembraneBroken)
+    } else if pools.get(Currency::ATP) <= STARVATION_ATP {
+        Some(DeathCause::Starved)
+    } else {
+        None
+    }
+}
+
 /// A cell is alive while it has ATP and an intact membrane.
 pub fn is_alive(pools: &CurrencyPools, membrane: &Membrane) -> bool {
-    pools.get(Currency::ATP) > 0.0 && membrane.integrity > 0.0
+    death_cause(pools, membrane).is_none()
 }
 
 /// Spawns a cell with the given genome and pools.
@@ -132,6 +201,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn damage_taken_names_the_main_source() {
+        let mut taken = DamageTaken::default();
+        assert_eq!(taken.main_source(), None);
+        taken.add(DamageSource::Heat, 3.0);
+        taken.add(DamageSource::Heat, -5.0);
+        assert_eq!(taken.main_source(), Some(DamageSource::Heat));
+        assert_eq!(taken.heat, 3.0);
+    }
+
+    #[test]
     fn bigger_cells_have_more_slots_and_cost_more() {
         let small = CellSize { radius: 1.0 };
         let big = CellSize { radius: 2.0 };
@@ -152,5 +231,19 @@ mod tests {
             ..default()
         };
         assert!(!is_alive(&pools, &broken));
+    }
+
+    #[test]
+    fn death_cause_names_the_failure() {
+        let mut pools = CurrencyPools::default();
+        let membrane = Membrane::default();
+        assert_eq!(death_cause(&pools, &membrane), Some(DeathCause::Starved));
+        pools.set(Currency::ATP, 1.0);
+        assert_eq!(death_cause(&pools, &membrane), None);
+        let broken = Membrane {
+            integrity: 0.0,
+            ..default()
+        };
+        assert_eq!(death_cause(&pools, &broken), Some(DeathCause::MembraneBroken));
     }
 }
