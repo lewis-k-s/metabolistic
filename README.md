@@ -8,7 +8,7 @@ Metabolistic3D simulates cellular metabolism through interconnected metabolic bl
 
 ### Key Features
 
-- **3D Environment**: Navigate through cellular landscapes with realistic physics
+- **Evolution Roguelite**: Each run, your cell evolves its metabolism along real evolutionary pathways
 - **Metabolic Simulation**: Manage complex metabolic pathways including glycolysis, respiration, and photosynthesis
 - **Resource Management**: Balance ATP, NADH/NADPH, and other cellular currencies
 - **Dynamic Gameplay**: Adapt to different environmental conditions and resource availability
@@ -63,7 +63,7 @@ Choose the build that best fits your needs:
   ```bash
   cargo run
   ```
-  Includes debug tools, hot reloading, and inspector (F12).
+  Includes debug tools, hot reloading, and inspector (F1).
 
 - **Web Build** (Advanced users):
   ```bash
@@ -76,33 +76,27 @@ Choose the build that best fits your needs:
 The development build includes:
 - Hot asset reloading
 - Debug tools and inspector
-- Physics debugging visualization
 - Developer console
 
 ## How to Play
 
-### Basic Controls
-- **Movement**: `WASD` or arrow keys to move your character
-- **Camera**: Mouse to look around and pan the camera
-- **Interact**: Left-click to interact with metabolic blocks
-- **Menu Navigation**: `Esc` to return to main menu
+The game is being rebuilt as a 2D evolution roguelite. The screens exist, but
+they are placeholders.
 
-### Game Modes
-- **3D Exploration**: Navigate the cellular environment in first person
-- **2D Flowmap**: Press `2` to view metabolic pathways as a flow diagram  
-- **Genome Editor**: Press `3` to modify and visualize the cell's genome
-- **Main Menu**: Press `1` or `Esc` to return to the start screen
+### Screens
+- **Loading**: Loads assets, then opens the menu.
+- **Menu**: Main menu (Run, Manage, Settings, Quit) and its submenus.
+- **Run**: The main loop. Your cell moves and interacts with the world.
+- **Manage**: The metabolism editor. View and edit your cell's metabolic diagram.
 
-### Gameplay Basics
-1. **Start in 3D mode** to explore the cellular environment
-2. **Manage resources** by balancing ATP, NADH, and other metabolic currencies
-3. **Activate metabolic blocks** to produce energy and maintain cellular function
-4. **Use the genome editor** to control which metabolic pathways are active
-5. **Monitor the 2D flowmap** to understand resource flows and bottlenecks
+### Controls
+- **Movement** (Run): `WASD`
+- **Switch Run / Manage**: `Tab`
+- **Back to the menu**: `Esc`
 
 ### Development Mode (Contributors Only)
-- **Inspector**: `F12` to open debug tools and entity inspection
-- **Physics Debug**: Collision boundaries and physics visualization
+- **Inspector**: `F1` to open debug tools and entity inspection
+- **UI Debug**: `` ` `` to show UI node outlines
 - **Hot Reload**: Assets automatically refresh during development
 
 ## Troubleshooting
@@ -138,5 +132,4 @@ The development build includes:
 ### Built With
 
 - **[Bevy Engine](https://bevyengine.org/)**: Modern game engine with ECS architecture
-- **[Avian3D](https://github.com/Jondolf/avian)**: Physics simulation
 - **Rust**: High-performance systems programming language

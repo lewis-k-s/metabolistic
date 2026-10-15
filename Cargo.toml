@@ -24,10 +24,6 @@ log = { version = "*", features = ["max_level_debug", "release_max_level_error"]
 # Compile low-severity logs out of web builds for performance.
 tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }
 
-# Physics and input mapping are only used by the graphical scenes.
-avian3d = { version = "0.7", optional = true }
-leafwing-input-manager = { version = "0.21", optional = true }
-
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -47,13 +43,11 @@ default = [
   "full",
 ]
 
-# Full build with graphics, audio, physics, and the egui inspector
+# Full build with graphics, audio, UI, and the egui inspector
 full = [
   "bevy/default",
   "bevy/bevy_gizmos",
   "bevy/bevy_ui_debug",
-  "dep:avian3d",
-  "dep:leafwing-input-manager",
   "dep:bevy-inspector-egui",
   "dep:bevy_egui",
   "dep:egui",

@@ -1,5 +1,3 @@
-#[cfg(feature = "full")]
-use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
@@ -15,26 +13,28 @@ pub mod tui;
 
 // Graphical modules: only in `full` builds.
 #[cfg(feature = "full")]
-pub mod camera;
-#[cfg(feature = "full")]
 pub mod debug;
 #[cfg(feature = "full")]
 pub mod dev_tools;
 #[cfg(feature = "full")]
 pub mod inspector;
 #[cfg(feature = "full")]
-pub mod scenes;
+pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
 
-/// Game states for scene management
+/// The top-level screens. See `screens` for each one.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum GameState {
+    /// Load assets, then open the menu.
     #[default]
-    MainMenu,
-    Scene3D,
-    Scene2D,
-    GenomeEditing,
+    Loading,
+    /// Main menu and its submenus (settings).
+    Menu,
+    /// The main loop: the player's cell moves and interacts with the world.
+    Run,
+    /// Metabolism editor: view and edit the cell's metabolic diagram.
+    Manage,
 }
 
 /// Main app configuration
@@ -46,9 +46,13 @@ impl MetabolisticApp {
 
         #[cfg(feature = "full")]
         {
-            app.add_plugins(DefaultPlugins)
-                .add_plugins(PhysicsPlugins::default())
-                .add_plugins(PhysicsDebugPlugin);
+            app.add_plugins(DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Metabolistic".into(),
+                    ..default()
+                }),
+                ..default()
+            }));
         }
 
         app // State management
@@ -67,19 +71,8 @@ impl MetabolisticApp {
             app.add_plugins(dev_tools::plugin)
                 .add_plugins(debug::plugin)
                 .add_plugins(inspector::plugin)
-                // Camera systems that work with any scene type
-                .add_plugins(camera::CameraSystemsPlugin)
-                // Scene-specific plugins
-                .add_plugins(scenes::menu::MainMenuPlugin)
-                .add_plugins(scenes::scene_3d::Scene3DPlugin)
-                .add_plugins(scenes::scene_2d::Scene2DPlugin)
-                .add_plugins(scenes::genome_edit::GenomeEditPlugin)
-                // Shared systems that run in multiple states
-                .add_systems(Startup, shared::spawn_starter_cell)
-                .add_systems(
-                    Update,
-                    (shared::state_transition_input, shared::genome_demo_system),
-                );
+                .add_plugins(screens::plugin)
+                .add_systems(Startup, shared::spawn_starter_cell);
             if smoke_test::requested() {
                 app.add_plugins(smoke_test::plugin);
             }

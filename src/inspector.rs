@@ -80,10 +80,6 @@ fn inspector_ui(world: &mut World) {
             // equivalent to `WorldInspectorPlugin`
             bevy_inspector_egui::bevy_inspector::ui_for_world(world, ui);
 
-            egui::CollapsingHeader::new("Materials").show(ui, |ui| {
-                bevy_inspector_egui::bevy_inspector::ui_for_assets::<StandardMaterial>(world, ui);
-            });
-
             ui.heading("Entities");
             bevy_inspector_egui::bevy_inspector::ui_for_entities(world, ui);
         });

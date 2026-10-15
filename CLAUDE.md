@@ -12,17 +12,16 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - **Library-based architecture**: Main logic in `src/lib.rs` with binary entry point in `src/main.rs`
 - **Dual-app pattern**: `MetabolisticApp::new()` for full game, `MetabolisticApp::new_headless()` for testing
 - **Plugin-based system**: Uses Bevy's plugin architecture for modular game systems
-- **State management**: Implements game states (MainMenu, Scene3D, Scene2D, GenomeEditing) with proper transitions
+- **Screens**: `GameState` has one variant per screen: `Loading` -> `Menu` -> `Run` / `Manage`. The game is 2D only.
 - **ECS pattern**: Leverages Bevy's Entity-Component-System for game logic
 
 ### Key Modules
 - `blocks/`: Metabolic pathway implementations (fermentation, fat_storage, vesicle_export, genome)
 - `molecules.rs`: Currency system for ATP, NADH/NADPH, and metabolic precursors
 - `metabolism/`: Core metabolic flow simulation and graph management
-- `scenes/`: Different game views (3D world, 2D flowmap, genome editor, menu)
-- `player/`: Player controller and movement systems
-- `camera.rs`: Camera management across different scenes
-- `shared.rs`: Common resources and state transition systems
+- `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`), the shared 2D camera, and UI helpers
+- `player/`: The player-cell link (`LocalPlayer`, `ControlledCell`) and spawn helpers
+- `shared.rs`: Starter cell and screen navigation (`navigate`, a pure function)
 
 ### Plugin Architecture
 The app uses a plugin-based architecture where each major system is implemented as a Bevy plugin:
@@ -32,12 +31,12 @@ The app uses a plugin-based architecture where each major system is implemented 
 - `FatStoragePlugin`: Manages lipid storage and fatty acid metabolism
 - `VesicleExportPlugin`: Handles cellular export mechanisms
 - `MetabolicFlowPlugin`: Core metabolic simulation engine and graph management
-- Scene-specific plugins for different game states
+- `screens::plugin`: the four screens. Each screen tags its entities with `DespawnOnExit(GameState::X)`; menu pages use the `MenuPage` sub-state the same way
 
 ## Development Commands
 
 ### Build Commands
-- **Toolchain**: Rust 1.96.1, pinned in `rust-toolchain.toml` (Bevy 0.19 needs 1.95+). Bevy 0.20 exists, but avian3d, leafwing-input-manager and bevy-inspector-egui do not support it yet.
+- **Toolchain**: Rust 1.96.1, pinned in `rust-toolchain.toml` (Bevy 0.19 needs 1.95+). Bevy 0.20 exists, but bevy-inspector-egui does not support it yet.
 - **Development build**: `cargo run` (includes hot reloading, debug tools)
 - **Optimized build**: `cargo run --profile release-native`
 - **Web-optimized build**: `cargo build --release`
@@ -45,9 +44,9 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 
 ### Smoke Test (full game)
-- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, visits every `GameState`, holds W in the 3D scene, saves one screenshot per state to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the ball's position, and exits. A panic fails the run (non-zero exit).
-- Use it after engine upgrades or changes to scenes, cameras, physics or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
-- Expected noise: bevy_egui "Bindless textures are not yet supported on metal", bevy_gltf "Unknown vertex attribute TEXCOORD_2", and a winit "Skipped event Destroyed" on exit.
+- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the run player's position, and exits. A panic fails the run (non-zero exit).
+- Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
+- Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
 
 ### Testing
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)
@@ -59,19 +58,18 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
-- `full` (default): Complete build with graphics, audio, physics, and egui inspector
+- `full` (default): Complete build with graphics, audio, UI, and egui inspector
 - `headless`: Simulation only (no graphics, audio, UI, physics). Always use with `--no-default-features`.
 - `tui`: Opt-in terminal monitor for cell state. Not in `full`, because it takes over the terminal. It turns itself off when stdout is not a terminal.
 - `dev`: Development features with dynamic linking and dev tools
 - `dev_native`: Development features plus file watching for hot reload
 
-Graphical modules (`camera`, `scenes`, `dev_tools`, `debug`, `inspector`, and the physics player in `player`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
+Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `smoke_test`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
 
 ### Development Tools (In-Game)
-- **Inspector**: F12 to open runtime debugging and inspection tools
-- **Physics Debug**: Enabled by default in development builds
-- **State Transitions**: Press number keys to switch between game states
-- **Genome Editor**: Press `3` to open circular genome visualization
+- **Inspector**: F1 to open runtime debugging and inspection tools
+- **UI Debug**: `` ` `` (backquote) toggles UI node outlines
+- **Screen Navigation**: `Tab` switches Run and Manage; `Esc` returns to the menu
 
 ## Code Patterns
 
@@ -84,7 +82,7 @@ Graphical modules (`camera`, `scenes`, `dev_tools`, `debug`, `inspector`, and th
 - Systems are organized by functionality in plugin modules
 - Use `Startup` schedule for initialization
 - Use `Update` schedule for per-frame logic
-- State-specific systems use run conditions like `.run_if(in_state(GameState::Scene3D))`
+- State-specific systems use run conditions like `.run_if(in_state(GameState::Run))`
 
 ### ECS Query Patterns (PREFERRED)
 When working with cell data, prefer ECS query patterns over world-querying:

@@ -1,8 +1,5 @@
+use crate::GameState;
 use crate::player::spawn_local_player_cell;
-#[cfg(feature = "full")]
-use crate::player::{ControlledCell, LocalPlayer};
-#[cfg(feature = "full")]
-use crate::{GameState, cell::Cell};
 use crate::{blocks::genome, metabolism::CurrencyPools};
 use bevy::prelude::*;
 
@@ -12,69 +9,49 @@ pub fn spawn_starter_cell(mut commands: Commands) {
     commands.entity(cell).insert(CurrencyPools::with_defaults());
 }
 
-/// Input system for state transitions
-#[cfg(feature = "full")]
-pub fn state_transition_input(
-    input: Res<ButtonInput<KeyCode>>,
-    current_state: Res<State<GameState>>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    // Press '1' for 3D scene
-    if input.just_pressed(KeyCode::Digit1) && current_state.get() != &GameState::Scene3D {
-        next_state.set(GameState::Scene3D);
-        info!("Switching to 3D scene");
-    }
+/// Screen-level navigation commands, independent of the keys bound to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Navigation {
+    /// Return to the menu.
+    Back,
+    /// Switch between the Run and Manage screens.
+    ToggleManage,
+}
 
-    // Press '2' for 2D scene
-    if input.just_pressed(KeyCode::Digit2) && current_state.get() != &GameState::Scene2D {
-        next_state.set(GameState::Scene2D);
-        info!("Switching to 2D scene");
-    }
-
-    // Press '3' for genome editing scene
-    if input.just_pressed(KeyCode::Digit3) && current_state.get() != &GameState::GenomeEditing {
-        next_state.set(GameState::GenomeEditing);
-        info!("Opening genome editor");
-    }
-
-    // Press 'Escape' for main menu
-    if input.just_pressed(KeyCode::Escape) && current_state.get() != &GameState::MainMenu {
-        next_state.set(GameState::MainMenu);
-        info!("Returning to main menu");
+/// The screen that `nav` leads to from `current`, if any.
+pub fn navigate(current: &GameState, nav: Navigation) -> Option<GameState> {
+    match (current, nav) {
+        (GameState::Run | GameState::Manage, Navigation::Back) => Some(GameState::Menu),
+        (GameState::Run, Navigation::ToggleManage) => Some(GameState::Manage),
+        (GameState::Manage, Navigation::ToggleManage) => Some(GameState::Run),
+        _ => None,
     }
 }
 
-/// Demo system to showcase genome functionality (works in all states).
-/// Edits the genome of the local player's cell.
-#[cfg(feature = "full")]
-pub fn genome_demo_system(
-    input: Res<ButtonInput<KeyCode>>,
-    local_players: Query<&ControlledCell, With<LocalPlayer>>,
-    mut genomes: Query<&mut genome::Genome, With<Cell>>,
-) {
-    let Some(mut genome) = local_players
-        .single()
-        .ok()
-        .and_then(|controlled| genomes.get_mut(controlled.0).ok())
-    else {
-        return;
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Press 'G' to express sugar catabolism gene
-    if input.just_pressed(KeyCode::KeyG) {
-        genome.express_gene(genome::BlockKind::SugarCatabolism);
-        info!("Expressed SugarCatabolism gene!");
+    #[test]
+    fn back_returns_to_menu_from_play_screens() {
+        assert_eq!(
+            navigate(&GameState::Run, Navigation::Back),
+            Some(GameState::Menu)
+        );
+        assert_eq!(
+            navigate(&GameState::Manage, Navigation::Back),
+            Some(GameState::Menu)
+        );
+        assert_eq!(navigate(&GameState::Menu, Navigation::Back), None);
+        assert_eq!(navigate(&GameState::Loading, Navigation::Back), None);
     }
 
-    // Press 'H' to silence fermentation gene
-    if input.just_pressed(KeyCode::KeyH) {
-        genome.silence_gene(genome::BlockKind::Fermentation);
-        info!("Silenced Fermentation gene!");
-    }
-
-    // Press 'J' to add a new gene
-    if input.just_pressed(KeyCode::KeyJ) {
-        genome.add_gene(genome::BlockKind::LightCapture);
-        info!("Added LightCapture gene to genome!");
+    #[test]
+    fn toggle_switches_run_and_manage_only() {
+        let toggle = Navigation::ToggleManage;
+        assert_eq!(navigate(&GameState::Run, toggle), Some(GameState::Manage));
+        assert_eq!(navigate(&GameState::Manage, toggle), Some(GameState::Run));
+        assert_eq!(navigate(&GameState::Menu, toggle), None);
+        assert_eq!(navigate(&GameState::Loading, toggle), None);
     }
 }

@@ -7,7 +7,7 @@ This file provides essential context for cloud-based LLM agents working on the M
 **Metabolistic3D** is a 3D cellular metabolism simulation game built with the Bevy engine. It simulates real cellular biochemistry through interconnected metabolic blocks that mirror biological processes like glycolysis, respiration, and photosynthesis.
 
 ### Core Concept
-- Players manage metabolic pathways in a 3D cellular environment
+- An evolution roguelite: players evolve a cell's metabolism between and during runs
 - Balance energy production (ATP), reducing power (NADH/NADPH), and resource management
 - Educational gameplay that teaches real biochemistry concepts
 - Self-contained metabolic blocks with minimal cross-talk via generic "currencies"
@@ -15,8 +15,7 @@ This file provides essential context for cloud-based LLM agents working on the M
 ## Technology Stack
 
 - **Engine**: [Bevy 0.19](https://bevyengine.org/) - Modern ECS-based game engine (Rust 1.96.1, pinned in `rust-toolchain.toml`)
-- **Physics**: [Avian3D 0.7](https://github.com/Jondolf/avian) - 3D physics simulation
-- **Input**: [Leafwing Input Manager 0.21](https://github.com/Leafwing-Studios/leafwing-input-manager)
+- **Presentation**: 2D only (Bevy UI and `Mesh2d`); no physics engine yet
 - **Debug/Dev Tools**: 
   - bevy-inspector-egui 0.37 (runtime inspection)
   - bevy_egui 0.40 (immediate mode GUI; pinned by bevy-inspector-egui)
@@ -38,19 +37,20 @@ This file provides essential context for cloud-based LLM agents working on the M
 ### Directory Structure
 ```
 src/
-├── main.rs           # Application entry point and setup
-├── lib.rs            # Library root
-├── camera.rs         # Camera systems and controls
-├── debug.rs          # Debug utilities and visualization
-├── dev_tools.rs      # Development tools and helpers
-├── inspector.rs      # Runtime inspection systems
-├── molecules.rs      # Molecular entities and chemistry systems
-├── shared.rs         # Shared utilities and components
-├── blocks/           # Primary metabolistic processing blocks
-    ├── genome.rs     # Manages the cell genome (state of expression of other blocks)
-├── player/           # Player controller and movement systems
-├── scenes/           # Scene management (menu, 2D, 3D scenes)
-└── terrain/          # Terrain generation and management
+├── main.rs           # Application entry point
+├── lib.rs            # Library root, GameState, app setup
+├── cell.rs           # Cell entity and its blocks
+├── debug.rs          # Frame-time diagnostics
+├── dev_tools.rs      # UI debug overlay toggle
+├── inspector.rs      # egui world inspector (F1)
+├── molecules.rs      # Currencies and molecule constants
+├── shared.rs         # Starter cell, screen navigation
+├── smoke_test.rs     # Scripted visit of every screen
+├── blocks/           # Metabolic blocks; genome.rs controls their expression
+├── metabolism/       # Flux solver and the metabolic tick
+├── player/           # Player-cell link and spawn helpers
+├── screens/          # loading, menu, run, manage
+└── tui/              # Opt-in terminal monitor
 ```
 
 ## Key Development Patterns
@@ -106,13 +106,13 @@ Core metabolic currencies that flow between blocks:
 1. Define components for the block's state and properties
 2. Create systems for the block's internal logic
 3. Implement currency input/output systems
-4. Add visual representation (3D model, particle effects)
+4. Add a visual representation on the Manage screen
 5. Create interaction systems for player control
 6. Add to the appropriate plugin structure
 
 ### Debugging and Development
-- Use `F12` to open inspector in development builds
-- Enable physics debugging with gizmos
+- Use `F1` to open the inspector in development builds
+- Use `` ` `` to toggle the UI debug overlay
 - Use `tracing` macros for logging (`info!`, `warn!`, `error!`)
 - Leverage hot reloading for rapid iteration
 
