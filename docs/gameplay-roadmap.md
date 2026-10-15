@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 and M4 are done. M5 is done (not committed yet). Next: tune the vent slice, then M6.
+merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done (not committed yet). Next: tune the vent slice, then M7.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -178,7 +178,7 @@ you must stay near water, the world you left behind.
 
 ## 3. Current code compared with the design
 
-Updated after M5.
+Updated after M6.
 
 | Area | Now | Still to do |
 |---|---|---|
@@ -188,12 +188,12 @@ Updated after M5.
 | Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size, editor UI | - |
 | Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | Mutation from ROS |
 | Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
-| Run screen | The player is a `Cell` with a body; vent field level with NPCs, walls and a gate cell; HUD; run-over screen with the cause of death or "Victory" | - |
+| Run screen | The player is a `Cell` with a body; the level comes from the stage's `LevelDef`; HUD with stage name and seed; run-over screen with the cause of death or "Run complete", and the new codex genes | - |
 | NPCs and world | NPC `Cell`s on a slow tick (every 4th), steering, engulf, symbiont exchange, food, metals, viruses, toxin hits, walls with pores, lysis, gate cell | Fusion protein, immune proteins |
 | Physics | avian2d, 64 Hz, no interpolation | - |
 | Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | A final light colour; a sprite for the shelter disc |
 | Manage screen | Editor: genome, enzymes, membrane slots, queue with time to finish, action slots | - |
-| Run structure | `InRun` state covers Run and Manage; death, victory and restart | Levels, stage sequence, codex (M6) |
+| Run structure | `RunState` (seed, stage, genes taken, carry), `Stage` + `LevelDef`, Prepare screen with a codex budget, Stage complete screen, `Codex` saved as JSON, seeded vent layout with a validator | Levels for shallow water and land (M7, M8) |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
 `flowmap_design.md`. Mitochondria now come from endosymbiosis (the shallow
@@ -432,7 +432,60 @@ Original plan:
 Done when: a full vent run can be won or lost. This is the **vertical
 slice**. Tune it before we build more stages.
 
-### M6. Run structure
+### M6. Run structure - done (not committed yet)
+
+Notes:
+- **Stage data.** `LevelDef` (`level.rs`) holds everything a level needs: grid
+  size and field physics (`FieldKind`), vents, shafts, UV fraction, shelters,
+  chamber, wall lines with pores, NPC slots, viruses, food and metal zones, gate
+  position and gene, pigment prey centre, start. The old constants stay as the
+  base layout (`LevelDef::vents_base()`), so M2-M5 tests did not change.
+  `Stage` (`stage.rs`) is Vents, ShallowWater, Land; only `Vents` has a level
+  (`Stage::level_def(run_seed)`). `CurrentLevel(LevelDef)` is a resource while a
+  stage runs; `gate_system` reads the gate gene from it. To add a stage (M7, M8):
+  return a `LevelDef` for it, and add a `FieldKind` if its physics differ.
+- **Run state** (`run.rs`). `RunState { active, seed, stage_index, loadout,
+  genes_taken, carry, new_genes }`. Winning a stage (after the victory clip):
+  the genome (mutated genes repaired), proteome and action bar are copied
+  (`Carry`); if the next stage has a level, the game goes to the new state
+  `GameState::StageComplete` ("Stage complete", gene taken, Continue). `InRun` is
+  left and entered again, so the world is rebuilt from the new `LevelDef`. Pools
+  are the starter values, membrane and genome integrity are full. If there is
+  no next level, `RunSummary::run_complete` is set and `RunOver` shows "Run
+  complete" and "(More stages coming.)". Entering `InRun` with no run begun (the
+  Manage button, the smoke test) begins a default run.
+- **Codex** (`codex.rs`). `Codex` (set of `BlockKind`) in `codex.json`. Directory:
+  `METABOLISTIC_SAVE_DIR`, else the user data dir (computed, no new crate).
+  Genes are tracked by message: `EngulfEvent` (player engulfs), new
+  `VirusInfection`, and `GateWon` (now has the gene). They go into the codex on
+  `OnEnter(RunOver)` and when the player leaves a run for the menu. A broken file
+  gives an empty codex and a warning (the next save overwrites it). The headless
+  app has `CodexStore { path: None }` (memory only); tests that save use a temp
+  dir. The smoke test saves in `target/smoke/save`.
+- **Prepare** (`prepare.rs`, `screens/prepare.rs`). Menu "Start" goes to Prepare;
+  "New run" on the run-over screen too. Budget 2 points; a gene with a block costs
+  1; `LightCapture` (no block) costs 0, is listed in grey and cannot be chosen;
+  starter genes cannot be chosen. A chosen gene starts Expressed with one enzyme.
+  The seed comes from the system RNG when Start is pressed.
+- **Layout** (`layout.rs`). `generate_vents(seed)` jitters: second vent (+-30,
+  +-50) and what belongs to it, start (+-12), shafts, shelters, creatures (+-35,
+  pushed out of vents), viruses, zones; picks 2 pores per wall line and for the
+  chamber; the pigment prey follow shaft A. `validate` is pure and checks the
+  hard rules listed in the module doc. A failed layout is retried (seed, attempt
+  + 1) up to 8 times, then the base layout is used. Over seeds 0-199 the first
+  layout fails for 2 seeds (1%); a test allows 10 and none fall back to the base.
+  Food and metal zones are circles, so a spawned particle can still land on a
+  wall tile (as before M6).
+- **HUD / screens**: the HUD has a first line "Stage 1/3: Deep-sea vents seed N";
+  the run-over screen shows stage, seed and "New in the codex: ...". The smoke
+  test visits Menu, Settings, Prepare, Run, Manage, Run, gate view, StageComplete,
+  RunOver, Menu.
+- Not done: more than one real stage (so the Stage-complete screen is only
+  visited by the smoke test, and by a unit test of `complete_stage` with
+  a fake "next stage is playable"); the seed is not shown on Prepare and the
+  player cannot type one.
+
+Original plan:
 
 1. Run state: the stage sequence, level transitions, win and loss.
 2. Codex: save obtained genes. Choose a starting genome with a budget.

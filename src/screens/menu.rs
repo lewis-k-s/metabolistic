@@ -37,7 +37,7 @@ fn spawn_main_page(mut commands: Commands) {
         DespawnOnExit(MenuPage::Main),
         children![
             label("Metabolistic", 80.0),
-            button("Run", MenuAction::Open(GameState::Run)),
+            button("Start", MenuAction::Open(GameState::Prepare)),
             button("Manage", MenuAction::Open(GameState::Manage)),
             button("Settings", MenuAction::Page(MenuPage::Settings)),
             button("Quit", MenuAction::Quit),

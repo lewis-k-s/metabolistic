@@ -1,7 +1,7 @@
 use crate::GameState;
-use crate::blocks::genome::{self, BlockKind};
+use crate::blocks::genome::BlockKind;
 use crate::environment::LocalEnvironment;
-use crate::level;
+use crate::run::{Carry, starter_carry};
 use crate::metabolism::CurrencyPools;
 use crate::player::spawn_local_player_cell;
 use crate::proteins::Proteome;
@@ -22,23 +22,25 @@ pub fn starter_proteome() -> Proteome {
     ])
 }
 
-/// Spawns the local player's cell at `position`: starter genome and proteome,
-/// default pools, and a mineral stock. Returns `(player, cell)`.
-pub fn spawn_starter_cell(commands: &mut Commands, position: Vec2) -> (Entity, Entity) {
-    let (player, cell) = spawn_local_player_cell(commands, genome::create_starter_genome());
+/// Spawns the local player's cell at `position` with a `Carry`: its genome,
+/// proteome and action bar. Pools are the starter values; the membrane, the
+/// genome integrity and everything else start new. Returns `(player, cell)`.
+pub fn spawn_cell_from_carry(commands: &mut Commands, position: Vec2, carry: Carry) -> (Entity, Entity) {
+    let (player, cell) = spawn_local_player_cell(commands, carry.genome);
     commands.entity(cell).insert((
         CurrencyPools::with_defaults(),
-        starter_proteome(),
-        crate::actions::starter_action_bar(),
+        carry.proteome,
+        carry.action_bar,
         LocalEnvironment::default(),
         Transform::from_translation(position.extend(0.0)),
     ));
     (player, cell)
 }
 
-/// Spawns the starter cell at the start of the vent field.
-pub fn spawn_starter_cell_at_start(commands: &mut Commands) -> (Entity, Entity) {
-    spawn_starter_cell(commands, level::START_POSITION)
+/// Spawns the local player's cell at `position`: starter genome and proteome,
+/// default pools, and a mineral stock. Returns `(player, cell)`.
+pub fn spawn_starter_cell(commands: &mut Commands, position: Vec2) -> (Entity, Entity) {
+    spawn_cell_from_carry(commands, position, starter_carry(&Default::default()))
 }
 
 /// Screen-level navigation commands, independent of the keys bound to them.
@@ -53,7 +55,14 @@ pub enum Navigation {
 /// The screen that `nav` leads to from `current`, if any.
 pub fn navigate(current: &GameState, nav: Navigation) -> Option<GameState> {
     match (current, nav) {
-        (GameState::Run | GameState::Manage | GameState::RunOver, Navigation::Back) => {
+        (
+            GameState::Run
+            | GameState::Manage
+            | GameState::RunOver
+            | GameState::Prepare
+            | GameState::StageComplete,
+            Navigation::Back,
+        ) => {
             Some(GameState::Menu)
         }
         (GameState::Run, Navigation::ToggleManage) => Some(GameState::Manage),

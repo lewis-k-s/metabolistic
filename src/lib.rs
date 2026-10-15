@@ -5,12 +5,14 @@ use bevy::state::app::StatesPlugin;
 pub mod actions;
 pub mod blocks;
 pub mod cell;
+pub mod codex;
 pub mod engulf;
 pub mod envgrid;
 pub mod environment;
 pub mod exchange;
 pub mod gate;
 pub mod genome_damage;
+pub mod layout;
 pub mod level;
 pub mod membrane;
 pub mod metabolism;
@@ -19,10 +21,12 @@ pub mod movement;
 pub mod npc;
 pub mod particles;
 pub mod player;
+pub mod prepare;
 pub mod proteins;
 pub mod run;
 pub mod shelter;
 pub mod shared;
+pub mod stage;
 pub mod walls;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -55,8 +59,12 @@ pub enum GameState {
     Run,
     /// Metabolism editor: view and edit the cell's metabolic diagram.
     Manage,
-    /// The player's cell died. Restart or go back to the menu.
+    /// The run ended: the cell died, or the last stage was won.
     RunOver,
+    /// Before a run: choose the starting genes from the codex.
+    Prepare,
+    /// A stage was won and another follows. Shows the gene that was taken.
+    StageComplete,
 }
 
 /// True while a run is on: in `Run` and in `Manage`. The world (the grid and
@@ -116,6 +124,7 @@ impl MetabolisticApp {
                 walls::WallsPlugin,
                 gate::GatePlugin,
             ))
+            .add_plugins(codex::CodexPlugin { in_memory: false })
             .add_plugins(run::RunPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
@@ -167,6 +176,7 @@ impl MetabolisticApp {
                 walls::WallsPlugin,
                 gate::GatePlugin,
             ))
+            .add_plugins(codex::CodexPlugin { in_memory: true })
             .add_plugins(run::RunPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)

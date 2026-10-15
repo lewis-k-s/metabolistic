@@ -170,43 +170,14 @@ pub const LINE_SOUTH: (usize, std::ops::RangeInclusive<usize>) = (16, 30..=48);
 /// Pores in the south line (grid x).
 pub const LINE_SOUTH_PORES: [usize; 2] = [35, 42];
 
-/// All wall tiles of the level, as grid cells.
+/// All wall tiles of the base layout, as grid cells.
 pub fn wall_tiles() -> Vec<((usize, usize), WallKind)> {
-    let mut tiles = Vec::new();
-    // The chamber ring.
-    for x in (CHAMBER_X.start() - 1)..=(CHAMBER_X.end() + 1) {
-        for y in [CHAMBER_Y.start() - 1, CHAMBER_Y.end() + 1] {
-            let kind = if y < *CHAMBER_Y.start() && CHAMBER_PORES.contains(&x) {
-                WallKind::Pore
-            } else {
-                WallKind::Wall
-            };
-            tiles.push(((x, y), kind));
-        }
-    }
-    for y in CHAMBER_Y {
-        for x in [CHAMBER_X.start() - 1, CHAMBER_X.end() + 1] {
-            tiles.push(((x, y), WallKind::Wall));
-        }
-    }
-    for y in LINE_EAST.1 {
-        let kind = if LINE_EAST_PORES.contains(&y) { WallKind::Pore } else { WallKind::Wall };
-        tiles.push(((LINE_EAST.0, y), kind));
-    }
-    for x in LINE_SOUTH.1 {
-        let kind = if LINE_SOUTH_PORES.contains(&x) { WallKind::Pore } else { WallKind::Wall };
-        tiles.push(((x, LINE_SOUTH.0), kind));
-    }
-    tiles
+    LevelDef::vents_base().wall_tiles()
 }
 
-/// The wall tiles as a `WallMap`.
+/// The wall tiles of the base layout as a `WallMap`.
 pub fn wall_map() -> WallMap {
-    let mut map = WallMap::default();
-    for (tile, kind) in wall_tiles() {
-        map.insert(tile, kind);
-    }
-    map
+    LevelDef::vents_base().wall_map()
 }
 
 // --- Creatures and particles ---
@@ -278,39 +249,214 @@ pub const METAL_ZONES: [(Vec2, f32); 4] = [
 pub const INITIAL_FOOD: usize = 22;
 pub const INITIAL_METALS: usize = 10;
 
-/// The vent field before the warm-up: emitters set, grid empty.
-pub fn vent_field_cold() -> EnvGrid {
-    let mut grid = EnvGrid::centered(FIELD_WIDTH, FIELD_HEIGHT);
-    for channel in Channel::ALL {
-        grid.set_params(channel, field_params(channel));
-    }
-    for vent in VENTS {
-        grid.add_emitter(Channel::Heat, vent.position, vent.radius, vent.heat);
-        grid.add_emitter(Channel::Minerals, vent.position, vent.radius, vent.minerals);
-    }
-    for shaft in SHAFTS {
-        grid.add_rect_emitter(Channel::Light, shaft.min, shaft.max, SHAFT_LEVEL * LIGHT_DECAY);
-    }
-    // The light zone of the gate chamber: the room, and nothing else.
-    let chamber_min = grid.cell_center(*CHAMBER_X.start(), *CHAMBER_Y.start());
-    let chamber_max = grid.cell_center(*CHAMBER_X.end(), *CHAMBER_Y.end());
-    grid.add_rect_emitter(Channel::Light, chamber_min, chamber_max, SHAFT_LEVEL * LIGHT_DECAY);
-    // Walls first, so that nothing flows into them during the warm-up.
-    for ((x, y), _) in wall_tiles() {
-        grid.set_wall(x, y, true);
-    }
-    grid
+// --- The level as a value ---
+
+/// A wall line: a row or a column of tissue tiles with pores.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WallLine {
+    /// A column (`at` is grid x, `span` is grid y) or a row (`at` is grid y,
+    /// `span` is grid x).
+    pub vertical: bool,
+    pub at: usize,
+    pub span: std::ops::RangeInclusive<usize>,
+    /// Positions along the line (a grid y for a column, a grid x for a row).
+    pub pores: Vec<usize>,
 }
 
-/// The vent field, run to a steady state.
-pub fn vent_field() -> EnvGrid {
-    let mut grid = vent_field_cold();
-    for _ in 0..WARM_UP_SECONDS as usize {
-        grid.step(1.0);
+/// The walled room of the gate cell. Walls ring `x` and `y`; the pores are in
+/// its south wall.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Chamber {
+    pub x: std::ops::RangeInclusive<usize>,
+    pub y: std::ops::RangeInclusive<usize>,
+    /// Grid x of the pores in the south wall.
+    pub pores: Vec<usize>,
+}
+
+/// Everything that makes one level: the grid build, the hazards and shelters,
+/// the walls, the creatures and particles, the gate cell and the start. The
+/// world spawns from a `LevelDef` (see `CurrentLevel`); a stage is a
+/// `LevelDef` value, so a new stage is new data. `layout` makes variants of the
+/// vent level from a seed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LevelDef {
+    pub name: &'static str,
+    pub seed: u64,
+    /// Grid size in grid cells.
+    pub width: usize,
+    pub height: usize,
+    /// How the channels move.
+    pub field: FieldKind,
+    pub vents: Vec<Vent>,
+    pub shafts: Vec<Shaft>,
+    pub shaft_level: f32,
+    /// Share of the light that is UV.
+    pub uv_fraction: f32,
+    pub shelters: Vec<crate::shelter::Shelter>,
+    pub chamber: Chamber,
+    pub lines: Vec<WallLine>,
+    pub npcs: Vec<NpcSpawn>,
+    pub viruses: Vec<Vec2>,
+    pub food_zones: Vec<(Vec2, f32)>,
+    pub metal_zones: Vec<(Vec2, f32)>,
+    pub initial_food: usize,
+    pub initial_metals: usize,
+    pub gate_position: Vec2,
+    /// The gene that the gate cell gives.
+    pub gate_gene: BlockKind,
+    /// The centre of the dim edge where the pigment prey wait.
+    pub pigment_prey: Vec2,
+    pub start: Vec2,
+}
+
+/// The channel physics of a level. A new stage adds a kind with its own values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldKind {
+    Vents,
+}
+
+impl FieldKind {
+    pub fn params(self, channel: Channel) -> FieldParams {
+        match self {
+            FieldKind::Vents => field_params(channel),
+        }
     }
-    // Light shafts are static: after the warm-up the grid does not step them.
-    grid.settle(Channel::Light);
-    grid
+}
+
+/// The level of the running stage. The world inserts it when a stage starts.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub struct CurrentLevel(pub LevelDef);
+
+impl LevelDef {
+    /// The hand-made base layout of the vent level (the constants above).
+    pub fn vents_base() -> Self {
+        Self {
+            name: "Deep-sea vents",
+            seed: 0,
+            width: FIELD_WIDTH,
+            height: FIELD_HEIGHT,
+            field: FieldKind::Vents,
+            vents: VENTS.to_vec(),
+            shafts: SHAFTS.to_vec(),
+            shaft_level: SHAFT_LEVEL,
+            uv_fraction: UV_FRACTION,
+            shelters: SHELTERS.to_vec(),
+            chamber: Chamber {
+                x: CHAMBER_X,
+                y: CHAMBER_Y,
+                pores: CHAMBER_PORES.to_vec(),
+            },
+            lines: vec![
+                WallLine {
+                    vertical: true,
+                    at: LINE_EAST.0,
+                    span: LINE_EAST.1,
+                    pores: LINE_EAST_PORES.to_vec(),
+                },
+                WallLine {
+                    vertical: false,
+                    at: LINE_SOUTH.0,
+                    span: LINE_SOUTH.1,
+                    pores: LINE_SOUTH_PORES.to_vec(),
+                },
+            ],
+            npcs: NPC_SPAWNS.to_vec(),
+            viruses: VIRUS_SPAWNS.to_vec(),
+            food_zones: FOOD_ZONES.to_vec(),
+            metal_zones: METAL_ZONES.to_vec(),
+            initial_food: INITIAL_FOOD,
+            initial_metals: INITIAL_METALS,
+            gate_position: GATE_POSITION,
+            gate_gene: crate::gate::GATE_GENE,
+            pigment_prey: PIGMENT_PREY_POSITION,
+            start: START_POSITION,
+        }
+    }
+
+    /// All wall tiles of the level, as grid cells.
+    pub fn wall_tiles(&self) -> Vec<((usize, usize), WallKind)> {
+        let mut tiles = Vec::new();
+        let (cx, cy) = (&self.chamber.x, &self.chamber.y);
+        // The chamber ring.
+        for x in (cx.start() - 1)..=(cx.end() + 1) {
+            for y in [cy.start() - 1, cy.end() + 1] {
+                let kind = if y < *cy.start() && self.chamber.pores.contains(&x) {
+                    WallKind::Pore
+                } else {
+                    WallKind::Wall
+                };
+                tiles.push(((x, y), kind));
+            }
+        }
+        for y in cy.clone() {
+            for x in [cx.start() - 1, cx.end() + 1] {
+                tiles.push(((x, y), WallKind::Wall));
+            }
+        }
+        for line in &self.lines {
+            for along in line.span.clone() {
+                let kind = if line.pores.contains(&along) { WallKind::Pore } else { WallKind::Wall };
+                let tile = if line.vertical { (line.at, along) } else { (along, line.at) };
+                tiles.push((tile, kind));
+            }
+        }
+        tiles
+    }
+
+    /// The wall tiles as a `WallMap`.
+    pub fn wall_map(&self) -> WallMap {
+        let mut map = WallMap::default();
+        for (tile, kind) in self.wall_tiles() {
+            map.insert(tile, kind);
+        }
+        map
+    }
+
+    /// The grid before the warm-up: emitters set, grid empty.
+    pub fn cold_grid(&self) -> EnvGrid {
+        let mut grid = EnvGrid::centered(self.width, self.height);
+        for channel in Channel::ALL {
+            grid.set_params(channel, self.field.params(channel));
+        }
+        for vent in &self.vents {
+            grid.add_emitter(Channel::Heat, vent.position, vent.radius, vent.heat);
+            grid.add_emitter(Channel::Minerals, vent.position, vent.radius, vent.minerals);
+        }
+        let source = self.shaft_level * LIGHT_DECAY;
+        for shaft in &self.shafts {
+            grid.add_rect_emitter(Channel::Light, shaft.min, shaft.max, source);
+        }
+        // The light zone of the gate chamber: the room, and nothing else.
+        let chamber_min = grid.cell_center(*self.chamber.x.start(), *self.chamber.y.start());
+        let chamber_max = grid.cell_center(*self.chamber.x.end(), *self.chamber.y.end());
+        grid.add_rect_emitter(Channel::Light, chamber_min, chamber_max, source);
+        // Walls first, so that nothing flows into them during the warm-up.
+        for ((x, y), _) in self.wall_tiles() {
+            grid.set_wall(x, y, true);
+        }
+        grid
+    }
+
+    /// The grid, run to a steady state.
+    pub fn grid(&self) -> EnvGrid {
+        let mut grid = self.cold_grid();
+        for _ in 0..WARM_UP_SECONDS as usize {
+            grid.step(1.0);
+        }
+        // Light shafts are static: after the warm-up the grid does not step them.
+        grid.settle(Channel::Light);
+        grid
+    }
+}
+
+/// The vent field before the warm-up: emitters set, grid empty.
+pub fn vent_field_cold() -> EnvGrid {
+    LevelDef::vents_base().cold_grid()
+}
+
+/// The base vent field, run to a steady state.
+pub fn vent_field() -> EnvGrid {
+    LevelDef::vents_base().grid()
 }
 
 #[cfg(test)]

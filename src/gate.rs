@@ -8,10 +8,11 @@
 //!   (`GateProgress::step`). The HUD shows the progress.
 //! - **If the contact breaks** for longer than `GATE_GRACE` seconds, the progress
 //!   **resets to 0**. (The short grace stops physics jitter from resetting it.)
-//! - When the time is full, the player takes the gate gene (`GATE_GENE`, a
-//!   placeholder: the light capture block comes in M7), the run is won, and the
-//!   world plays `gate_cell_victory` for `VICTORY_DELAY` seconds. Then the
-//!   run-over screen shows "Victory" and the gene.
+//! - When the time is full, the player takes the gate gene (`LevelDef::gate_gene`;
+//!   `GATE_GENE` is the default, a placeholder: the light capture block comes in
+//!   M7), the stage is won, and the world plays `gate_cell_victory` for
+//!   `VICTORY_DELAY` seconds. Then the run goes on to the next stage, or ends
+//!   (see `run`).
 
 use bevy::prelude::*;
 
@@ -66,6 +67,8 @@ impl GateProgress {
 pub struct GateWon {
     pub gate: Entity,
     pub position: Vec2,
+    /// The gene that the gate cell gave.
+    pub gene: BlockKind,
 }
 
 #[allow(clippy::type_complexity)]
@@ -75,6 +78,7 @@ pub fn gate_system(
     players: Query<&ControlledCell, With<LocalPlayer>>,
     mut gates: Query<(Entity, &Transform, &CellSize, &mut GateProgress), With<GateCell>>,
     mut bodies: Query<(&Transform, &CellSize, &mut Genome), (With<Cell>, Without<GateCell>)>,
+    level: Option<Res<crate::level::CurrentLevel>>,
     mut summary: ResMut<RunSummary>,
     mut won: MessageWriter<GateWon>,
     mut commands: Commands,
@@ -83,6 +87,8 @@ pub fn gate_system(
         return;
     }
     let dt = time.delta_secs();
+    // The level says what the gate gives; tests without a level use the default.
+    let gate_gene = level.map_or(GATE_GENE, |l| l.0.gate_gene);
     for controlled in &players {
         let Ok((player_transform, player_size, mut genome)) = bodies.get_mut(controlled.0) else {
             continue;
@@ -95,13 +101,14 @@ pub fn gate_system(
                 world_radius(gate_size),
             );
             if progress.step(contact, dt) {
-                genome.table.insert(GATE_GENE, GeneState::Expressed);
-                summary.victory = Some(GATE_GENE);
+                genome.table.insert(gate_gene, GeneState::Expressed);
+                summary.victory = Some(gate_gene);
                 summary.cause = None;
                 commands.insert_resource(PendingVictory(VICTORY_DELAY));
                 won.write(GateWon {
                     gate,
                     position: gate_transform.translation.truncate(),
+                    gene: gate_gene,
                 });
             }
         }

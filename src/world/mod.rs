@@ -1,6 +1,6 @@
 //! # The world of a run
 //!
-//! The world is the vent field and the player's cell. It exists while `InRun`
+//! The world is the level of the current stage (`LevelDef`) and the player's cell. It exists while `InRun`
 //! is active: it is spawned when a run starts, it stays when the player
 //! switches between Run and Manage, and it is removed at death or when the
 //! player goes back to the menu. Every world entity has
@@ -20,14 +20,15 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::genome_damage::UvFraction;
-use crate::level::{self, VENTS};
+use crate::level::{CurrentLevel, LevelDef};
+use crate::run::RunState;
 use crate::npc::{NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
 use crate::particles::{
     ParticleTimers, ParticleZones, point_in_circle, spawn_food, spawn_metal, spawn_virus,
     VIRUS_SPEED,
 };
 use crate::proteins::Proteome;
-use crate::shared::spawn_starter_cell_at_start;
+use crate::shared::spawn_cell_from_carry;
 use crate::shelter::Shelters;
 use crate::sprites::Sheets;
 use crate::walls::{WallMap, solid_for, WallKind};
@@ -94,30 +95,37 @@ fn spawn_world(
     sheets: Res<Sheets>,
     mut images: ResMut<Assets<Image>>,
     mut rng: ResMut<NpcRng>,
+    run: Res<RunState>,
 ) {
-    let grid = level::vent_field();
+    // The stage decides the level. A stage without a level is never entered
+    // (the run completes instead); the base vents are the safe fallback.
+    let def = run.level_def().unwrap_or_else(|| {
+        warn!("the stage {:?} has no level; using the base vents", run.stage());
+        LevelDef::vents_base()
+    });
+    let grid = def.grid();
     let world_size = grid.world_size();
     let origin = grid.origin();
 
     grid_view::spawn_grid_view(&mut commands, &grid);
-    for vent in VENTS {
+    for vent in def.vents.iter().copied() {
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
     }
     grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);
-    let walls = level::wall_map();
+    let walls = def.wall_map();
     walls_view::spawn_walls(&mut commands, &asset_server, &walls, &grid);
     commands.insert_resource(walls);
     commands.insert_resource(grid);
-    commands.insert_resource(UvFraction(level::UV_FRACTION));
-    for shelter in level::SHELTERS {
+    commands.insert_resource(UvFraction(def.uv_fraction));
+    for shelter in def.shelters.iter().copied() {
         actions_view::spawn_shelter(&mut commands, &mut images, shelter);
     }
-    commands.insert_resource(Shelters(level::SHELTERS.to_vec()));
+    commands.insert_resource(Shelters(def.shelters.clone()));
 
     // The creatures, viruses and particles of the fixed layout.
     let slots = NpcSlots(
-        level::NPC_SPAWNS
+        def.npcs
             .iter()
             .map(|n| (n.archetype, n.position, n.signature))
             .collect(),
@@ -130,36 +138,38 @@ fn spawn_world(
     let gate = spawn_npc(
         &mut commands,
         crate::npc::Archetype::Gate,
-        level::GATE_POSITION,
-        None,
-        level::NPC_SPAWNS.len() as u32,
+        def.gate_position,
+        Some(def.gate_gene),
+        def.npcs.len() as u32,
     );
     commands.entity(gate).insert(crate::gate::GateProgress::default());
-    for (index, position) in level::VIRUS_SPAWNS.iter().enumerate() {
+    for (index, position) in def.viruses.iter().enumerate() {
         let angle = index as f32 * 2.1;
         spawn_virus(&mut commands, *position, Vec2::new(angle.cos(), angle.sin()) * VIRUS_SPEED);
     }
-    for _ in 0..level::INITIAL_FOOD {
-        let (centre, radius) = level::FOOD_ZONES[rng.0.random_range(0..level::FOOD_ZONES.len())];
+    for _ in 0..def.initial_food {
+        let (centre, radius) = def.food_zones[rng.0.random_range(0..def.food_zones.len())];
         spawn_food(&mut commands, point_in_circle(centre, radius, &mut rng.0), crate::particles::FOOD_CARBON);
     }
-    for _ in 0..level::INITIAL_METALS {
-        let (centre, radius) = level::METAL_ZONES[rng.0.random_range(0..level::METAL_ZONES.len())];
+    for _ in 0..def.initial_metals {
+        let (centre, radius) = def.metal_zones[rng.0.random_range(0..def.metal_zones.len())];
         spawn_metal(&mut commands, point_in_circle(centre, radius, &mut rng.0));
     }
     commands.insert_resource(ParticleZones {
-        food: level::FOOD_ZONES.to_vec(),
-        metals: level::METAL_ZONES.to_vec(),
+        food: def.food_zones.clone(),
+        metals: def.metal_zones.clone(),
     });
     commands.insert_resource(ParticleTimers::default());
 
-    let (player, cell) = spawn_starter_cell_at_start(&mut commands);
+    let (player, cell) = spawn_cell_from_carry(&mut commands, def.start, run.cell_carry());
     commands.entity(player).insert(DespawnOnExit(InRun));
     player_body::attach_body(&mut commands, &sheets, cell);
+    commands.insert_resource(CurrentLevel(def));
 }
 
 fn remove_grid(mut commands: Commands) {
     commands.remove_resource::<crate::envgrid::EnvGrid>();
+    commands.remove_resource::<CurrentLevel>();
     commands.insert_resource(Shelters::default());
     commands.insert_resource(WallMap::default());
     commands.insert_resource(ParticleZones::default());

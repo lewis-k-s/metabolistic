@@ -1,4 +1,4 @@
-//! The top-level screens: `Loading`, `Menu`, `Run`, `Manage` and `RunOver` (see
+//! The top-level screens: `Loading`, `Menu`, `Prepare`, `Run`, `Manage`, `StageComplete` and `RunOver` (see
 //! `crate::GameState`). Each screen tags the entities it spawns with
 //! `DespawnOnExit`, so leaving a screen removes them. The world of a run (the
 //! vent field and the player's cell) is not a screen: see `crate::world`.
@@ -10,8 +10,10 @@ use crate::GameState;
 pub mod loading;
 pub mod manage;
 pub mod menu;
+pub mod prepare;
 pub mod run;
 pub mod run_over;
+pub mod stage_complete;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins((
@@ -19,6 +21,8 @@ pub(crate) fn plugin(app: &mut App) {
         menu::plugin,
         run::plugin,
         run_over::plugin,
+        prepare::plugin,
+        stage_complete::plugin,
         manage::plugin,
     ))
     .add_systems(Startup, spawn_camera)

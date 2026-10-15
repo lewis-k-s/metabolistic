@@ -7,6 +7,10 @@
 //! dies, or the player does not move while W is held. Screenshots go to
 //! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
 //!
+//! M6 steps: the sequence also visits Prepare and StageComplete. The codex is
+//! saved in `<smoke dir>/save` (or `METABOLISTIC_SAVE_DIR`), never in the user
+//! data directory.
+//!
 //! M5 steps: the player cell is `Invulnerable` in smoke mode (a predator could
 //! engulf it, and the run must not end by chance). On the first Run step the
 //! test checks that NPCs are in the world. A new Run step moves the player into
@@ -52,23 +56,25 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 8] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 10] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
+    (GameState::Prepare, None),
     (GameState::Run, None),
     (GameState::Manage, None),
     (GameState::Run, None),
     (GameState::Run, None),
+    (GameState::StageComplete, None),
     (GameState::RunOver, None),
     (GameState::Menu, Some(MenuPage::Main)),
 ];
 
 /// Steps of the M4 checks.
-const STEP_RUN: usize = 2;
-const STEP_MANAGE: usize = 3;
-const STEP_RUN_AGAIN: usize = 4;
+const STEP_RUN: usize = 3;
+const STEP_MANAGE: usize = 4;
+const STEP_RUN_AGAIN: usize = 5;
 /// The gate chamber view.
-const STEP_GATE_VIEW: usize = 5;
+const STEP_GATE_VIEW: usize = 6;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -86,6 +92,19 @@ pub fn plugin(app: &mut App) {
     if let Err(err) = std::fs::create_dir_all(&dir) {
         warn!("smoke test: cannot create {}: {err}", dir.display());
     }
+    // The smoke test never touches the real codex: it saves in its own
+    // directory, unless METABOLISTIC_SAVE_DIR says otherwise. The codex has
+    // three genes, so that the Prepare screen has something to show.
+    let save_dir = if std::env::var_os(crate::codex::SAVE_DIR_VAR).is_some() {
+        crate::codex::save_dir().expect("a save directory")
+    } else {
+        dir.join("save")
+    };
+    let mut codex = crate::codex::load(&crate::codex::codex_path(&save_dir));
+    codex.bank(&[BlockKind::Fermentation, BlockKind::FatStorage, BlockKind::LightCapture]);
+    app.insert_resource(codex).insert_resource(crate::codex::CodexStore {
+        path: Some(crate::codex::codex_path(&save_dir)),
+    });
     app.insert_resource(SmokeTest {
         dir,
         step: 0,

@@ -1,11 +1,12 @@
-//! Run-over screen: the player's cell died. The player can restart (a new
-//! world and a new starter cell) or go back to the menu.
+//! Run-over screen: the cell died, or the last stage was won. It shows the
+//! cause (or the gene taken), the stage and the seed, and the genes that are new
+//! in the codex. Restart goes to Prepare; the other button goes to the menu.
 
 use bevy::prelude::*;
 
 use super::{button, label, screen_root};
 use crate::GameState;
-use crate::run::{RunSummary, run_over_message, run_over_title};
+use crate::run::{RunState, RunSummary, new_genes_message, run_over_message, run_over_title};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(GameState::RunOver), spawn_run_over_screen)
@@ -22,13 +23,13 @@ enum RunOverAction {
 impl RunOverAction {
     fn target(self) -> GameState {
         match self {
-            RunOverAction::Restart => GameState::Run,
+            RunOverAction::Restart => GameState::Prepare,
             RunOverAction::Menu => GameState::Menu,
         }
     }
 }
 
-fn spawn_run_over_screen(mut commands: Commands, summary: Res<RunSummary>) {
+fn spawn_run_over_screen(mut commands: Commands, summary: Res<RunSummary>, run: Res<RunState>) {
     commands.spawn((
         Name::new("Run Over Screen"),
         screen_root(),
@@ -36,7 +37,9 @@ fn spawn_run_over_screen(mut commands: Commands, summary: Res<RunSummary>) {
         children![
             label(run_over_title(&summary), 80.0),
             label(&run_over_message(&summary), 28.0),
-            button("Restart", RunOverAction::Restart),
+            label(format!("Stage {}    seed {}", run.stage().name(), run.seed), 22.0),
+            label(new_genes_message(&run.new_genes), 28.0),
+            button("New run", RunOverAction::Restart),
             button("Menu", RunOverAction::Menu),
         ],
     ));
@@ -59,7 +62,7 @@ mod tests {
 
     #[test]
     fn restart_starts_a_new_run_and_menu_leaves() {
-        assert_eq!(RunOverAction::Restart.target(), GameState::Run);
+        assert_eq!(RunOverAction::Restart.target(), GameState::Prepare);
         assert_eq!(RunOverAction::Menu.target(), GameState::Menu);
     }
 }

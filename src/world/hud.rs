@@ -19,7 +19,9 @@ use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::Proteome;
 use crate::shelter::InShelter;
+use crate::run::RunState;
 use crate::screens::label;
+use crate::stage::STAGES;
 use crate::GameState;
 
 /// Width of a bar in characters.
@@ -32,6 +34,7 @@ const POOL_BAR_MAX: f32 = 50.0;
 /// One line of the HUD.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 enum HudLine {
+    Stage,
     Atp,
     Membrane,
     Genome,
@@ -49,7 +52,8 @@ enum HudLine {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct HudSlot(usize);
 
-const LINES: [HudLine; 11] = [
+const LINES: [HudLine; 12] = [
+    HudLine::Stage,
     HudLine::Atp,
     HudLine::Membrane,
     HudLine::Genome,
@@ -107,6 +111,17 @@ fn spawn_hud(mut commands: Commands) {
         });
 }
 
+/// The stage name and the run seed.
+pub fn stage_line(run: &RunState) -> String {
+    format!(
+        "Stage {}/{}: {}    seed {}",
+        run.stage_index + 1,
+        STAGES.len(),
+        run.stage().name(),
+        run.seed
+    )
+}
+
 /// A text bar: `[#####---]` with `value` out of `max`, `width` characters wide.
 /// The value is clamped to the range.
 pub fn text_bar(value: f32, max: f32, width: usize) -> String {
@@ -141,6 +156,7 @@ fn update_hud(
         With<Cell>,
     >,
     fraction: Res<UvFraction>,
+    run: Res<RunState>,
     gate: Query<&GateProgress>,
     mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
     mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
@@ -164,6 +180,7 @@ fn update_hud(
                     String::new()
                 }
             }
+            HudLine::Stage => stage_line(&run),
             HudLine::Atp => bar_line("ATP", pools.get(Currency::ATP), ATP_BAR_MAX),
             HudLine::Membrane => bar_line("Membrane", membrane.integrity, membrane.max),
             HudLine::Genome => {
@@ -207,6 +224,13 @@ fn update_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stage_line_names_the_stage_and_the_seed() {
+        let run = RunState::begin(1234, Default::default());
+        let line = stage_line(&run);
+        assert!(line.contains("Deep-sea vents") && line.contains("1234") && line.contains("1/3"), "{line}");
+    }
 
     #[test]
     fn text_bar_fills_in_proportion_and_clamps() {

@@ -301,12 +301,21 @@ pub fn virus_drift_system(
     }
 }
 
+/// A virus infected a cell. `gene` is the gene that it gave, if any.
+#[derive(Message, Debug, Clone, Copy, PartialEq)]
+pub struct VirusInfection {
+    pub cell: Entity,
+    pub gene: Option<BlockKind>,
+}
+
 /// A virus that touches a cell infects it and is gone.
 pub fn virus_contact_system(
     mut rng: ResMut<GeneRng>,
+    mut infections: MessageWriter<VirusInfection>,
     viruses: Query<(Entity, &Transform), With<Virus>>,
     mut cells: Query<
         (
+            Entity,
             &Transform,
             &CellSize,
             &mut Genome,
@@ -320,16 +329,23 @@ pub fn virus_contact_system(
 ) {
     for (virus_entity, virus_transform) in &viruses {
         let position = virus_transform.translation.truncate();
-        let host = cells.iter_mut().find(|(transform, size, ..)| {
+        let host = cells.iter_mut().find(|(_, transform, size, ..)| {
             touches(transform.translation.truncate(), world_radius(size), position, VIRUS_RADIUS)
         });
-        let Some((_, _, mut genome, mut queue, proteome, mut load)) = host else {
+        let Some((cell, _, _, mut genome, mut queue, proteome, mut load)) = host else {
             continue;
         };
-        match virus_outcome(&genome, &mut rng.0) {
-            VirusOutcome::Gene(kind) => take_gene(&mut genome, proteome, &mut queue, kind),
-            VirusOutcome::Mutation => load.0 += VIRUS_MUTATION_LOAD,
-        }
+        let gene = match virus_outcome(&genome, &mut rng.0) {
+            VirusOutcome::Gene(kind) => {
+                take_gene(&mut genome, proteome, &mut queue, kind);
+                Some(kind)
+            }
+            VirusOutcome::Mutation => {
+                load.0 += VIRUS_MUTATION_LOAD;
+                None
+            }
+        };
+        infections.write(VirusInfection { cell, gene });
         commands.entity(virus_entity).despawn();
     }
 }
@@ -427,7 +443,8 @@ pub struct ParticlePlugin;
 
 impl Plugin for ParticlePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ParticleZones>()
+        app.add_message::<VirusInfection>()
+            .init_resource::<ParticleZones>()
             .init_resource::<ParticleTimers>()
             .add_systems(
                 Update,
