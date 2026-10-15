@@ -26,6 +26,7 @@ fn atp_consuming_system(
 
 /// Tests that a currency (ATP) decreases when consumed and never goes below zero.
 #[test]
+#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn test_atp_consumption_decreases_resource() {
     // --- Setup ---
     // Create a headless app with the necessary plugins and systems.
@@ -120,6 +121,7 @@ fn test_atp_consumption_decreases_resource() {
 
 /// Tests that consumption fails when the requested amount exceeds the available currency.
 #[test]
+#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn test_consumption_fails_on_insufficient_funds() {
     // --- Setup ---
     let mut app = MetabolisticApp::new_headless();

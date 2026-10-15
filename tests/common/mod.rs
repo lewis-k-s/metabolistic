@@ -2,6 +2,7 @@
 //!
 //! This module provides proptest strategies for generating test data for the metabolic simulation.
 //! It includes generators for currency values, metabolic states, and system configurations.
+#![allow(dead_code)] // Each test binary uses a subset of these helpers.
 
 use proptest::prelude::*;
 use metabolistic3d::molecules::*;

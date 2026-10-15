@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use metabolistic3d::metabolism::*;
 use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent};
-use metabolistic3d::molecules::Currency;
 
 #[test]
 fn metabolic_flow_plugin_adds_resources() {

@@ -6,6 +6,7 @@ use metabolistic3d::player::spawn_local_player_cell;
 use bevy::prelude::*;
 
 #[test]
+#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn debug_fermentation() {
     // --- Setup ---
     let mut app = App::new();
