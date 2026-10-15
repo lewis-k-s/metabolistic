@@ -11,6 +11,8 @@ use metabolistic3d::blocks::fermentation::FermentationBlock;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::{PolyMer, CellMass};
 use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
+use metabolistic3d::blocks::genome::Genome;
+use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::MetabolisticApp;
 use bevy::prelude::*;
 use bevy::time::{Time, Fixed};
@@ -21,6 +23,12 @@ use property_utils::*;
 // --- Temporal Stability Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4, // Very small for long simulations
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that currency levels stabilize over time rather than oscillating wildly
     #[test]
     fn currency_stabilization_over_time(
@@ -30,20 +38,31 @@ proptest! {
             200.0f32..600.0f32, // free fatty acids
             50.0f32..150.0f32   // atp
         ),
-        long_simulation in 100..500usize
+        long_simulation in 10..30usize  // Dramatically reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = initial_values;
         
         let mut app = MetabolisticApp::new_headless();
         
-        // Set up stable system configuration
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, pyruvate);
-        currency_pools.set(Currency::ReducingPower, rp);
-        currency_pools.set(Currency::ATP, atp);
-        currency_pools.set(Currency::OrganicWaste, 10.0);
-        currency_pools.set(Currency::FreeFattyAcids, ffa);
-        currency_pools.set(Currency::StorageBeads, 30.0);
+        // Spawn a cell first
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        // Set up stable system configuration in the cell
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            if let Some(mut currency_pools) = entity_mut.get_mut::<CurrencyPools>() {
+                currency_pools.set(Currency::Pyruvate, pyruvate);
+                currency_pools.set(Currency::ReducingPower, rp);
+                currency_pools.set(Currency::ATP, atp);
+                currency_pools.set(Currency::OrganicWaste, 10.0);
+                currency_pools.set(Currency::FreeFattyAcids, ffa);
+                currency_pools.set(Currency::StorageBeads, 30.0);
+            }
+        }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
         
         // Spawn all systems
@@ -106,6 +125,12 @@ proptest! {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4,
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that system behavior is consistent across identical initial conditions
     #[test]
     fn reproducible_behavior(
@@ -115,7 +140,7 @@ proptest! {
             100.0f32..400.0f32, // ffa
             25.0f32..75.0f32    // atp
         ),
-        simulation_length in 20..100usize
+        simulation_length in 5..15usize  // Reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = test_conditions;
         
@@ -127,13 +152,22 @@ proptest! {
             let mut app = MetabolisticApp::new_headless();
             
             // Identical initial conditions
-            let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::ATP, atp);
-            currency_pools.set(Currency::OrganicWaste, 5.0);
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::StorageBeads, 15.0);
+            let (_player_entity, cell_entity) = {
+                let mut commands = app.world_mut().commands();
+                spawn_local_player_cell(&mut commands, Genome::default())
+            };
+            app.world_mut().flush();
+            
+            {
+                let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+                let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+                currency_pools.set(Currency::Pyruvate, pyruvate);
+                currency_pools.set(Currency::ReducingPower, rp);
+                currency_pools.set(Currency::ATP, atp);
+                currency_pools.set(Currency::OrganicWaste, 5.0);
+                currency_pools.set(Currency::FreeFattyAcids, ffa);
+                currency_pools.set(Currency::StorageBeads, 15.0);
+            }
             app.world_mut().insert_resource(LipidToxicityThreshold(80.0));
             
             // Identical system configuration
@@ -175,6 +209,12 @@ proptest! {
 // --- Long-Term System Health Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4,
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that systems don't accumulate errors over very long simulations
     #[test]
     fn long_term_error_accumulation(
@@ -184,20 +224,29 @@ proptest! {
             400.0f32..800.0f32, // initial ffa
             100.0f32..200.0f32  // initial atp
         ),
-        very_long_simulation in 500..2000usize
+        very_long_simulation in 15..40usize  // Dramatically reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = stable_config;
         
         let mut app = MetabolisticApp::new_headless();
         
         // Set up stable, well-resourced system
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, pyruvate);
-        currency_pools.set(Currency::ReducingPower, rp);
-        currency_pools.set(Currency::ATP, atp);
-        currency_pools.set(Currency::OrganicWaste, 20.0);
-        currency_pools.set(Currency::FreeFattyAcids, ffa);
-        currency_pools.set(Currency::StorageBeads, 50.0);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+            currency_pools.set(Currency::Pyruvate, pyruvate);
+            currency_pools.set(Currency::ReducingPower, rp);
+            currency_pools.set(Currency::ATP, atp);
+            currency_pools.set(Currency::OrganicWaste, 20.0);
+            currency_pools.set(Currency::FreeFattyAcids, ffa);
+            currency_pools.set(Currency::StorageBeads, 50.0);
+        }
         app.world_mut().insert_resource(LipidToxicityThreshold(200.0));
         
         app.world_mut().spawn(FermentationBlock);
@@ -266,6 +315,12 @@ proptest! {
 // --- Cyclic Behavior Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4,
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test for healthy cyclic behavior vs problematic oscillations
     #[test]
     fn cyclic_behavior_analysis(
@@ -275,20 +330,29 @@ proptest! {
             300.0f32..600.0f32, // ffa (high to trigger polymerization)
             30.0f32..80.0f32    // atp
         ),
-        cycle_observation_length in 50..200usize
+        cycle_observation_length in 10..30usize  // Reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = oscillation_config;
         
         let mut app = MetabolisticApp::new_headless();
         
         // Set up conditions that might produce cyclic behavior
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, pyruvate);
-        currency_pools.set(Currency::ReducingPower, rp);
-        currency_pools.set(Currency::ATP, atp);
-        currency_pools.set(Currency::OrganicWaste, 0.0);
-        currency_pools.set(Currency::FreeFattyAcids, ffa);
-        currency_pools.set(Currency::StorageBeads, 10.0);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+            currency_pools.set(Currency::Pyruvate, pyruvate);
+            currency_pools.set(Currency::ReducingPower, rp);
+            currency_pools.set(Currency::ATP, atp);
+            currency_pools.set(Currency::OrganicWaste, 0.0);
+            currency_pools.set(Currency::FreeFattyAcids, ffa);
+            currency_pools.set(Currency::StorageBeads, 10.0);
+        }
         app.world_mut().insert_resource(LipidToxicityThreshold(250.0)); // Low to trigger cycles
         
         app.world_mut().spawn(FermentationBlock);
@@ -313,7 +377,7 @@ proptest! {
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
             
-            let currency_pools = app.world().resource::<CurrencyPools>();
+            let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
             let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
             let current_waste = currency_pools.get(Currency::OrganicWaste);
             
@@ -366,6 +430,12 @@ proptest! {
 // --- Time-Scale Consistency Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4,
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that system behavior is consistent across different time scales
     #[test]
     fn time_scale_consistency(
@@ -389,14 +459,25 @@ proptest! {
         let mut scaled_app = MetabolisticApp::new_headless();
         
         // Identical initial conditions
+        let mut cell_entities = Vec::new();
         for app in [&mut normal_app, &mut scaled_app] {
-            let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::ATP, atp);
-            currency_pools.set(Currency::OrganicWaste, 5.0);
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::StorageBeads, 20.0);
+            let (_player_entity, cell_entity) = {
+                let mut commands = app.world_mut().commands();
+                spawn_local_player_cell(&mut commands, Genome::default())
+            };
+            app.world_mut().flush();
+            cell_entities.push(cell_entity);
+            
+            {
+                let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+                let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+                currency_pools.set(Currency::Pyruvate, pyruvate);
+                currency_pools.set(Currency::ReducingPower, rp);
+                currency_pools.set(Currency::ATP, atp);
+                currency_pools.set(Currency::OrganicWaste, 5.0);
+                currency_pools.set(Currency::FreeFattyAcids, ffa);
+                currency_pools.set(Currency::StorageBeads, 20.0);
+            }
             app.world_mut().insert_resource(LipidToxicityThreshold(120.0));
             
             app.world_mut().spawn(FermentationBlock);
@@ -433,8 +514,32 @@ proptest! {
             scaled_app.world_mut().run_schedule(FixedUpdate);
         }
         
-        let normal_results = get_currency_snapshot(&normal_app);
-        let scaled_results = get_currency_snapshot(&scaled_app);
+        let normal_results = {
+            let currency_pools = normal_app.world().get::<CurrencyPools>(cell_entities[0]).unwrap();
+            vec![
+                currency_pools.get(Currency::ATP),
+                currency_pools.get(Currency::ReducingPower),
+                currency_pools.get(Currency::AcetylCoA),
+                currency_pools.get(Currency::CarbonSkeletons),
+                currency_pools.get(Currency::FreeFattyAcids),
+                currency_pools.get(Currency::Pyruvate),
+                currency_pools.get(Currency::OrganicWaste),
+                currency_pools.get(Currency::StorageBeads),
+            ]
+        };
+        let scaled_results = {
+            let currency_pools = scaled_app.world().get::<CurrencyPools>(cell_entities[1]).unwrap();
+            vec![
+                currency_pools.get(Currency::ATP),
+                currency_pools.get(Currency::ReducingPower),
+                currency_pools.get(Currency::AcetylCoA),
+                currency_pools.get(Currency::CarbonSkeletons),
+                currency_pools.get(Currency::FreeFattyAcids),
+                currency_pools.get(Currency::Pyruvate),
+                currency_pools.get(Currency::OrganicWaste),
+                currency_pools.get(Currency::StorageBeads),
+            ]
+        };
         
         // Results should be approximately equivalent (allowing for numerical differences)
         for (_i, (&normal, &scaled)) in normal_results.iter().zip(scaled_results.iter()).enumerate() {

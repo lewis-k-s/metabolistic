@@ -32,7 +32,12 @@ impl Plugin for CharacterControllerPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<MovementAction>()
             .add_plugins(InputManagerPlugin::<Action>::default())
-            .add_systems(Update, (movement_input, update_grounded, movement).chain());
+            .add_systems(
+                Update,
+                (movement_input, update_grounded, movement)
+                    .chain()
+                    .run_if(in_state(crate::GameState::Scene3D)),
+            );
     }
 }
 

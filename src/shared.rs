@@ -1,13 +1,14 @@
 use crate::{blocks::genome, GameState};
 use bevy::prelude::*;
 
+
 /// Shared resources and systems that persist across all game states
 pub fn setup_shared_resources(mut commands: Commands) {
-    // Initialize genome with starter genes
+    // Initialize genome with starter genes as a global resource
     let starter_genome = genome::create_starter_genome();
     commands.insert_resource(starter_genome);
 
-    // Note: Metabolic block entities will be spawned by individual scenes as needed
+    // Note: Player-cell entities are now spawned by individual scenes or systems as needed
 }
 
 /// Input system for state transitions

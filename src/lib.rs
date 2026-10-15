@@ -3,17 +3,19 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
-pub mod inspector;
 pub mod blocks;
 pub mod camera;
 pub mod debug;
 pub mod dev_tools;
+pub mod inspector;
 
+pub mod cell;
+pub mod metabolism;
 pub mod molecules;
 pub mod player;
 pub mod scenes;
 pub mod shared;
-pub mod metabolism;
+pub mod tui;
 
 /// Game states for scene management
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -38,17 +40,16 @@ impl MetabolisticApp {
                 .add_plugins(PhysicsPlugins::default())
                 .add_plugins(PhysicsDebugPlugin::default());
         }
-        
+
         app // State management
             .init_state::<GameState>()
             // Shared systems (available in all states)
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
-            .add_plugins(blocks::fermentation::FermentationPlugin)
-            .add_plugins(blocks::fat_storage::FatStoragePlugin)
-            .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
-            .add_plugins(metabolism::MetabolicFlowPlugin);
-            
+            .add_plugins(blocks::MetabolicBlocksPlugin)
+            .add_plugins(metabolism::MetabolicFlowPlugin)
+            .add_plugins(tui::CellTuiPlugin);
+
         #[cfg(feature = "full")]
         {
             app.add_plugins(dev_tools::plugin)
@@ -86,10 +87,9 @@ impl MetabolisticApp {
             // Only add plugins that don't require graphics/windowing
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
-            .add_plugins(blocks::fermentation::FermentationPlugin)
-            .add_plugins(blocks::fat_storage::FatStoragePlugin)
-            .add_plugins(blocks::vesicle_export::VesicleExportPlugin)
+            .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
+            .add_plugins(tui::CellTuiPlugin)
             // Override with deterministic mutations for testing
             .insert_resource(blocks::genome::MutationConfig::deterministic())
             // Only add shared systems that don't require input
@@ -106,9 +106,8 @@ mod tests {
     #[test]
     fn test_app_creation() {
         // Test that we can create the app without panicking
-        let app = MetabolisticApp::new_headless();
+        let _app = MetabolisticApp::new_headless();
         // Verify the app has a world (basic validity check)
-        assert!(app.world().entities().len() >= 0);
     }
 
     #[test]
@@ -117,7 +116,7 @@ mod tests {
 
         // Verify the app has the expected structure
         // This test ensures the basic setup doesn't panic and has a valid world
-        assert!(app.world().entities().len() >= 0);
+
         assert!(
             app.world().contains_resource::<State<GameState>>(),
             "GameState should be initialized"
@@ -145,7 +144,7 @@ mod tests {
         app.update();
 
         // Verify app is still valid after startup
-        assert!(app.world().entities().len() >= 0);
+
         assert!(
             app.world().contains_resource::<State<GameState>>(),
             "GameState should be initialized"

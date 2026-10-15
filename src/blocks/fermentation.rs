@@ -1,35 +1,15 @@
-use crate::molecules::Currency;
-use crate::metabolism::{FluxProfile, MetabolicBlock, MetabolicNode, BlockStatus};
-use crate::blocks::genome::BlockKind;
+//! Fermentation metabolic block implementation.
+//! 
+//! Fermentation is an anaerobic metabolic pathway that converts pyruvate and reducing power
+//! into ATP and organic waste. This is a flux-only block with no active systems.
+
 use bevy::prelude::*;
 
+/// Component marker for fermentation metabolic blocks.
+/// 
+/// Fermentation follows the stoichiometry:
+/// - Inputs: 1 Pyruvate + 1 ReducingPower
+/// - Outputs: 1 ATP + 1 OrganicWaste
 #[derive(Component)]
 pub struct FermentationBlock;
 
-pub struct FermentationPlugin;
-
-impl Plugin for FermentationPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_fermentation_block);
-    }
-}
-
-fn spawn_fermentation_block(mut commands: Commands) {
-    let mut flux_profile = FluxProfile::default();
-    
-    // Define the fermentation flux profile using utility methods
-    flux_profile.set_demand(Currency::Pyruvate, 1.0);
-    flux_profile.set_demand(Currency::ReducingPower, 1.0);
-    flux_profile.set_production(Currency::ATP, 1.0);
-    flux_profile.set_production(Currency::OrganicWaste, 1.0);
-    
-    commands.spawn((
-        FermentationBlock,
-        MetabolicBlock,
-        MetabolicNode {
-            kind: BlockKind::Fermentation,
-            status: BlockStatus::Active,
-        },
-        flux_profile,
-    ));
-}

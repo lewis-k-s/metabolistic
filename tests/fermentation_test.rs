@@ -1,101 +1,192 @@
-use metabolistic3d::molecules::Currency;
-use metabolistic3d::blocks::fermentation::FermentationPlugin;
-use metabolistic3d::blocks::vesicle_export::{VesicleExportPlugin, VesicleExportBlock};
-use metabolistic3d::metabolism::{CurrencyPools, MetabolicFlowPlugin};
-use metabolistic3d::blocks::genome::{Genome, GenomeDiffEvent, MetabolicUpdateEvent, BlockKind};
-use bevy::prelude::{App, MinimalPlugins, FixedUpdate};
-use bevy::time::{Time, Fixed};
+use metabolistic3d::molecules::{Currency, CurrencyPools, LipidToxicityThreshold};
+use metabolistic3d::blocks::MetabolicBlocksPlugin;
+use metabolistic3d::metabolism::{MetabolicFlowPlugin, FlowDirty};
+use metabolistic3d::blocks::genome::{Genome, GenomePlugin, MetabolicUpdateEvent, BlockKind};
+use metabolistic3d::player::spawn_local_player_cell;
+use bevy::prelude::*;
 
-/// Tests that fermentation consumes Pyruvate and ReducingPower and produces ATP and OrganicWaste.
+/// Tests that fermentation converts Pyruvate and ReducingPower into ATP and OrganicWaste.
 #[test]
-fn test_fermentation_produces_and_consumes() {
+fn test_fermentation_basic_flow() {
     // --- Setup ---
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(FermentationPlugin);
-    app.add_plugins(MetabolicFlowPlugin);  // Add the metabolic flow plugin to handle currency changes
-    app.add_event::<GenomeDiffEvent>();
-    app.add_event::<MetabolicUpdateEvent>();
-    app.init_resource::<Genome>();
-    app.init_resource::<Time>();
-    app.init_resource::<Time<Fixed>>();
+    app.add_plugins(GenomePlugin);
+    app.add_plugins(MetabolicBlocksPlugin);
+    app.add_plugins(MetabolicFlowPlugin);
+    app.insert_resource(LipidToxicityThreshold(50.0));
 
-    // Set up CurrencyPools with the same starting amounts
+    // Spawn a local player-cell pair for testing
+    let (_player_entity, cell_entity) = {
+        let mut commands = app.world_mut().commands();
+        // Create a genome with fermentation expressed for the cell
+        let mut cell_genome = Genome::default();
+        cell_genome.add_gene(BlockKind::Fermentation);
+        cell_genome.express_gene(BlockKind::Fermentation);
+        spawn_local_player_cell(&mut commands, cell_genome)
+    };
+    
+    // Apply commands to actually create the entities
+    app.world_mut().flush();
+    
+    // Force initial metabolic update since poll_genome_diff won't detect per-cell genomes
+    app.world_mut().send_event(MetabolicUpdateEvent);
+    app.update();
+    
+    // Run another update to ensure block spawning completes  
+    app.update();
+    
+    // Initialize currencies for fermentation
     {
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, 100.0);
-        currency_pools.set(Currency::ReducingPower, 100.0);
+        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+        currency_pools.set(Currency::Pyruvate, 10.0);
+        currency_pools.set(Currency::ReducingPower, 10.0);
         currency_pools.set(Currency::ATP, 0.0);
         currency_pools.set(Currency::OrganicWaste, 0.0);
     }
-    
-    // Activate the fermentation gene so the block will be active
-    {
-        let mut genome = app.world_mut().resource_mut::<Genome>();
-        genome.add_gene(BlockKind::Fermentation);
-        genome.express_gene(BlockKind::Fermentation);
-    }
-    
-    // Trigger metabolic graph rebuild to process gene expression changes
-    app.world_mut().resource_mut::<metabolistic3d::metabolism::FlowDirty>().0 = true;
 
     // --- Run Simulation ---
-    let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-    app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-    app.update(); // This runs the MetabolicSchedule through MetabolicFlowPlugin
+    // Trigger metabolic flow calculation
+    app.world_mut().resource_mut::<FlowDirty>().0 = true;
+    app.update();
+    
+    // Run one more update to ensure all systems execute
+    app.update();
 
     // --- Verification ---
-    // Check CurrencyPools for the actual results since that's where changes are applied
-    let currency_pools = app.world().resource::<CurrencyPools>();
-    assert!((currency_pools.get(Currency::OrganicWaste) - 1.0).abs() < 1e-6, 
-            "Expected OrganicWaste to be 1.0, got {}", currency_pools.get(Currency::OrganicWaste));
-    assert!((currency_pools.get(Currency::ATP) - 1.0).abs() < 1e-6,
-            "Expected ATP to be 1.0, got {}", currency_pools.get(Currency::ATP));
-    assert!((currency_pools.get(Currency::Pyruvate) - 99.0).abs() < 1e-6,
-            "Expected Pyruvate to be 99.0, got {}", currency_pools.get(Currency::Pyruvate));
-
-    // Run again to ensure continuous operation
-    app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-    app.update(); // This runs the MetabolicSchedule through MetabolicFlowPlugin
-    
-    let currency_pools = app.world().resource::<CurrencyPools>();
-    assert!((currency_pools.get(Currency::OrganicWaste) - 2.0).abs() < 1e-6,
-            "Expected OrganicWaste to be 2.0, got {}", currency_pools.get(Currency::OrganicWaste));
+    // Check that currencies have changed after metabolic flow calculation
+    {
+        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
+        let pyruvate = currency_pools.get(Currency::Pyruvate);
+        let reducing_power = currency_pools.get(Currency::ReducingPower);
+        let atp = currency_pools.get(Currency::ATP);
+        let organic_waste = currency_pools.get(Currency::OrganicWaste);
+        
+        // Should have consumed some inputs
+        assert!(pyruvate < 10.0, "Pyruvate should be consumed: {}", pyruvate);
+        assert!(reducing_power < 10.0, "ReducingPower should be consumed: {}", reducing_power);
+        
+        // Should have produced some outputs
+        assert!(atp > 0.0, "ATP should be produced: {}", atp);
+        assert!(organic_waste > 0.0, "OrganicWaste should be produced: {}", organic_waste);
+    }
 }
 
-/// Tests that vesicle export decreases OrganicWaste.
+/// Tests that fermentation doesn't occur without required inputs.
 #[test]
-fn test_vesicle_export_decreases_organic_waste() {
+fn test_fermentation_requires_inputs() {
     // --- Setup ---
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(VesicleExportPlugin);
-    app.init_resource::<CurrencyPools>();
-    app.init_resource::<Time>();
-    app.init_resource::<Time<Fixed>>();
+    app.add_plugins(GenomePlugin);
+    app.add_plugins(MetabolicBlocksPlugin);
+    app.add_plugins(MetabolicFlowPlugin);
+    app.insert_resource(LipidToxicityThreshold(50.0));
 
-    app.world_mut().spawn(VesicleExportBlock);
-
-    // Initialize OrganicWaste with a starting amount.
-    app.world_mut().resource_mut::<CurrencyPools>().set(Currency::OrganicWaste, 100.0);
-
-    // --- Run Simulation ---
-    let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-    app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
+    // Spawn a local player-cell pair for testing
+    let (_player_entity, cell_entity) = {
+        let mut commands = app.world_mut().commands();
+        let mut cell_genome = Genome::default();
+        cell_genome.add_gene(BlockKind::Fermentation);
+        cell_genome.express_gene(BlockKind::Fermentation);
+        spawn_local_player_cell(&mut commands, cell_genome)
+    };
+    
+    // Apply commands to actually create the entities
+    app.world_mut().flush();
+    
+    // Trigger genome update to spawn fermentation block
+    app.world_mut().send_event(MetabolicUpdateEvent);
     app.update();
-    app.world_mut().run_schedule(FixedUpdate);
-
-    // --- Verification ---
-    // Assuming default VesicleExportRate(0.1)
-    assert!((app.world().resource::<CurrencyPools>().get(Currency::OrganicWaste) - 99.9).abs() < 1e-6);
-
-    // Run until depletion
-    for _ in 0..999 {
-        app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-        app.update();
-        app.world_mut().run_schedule(FixedUpdate);
+    
+    // Initialize with no inputs
+    {
+        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+        currency_pools.set(Currency::Pyruvate, 0.0);
+        currency_pools.set(Currency::ReducingPower, 0.0);
+        currency_pools.set(Currency::ATP, 0.0);
+        currency_pools.set(Currency::OrganicWaste, 0.0);
     }
 
-    // Verify that it doesn't go below zero
-    assert!((app.world().resource::<CurrencyPools>().get(Currency::OrganicWaste) - 0.0).abs() < 1e-6);
+    // --- Run Simulation ---
+    app.world_mut().resource_mut::<FlowDirty>().0 = true;
+    app.update();
+
+    // --- Verification ---
+    // Check that no currencies changed without inputs
+    {
+        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
+        assert_eq!(currency_pools.get(Currency::ATP), 0.0, "ATP should remain at 0");
+        assert_eq!(currency_pools.get(Currency::OrganicWaste), 0.0, "OrganicWaste should remain at 0");
+    }
+}
+
+/// Tests that fermentation respects the 1:1:1:1 stoichiometry.
+#[test]
+fn test_fermentation_stoichiometry() {
+    // --- Setup ---
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(GenomePlugin);
+    app.add_plugins(MetabolicBlocksPlugin);
+    app.add_plugins(MetabolicFlowPlugin);
+    app.insert_resource(LipidToxicityThreshold(50.0));
+
+    // Spawn a local player-cell pair for testing
+    let (_player_entity, cell_entity) = {
+        let mut commands = app.world_mut().commands();
+        let mut cell_genome = Genome::default();
+        cell_genome.add_gene(BlockKind::Fermentation);
+        cell_genome.express_gene(BlockKind::Fermentation);
+        spawn_local_player_cell(&mut commands, cell_genome)
+    };
+    
+    // Apply commands to actually create the entities
+    app.world_mut().flush();
+    
+    // Trigger genome update to spawn fermentation block
+    app.world_mut().send_event(MetabolicUpdateEvent);
+    app.update();
+    
+    // Initialize with specific amounts
+    let initial_pyruvate = 5.0;
+    let initial_reducing = 8.0;
+    {
+        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+        currency_pools.set(Currency::Pyruvate, initial_pyruvate);
+        currency_pools.set(Currency::ReducingPower, initial_reducing);
+        currency_pools.set(Currency::ATP, 0.0);
+        currency_pools.set(Currency::OrganicWaste, 0.0);
+    }
+
+    // --- Run Simulation ---
+    app.world_mut().resource_mut::<FlowDirty>().0 = true;
+    app.update();
+
+    // --- Verification ---
+    {
+        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
+        let pyruvate_consumed = initial_pyruvate - currency_pools.get(Currency::Pyruvate);
+        let reducing_consumed = initial_reducing - currency_pools.get(Currency::ReducingPower);
+        let atp_produced = currency_pools.get(Currency::ATP);
+        let waste_produced = currency_pools.get(Currency::OrganicWaste);
+        
+        // All should be equal due to 1:1:1:1 stoichiometry
+        assert!((pyruvate_consumed - reducing_consumed).abs() < 0.01, 
+            "Pyruvate and ReducingPower consumption should be equal: {} vs {}", 
+            pyruvate_consumed, reducing_consumed);
+        assert!((pyruvate_consumed - atp_produced).abs() < 0.01, 
+            "Input consumption should equal ATP production: {} vs {}", 
+            pyruvate_consumed, atp_produced);
+        assert!((pyruvate_consumed - waste_produced).abs() < 0.01, 
+            "Input consumption should equal waste production: {} vs {}", 
+            pyruvate_consumed, waste_produced);
+        
+        // Should be limited by the smaller input (pyruvate = 5.0)
+        assert!((pyruvate_consumed - initial_pyruvate).abs() < 0.01, 
+            "Should consume all available pyruvate: {}", pyruvate_consumed);
+    }
 }

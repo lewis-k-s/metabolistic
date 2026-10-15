@@ -95,8 +95,9 @@ impl Default for GeneState {
     }
 }
 
-/// Resource containing the entire chromosome of gene tiles
-#[derive(Resource, Default)]
+/// Resource/Component containing the entire chromosome of gene tiles
+/// Can be used as a Resource (global genome) or Component (per-cell genome)
+#[derive(Resource, Component, Default, Clone)]
 pub struct Genome {
     pub table: HashMap<BlockKind, GeneState>,
     /// Track previous state for diff computation

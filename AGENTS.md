@@ -143,4 +143,26 @@ Core metabolic currencies that flow between blocks:
 - Implement error handling for asset loading and system failures
 - Follow the principle of least privilege for mutable access
 
+## Build/Lint/Test Commands
+
+- **Development build**: `cargo run`
+- **Release build**: `cargo build --release` 
+- **Native release**: `cargo run --profile release-native`
+- **Single test**: `cargo test test_name`
+- **All tests**: `cargo test`
+- **Headless tests**: `cargo test --features headless`
+- **Lint**: `cargo clippy`
+- **Format**: `cargo fmt`
+
+## Code Style Guidelines
+
+- **Imports**: Group std, external, local crates. Use `use bevy::prelude::*` for Bevy
+- **Formatting**: Follow `rustfmt` defaults, 100 char line length
+- **Types**: Use explicit types for public APIs, infer locally
+- **Naming**: `snake_case` for functions/vars, `PascalCase` for types/traits
+- **Error handling**: Use `Result<T, E>` and `?` operator, avoid `unwrap()`
+- **Systems**: Name descriptively, use `Query<With<T>>` filters
+- **Components**: Keep small, single responsibility
+- **Resources**: Use `Res<T>` for read, `ResMut<T>` for write access
+
 This context should help you understand the project architecture and contribute effectively to the Metabolistic3D codebase. 

@@ -74,6 +74,42 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Use `Update` schedule for per-frame logic
 - State-specific systems use run conditions like `.run_if(in_state(GameState::Scene3D))`
 
+### ECS Query Patterns (PREFERRED)
+When working with cell data, prefer ECS query patterns over world-querying:
+
+**Preferred Pattern:**
+```rust
+fn update_cell_currencies(
+    mut cell_query: Query<&mut CurrencyPools, With<Cell>>,
+    player_query: Query<&ControlledCell, With<LocalPlayer>>,
+) {
+    if let Ok(controlled_cell) = player_query.get_single() {
+        if let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0) {
+            currency_pools.modify(Currency::ATP, 10.0);
+        }
+    }
+}
+```
+
+**Anti-Pattern (avoid):**
+```rust
+fn update_cell_currencies(world: &mut World) {
+    let cell_entity = find_cell_somehow(world);
+    world.get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ATP, 10.0);
+}
+```
+
+**Cell Wrapper Methods:** Cell wrapper methods should accept Query parameters instead of World references:
+```rust
+impl Cell {
+    // Preferred
+    pub fn get_currency(&self, currency_query: &Query<&CurrencyPools, With<Cell>>, currency: Currency) -> f32
+    
+    // Anti-pattern
+    pub fn get_currency(&self, world: &World, currency: Currency) -> f32
+}
+```
+
 ### Resource Management
 - Currency systems use shared resources accessible across plugins
 - State transitions managed through `NextState<GameState>` resource
@@ -122,3 +158,8 @@ The codebase includes comprehensive testing with multiple categories:
 # Use `rg` instead of `grep` in general
 
 # Run `cargo modules --lib` to see the up-to-date project structure
+
+## Code Philosophy
+
+- **Bevy Systems Methodology**:
+  - Follow the rule: Bevy systems fetch data, pure functions mutate it. Try to keep a separation from the ECS queries and the logic for each step.

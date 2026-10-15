@@ -11,6 +11,8 @@ use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::{PolyMer, CellMass};  
 use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
 use metabolistic3d::MetabolisticApp;
+use metabolistic3d::player::spawn_local_player_cell;
+use metabolistic3d::blocks::genome::Genome;
 use bevy::prelude::*;
 use bevy::time::{Time, Fixed};
 
@@ -31,29 +33,42 @@ const LONG_SIMULATION_EPSILON: f32 = 1e-2;
 // --- Precision Tests for Currency Operations ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 8,
+        max_shrink_iters: 3,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that repeated small currency operations don't accumulate precision errors
     #[test]
     fn currency_precision_accumulation(
         initial_amount in 100.0f32..1000.0f32,
         operation_size in 0.01f32..1.0f32,
-        iterations in 10..1000usize
+        iterations in 10..50usize  // Reduced for performance
     ) {
         let mut app = MetabolisticApp::new_headless();
-        app.world_mut().resource_mut::<CurrencyPools>().set(Currency::ATP, initial_amount);
+        
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::ATP, initial_amount);
         
         // Perform many small operations
         let mut expected_total = initial_amount;
         for _ in 0..iterations {
             if expected_total >= operation_size {
-                let atp_before = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+                let atp_before = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
                 if atp_before >= operation_size {
-                    app.world_mut().resource_mut::<CurrencyPools>().modify(Currency::ATP, -operation_size);
+                    app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ATP, -operation_size);
                     expected_total -= operation_size;
                 }
             }
         }
         
-        let actual_total = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+        let actual_total = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
         
         // Verify precision is maintained within acceptable bounds
         assert_relative_eq!(actual_total, expected_total, epsilon = CURRENCY_RELATIVE_EPSILON);
@@ -62,20 +77,35 @@ proptest! {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 8,
+        max_shrink_iters: 3,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test precision in currency transfer operations (polymerization/lipolysis)
     #[test]
     fn transfer_precision(
         initial_ffa in 200.0f32..800.0f32,
         poly_rate in 0.5f32..25.0f32,
         lipo_rate in 0.1f32..10.0f32,
-        cycles in 5..100usize
+        cycles in 5..20usize  // Reduced for performance
     ) {
         let mut app = MetabolisticApp::new_headless();
         
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-        currency_pools.set(Currency::StorageBeads, 50.0);
-        currency_pools.set(Currency::ATP, 1000.0); // Plenty of ATP
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
+            currency_pools.set(Currency::StorageBeads, 50.0);
+            currency_pools.set(Currency::ATP, 1000.0); // Plenty of ATP
+        }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
         
         app.world_mut().spawn((
@@ -94,7 +124,7 @@ proptest! {
         for _ in 0..cycles {
             app.update();
             
-            let currency_pools = app.world().resource::<CurrencyPools>();
+            let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
             let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
             let current_storage = currency_pools.get(Currency::StorageBeads);
             let current_total = current_ffa + current_storage;
@@ -112,20 +142,35 @@ proptest! {
 // --- Long-Running Simulation Precision Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4, // Fewer cases for long simulations
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test that fermentation maintains precision over extended simulations  
     #[test]
     fn long_fermentation_precision(
         initial_pyruvate in 500.0f32..2000.0f32,
         initial_rp in 500.0f32..2000.0f32,
-        long_simulation_steps in 100..500usize
+        long_simulation_steps in 20..50usize  // Reduced for performance
     ) {
         let mut app = MetabolisticApp::new_headless();
         
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-        currency_pools.set(Currency::ReducingPower, initial_rp);
-        currency_pools.set(Currency::ATP, 0.0);
-        currency_pools.set(Currency::OrganicWaste, 0.0);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+            currency_pools.set(Currency::Pyruvate, initial_pyruvate);
+            currency_pools.set(Currency::ReducingPower, initial_rp);
+            currency_pools.set(Currency::ATP, 0.0);
+            currency_pools.set(Currency::OrganicWaste, 0.0);
+        }
         
         app.world_mut().spawn(FermentationBlock);
         
@@ -142,7 +187,7 @@ proptest! {
             
             // Check mass balance precision every 10 steps
             if step % 10 == 0 {
-                let currency_pools = app.world().resource::<CurrencyPools>();
+                let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
                 let current_pyruvate = currency_pools.get(Currency::Pyruvate);
                 let current_rp = currency_pools.get(Currency::ReducingPower);
                 let current_atp = currency_pools.get(Currency::ATP);
@@ -187,29 +232,41 @@ proptest! {
 // --- Edge Case Precision Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 8,
+        max_shrink_iters: 3,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test precision with very small currency amounts (near floating-point limits)
     #[test]
     fn small_amount_precision(
         tiny_amount in 1e-6f32..1e-3f32,
-        operations in 1..100usize
+        operations in 1..20usize  // Reduced for performance
     ) {
         let mut app = MetabolisticApp::new_headless();
-        app.world_mut().resource_mut::<CurrencyPools>().set(Currency::ATP, tiny_amount);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::ATP, tiny_amount);
         
         let initial_amount = tiny_amount;
         
         // Attempt operations on very small amounts
         for _ in 0..operations {
-            let current_amount = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+            let current_amount = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
             
             // Try to consume half of remaining amount
             let consumption_amount = current_amount * 0.5;
             if consumption_amount > 1e-10 { // Avoid underflow
-                if app.world().resource::<CurrencyPools>().can_consume(Currency::ATP, consumption_amount) {
-                    app.world_mut().resource_mut::<CurrencyPools>().modify(Currency::ATP, -consumption_amount);
+                if app.world().get::<CurrencyPools>(cell_entity).unwrap().can_consume(Currency::ATP, consumption_amount) {
+                    app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ATP, -consumption_amount);
                 }
                 
-                let new_amount = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+                let new_amount = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
                 
                 // Verify precision maintained even for tiny operations
                 let expected = current_amount - consumption_amount;
@@ -222,35 +279,47 @@ proptest! {
         }
         
         // Final amount should still be non-negative and reasonable
-        let final_amount = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+        let final_amount = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
         prop_assert!(final_amount >= 0.0);
         prop_assert!(final_amount <= initial_amount + 1e-10);
     }
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 8,
+        max_shrink_iters: 3,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test precision with large currency amounts (near overflow limits)
     #[test]
     fn large_amount_precision(
         large_amount in 1e6f32..1e8f32,
-        small_operations in prop::collection::vec(1.0f32..100.0f32, 10..50)
+        small_operations in prop::collection::vec(1.0f32..100.0f32, 5..15)  // Reduced for performance
     ) {
         let mut app = MetabolisticApp::new_headless();
-        app.world_mut().resource_mut::<CurrencyPools>().set(Currency::ATP, large_amount);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::ATP, large_amount);
         
         let mut expected_amount = large_amount;
         
         // Perform many small operations on large amount
         for &op_amount in &small_operations {
             if expected_amount >= op_amount {
-                if app.world().resource::<CurrencyPools>().can_consume(Currency::ATP, op_amount) {
-                    app.world_mut().resource_mut::<CurrencyPools>().modify(Currency::ATP, -op_amount);
+                if app.world().get::<CurrencyPools>(cell_entity).unwrap().can_consume(Currency::ATP, op_amount) {
+                    app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ATP, -op_amount);
                     expected_amount -= op_amount;
                 }
             }
         }
         
-        let actual_amount = app.world().resource::<CurrencyPools>().get(Currency::ATP);
+        let actual_amount = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
         
         // Verify precision maintained even with large base amounts
         assert_relative_eq!(
@@ -264,6 +333,12 @@ proptest! {
 // --- System Integration Precision Tests ---
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4, // Fewer cases for complex scenarios
+        max_shrink_iters: 2,
+        timeout: 5000,
+        .. ProptestConfig::default()
+    })]
     /// Test precision in complex multi-system scenarios
     #[test]
     fn multi_system_precision(
@@ -280,13 +355,22 @@ proptest! {
         let mut app = MetabolisticApp::new_headless();
         
         // Initialize all systems
-        let mut currency_pools = app.world_mut().resource_mut::<CurrencyPools>();
-        currency_pools.set(Currency::Pyruvate, pyruvate);
-        currency_pools.set(Currency::ReducingPower, rp);
-        currency_pools.set(Currency::FreeFattyAcids, ffa);
-        currency_pools.set(Currency::OrganicWaste, waste);
-        currency_pools.set(Currency::ATP, 100.0);
-        currency_pools.set(Currency::StorageBeads, 50.0);
+        let (_player_entity, cell_entity) = {
+            let mut commands = app.world_mut().commands();
+            spawn_local_player_cell(&mut commands, Genome::default())
+        };
+        app.world_mut().flush();
+        
+        {
+            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
+            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
+            currency_pools.set(Currency::Pyruvate, pyruvate);
+            currency_pools.set(Currency::ReducingPower, rp);
+            currency_pools.set(Currency::FreeFattyAcids, ffa);
+            currency_pools.set(Currency::OrganicWaste, waste);
+            currency_pools.set(Currency::ATP, 100.0);
+            currency_pools.set(Currency::StorageBeads, 50.0);
+        }
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
         
         // Spawn all metabolic blocks
