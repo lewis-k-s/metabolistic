@@ -1,12 +1,33 @@
 use crate::GameState;
+use crate::blocks::genome::{self, BlockKind};
+use crate::environment::LocalEnvironment;
+use crate::metabolism::CurrencyPools;
 use crate::player::spawn_local_player_cell;
-use crate::{blocks::genome, metabolism::CurrencyPools};
+use crate::proteins::Proteome;
 use bevy::prelude::*;
 
-/// Spawns the local player's cell with the starter genome and default pools.
+/// Outside channel level of the constant vent supply, until the M2 grid.
+pub const STARTER_VENT_LEVEL: f32 = 20.0;
+
+/// The enzymes that a new vent cell starts with.
+pub fn starter_proteome() -> Proteome {
+    Proteome::with_enzymes(&[
+        (BlockKind::Chemosynthesis, 2),
+        (BlockKind::AminoAcidBiosynthesis, 1),
+        (BlockKind::LipidMetabolism, 1),
+        (BlockKind::ProteinSynthesis, 1),
+    ])
+}
+
+/// Spawns the local player's cell: starter genome and proteome, default pools,
+/// and a constant vent supply.
 pub fn spawn_starter_cell(mut commands: Commands) {
     let (_player, cell) = spawn_local_player_cell(&mut commands, genome::create_starter_genome());
-    commands.entity(cell).insert(CurrencyPools::with_defaults());
+    commands.entity(cell).insert((
+        CurrencyPools::with_defaults(),
+        starter_proteome(),
+        LocalEnvironment::vent(STARTER_VENT_LEVEL),
+    ));
 }
 
 /// Screen-level navigation commands, independent of the keys bound to them.

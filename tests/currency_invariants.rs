@@ -1,13 +1,13 @@
-//! # Currency Conservation Invariant Tests
+//! # Currency conservation invariants
 //!
-//! Property-based tests that verify fundamental invariants of the currency system:
-//! 1. Currency pools never go below zero
-//! 2. Mass balance is maintained in metabolic operations
-//! 3. Transfer operations are zero-sum (conservation of total currency)
+//! Property tests for the basic invariants of the pools:
+//! 1. Pools never go below zero.
+//! 2. Blocks keep their stoichiometry (mass balance).
+//! 3. Transfers are zero-sum.
 
 use approx::assert_relative_eq;
 use metabolistic3d::MetabolisticApp;
-use metabolistic3d::blocks::genome::Genome;
+use metabolistic3d::cell::CellSize;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
@@ -15,15 +15,20 @@ use proptest::prelude::*;
 mod common;
 use common::*;
 
-// --- Invariant 1: Currency Pools Never Go Below Zero ---
+/// Removes the maintenance cost, so that only the blocks change the pools.
+fn no_maintenance(app: &mut bevy::prelude::App, cell: bevy::prelude::Entity) {
+    *app.world_mut().get_mut::<CellSize>(cell).unwrap() = CellSize { radius: 0.0 };
+}
+
+// --- Invariant 1: pools never go below zero ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 32, // Reduced from default 256
+        cases: 32,
         max_shrink_iters: 10,
         .. ProptestConfig::default()
     })]
-    /// Test that all currency pools remain non-negative after any sequence of consumption attempts
+    /// All pools stay at 0 or more after any sequence of consumption attempts.
     #[test]
     fn currency_pools_never_negative(
         initial_atp in currency_amount(),
@@ -31,106 +36,64 @@ proptest! {
         consumption_attempts in prop::collection::vec(consumption_amount(), 1..20)
     ) {
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut commands = app.world_mut().commands();
-            commands.spawn((
-                metabolistic3d::cell::Cell, Genome::default(), CurrencyPools::default(),
-            )).id()
-        };
-        app.world_mut().flush();
+        let cell = spawn_test_cell(&mut app, &[], &[
+            (Currency::ATP, initial_atp),
+            (Currency::ReducingPower, initial_rp),
+        ]);
 
-        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::ATP, initial_atp);
-        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::ReducingPower, initial_rp);
-
-        // Attempt various consumption operations
         for &amount in &consumption_attempts {
-
-            // Try to consume ATP (should fail gracefully when insufficient)
-            if app.world().get::<CurrencyPools>(cell_entity).unwrap().can_consume(Currency::ATP, amount) {
-                app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ATP, -amount);
+            let mut pools = app.world_mut().get_mut::<CurrencyPools>(cell).unwrap();
+            for currency in [Currency::ATP, Currency::ReducingPower] {
+                if pools.can_consume(currency, amount) {
+                    pools.modify(currency, -amount);
+                }
+                prop_assert!(pools.get(currency) >= 0.0, "{:?} went negative", currency);
             }
-
-            // Try to consume ReducingPower (should fail gracefully when insufficient)
-            if app.world().get::<CurrencyPools>(cell_entity).unwrap().can_consume(Currency::ReducingPower, amount) {
-                app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().modify(Currency::ReducingPower, -amount);
-            }
-
-            let atp_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP);
-            let rp_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ReducingPower);
-
-            // Verify currencies never go negative
-            prop_assert!(atp_after >= 0.0, "ATP went negative: {}", atp_after);
-            prop_assert!(rp_after >= 0.0, "ReducingPower went negative: {}", rp_after);
         }
-
-        // Final verification that all currencies are non-negative
-        let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-        for currency in [Currency::ATP, Currency::ReducingPower, Currency::AcetylCoA, Currency::CarbonSkeletons, Currency::FreeFattyAcids, Currency::Pyruvate, Currency::OrganicWaste, Currency::StorageBeads] {
-            prop_assert!(currency_pools.get(currency) >= 0.0, "Currency {:?} went negative", currency);
-        }
+        prop_assert!(cell_currencies_non_negative(&app, cell));
     }
 }
 
-// --- Invariant 2: Mass Balance in Metabolic Operations ---
+// --- Invariant 2: mass balance in blocks ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 16, // Reduced for performance
+        cases: 16,
         max_shrink_iters: 5,
         .. ProptestConfig::default()
     })]
-    /// Test that fermentation maintains mass balance (inputs consumed = outputs produced)
+    /// Fermentation is 1 Pyruvate + 1 ReducingPower -> 1 ATP + 1 Waste: the
+    /// inputs used equal the outputs made.
     #[test]
     fn fermentation_mass_balance(
         initial_pyruvate in 50.0f32..500.0f32,
         initial_rp in 50.0f32..500.0f32,
-        simulation_steps in 1..10usize  // Reduced steps for performance
+        simulation_steps in 1..10usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut commands = app.world_mut().commands();
-            commands.spawn((
-                metabolistic3d::cell::Cell, Genome::default(), CurrencyPools::default(),
-            )).id()
-        };
-        app.world_mut().flush();
+        let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation], &[
+            (Currency::Pyruvate, initial_pyruvate),
+            (Currency::ReducingPower, initial_rp),
+        ]);
+        no_maintenance(&mut app, cell);
 
-        // Initialize resources with sufficient amounts for testing
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-            currency_pools.set(Currency::ReducingPower, initial_rp);
-            currency_pools.set(Currency::ATP, 0.0);
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-        }
-
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation]);
-
-        let initial_inputs = initial_pyruvate + initial_rp;
-
-        // Run simulation
         for _ in 0..simulation_steps {
             sim_step(&mut app);
         }
 
-        let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-        let final_pyruvate = currency_pools.get(Currency::Pyruvate);
-        let final_rp = currency_pools.get(Currency::ReducingPower);
-        let final_atp = currency_pools.get(Currency::ATP);
-        let final_waste = currency_pools.get(Currency::OrganicWaste);
+        let pyruvate_used = initial_pyruvate - pool(&app, cell, Currency::Pyruvate);
+        let rp_used = initial_rp - pool(&app, cell, Currency::ReducingPower);
+        let atp = pool(&app, cell, Currency::ATP);
+        let waste = pool(&app, cell, Currency::Waste);
 
-        let remaining_inputs = final_pyruvate + final_rp;
-        let total_outputs = final_atp + final_waste;
-        let consumed_inputs = initial_inputs - remaining_inputs;
-
-        // Mass balance: consumed inputs should approximately equal produced outputs
-        // Allow for small floating-point precision differences
-        assert_relative_eq!(consumed_inputs, total_outputs, epsilon = 0.1);
+        prop_assert!(pyruvate_used > 0.0);
+        assert_relative_eq!(pyruvate_used, rp_used, epsilon = 1e-3);
+        assert_relative_eq!(pyruvate_used, atp, epsilon = 1e-3);
+        assert_relative_eq!(pyruvate_used, waste, epsilon = 1e-3);
     }
 }
 
-// --- Invariant 3: Transfer Operations are Zero-Sum ---
+// --- Invariant 3: transfers are zero-sum ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -138,55 +101,32 @@ proptest! {
         max_shrink_iters: 5,
         .. ProptestConfig::default()
     })]
-    /// Test that fat storage polymerization is zero-sum (FFA decrease = StorageBeads increase)
+    /// Fat storage only moves lipids: free + stored lipids stay constant.
     #[test]
     fn fat_storage_zero_sum_transfer(
-        initial_ffa in 100.0f32..500.0f32,
+        initial_lipids in 100.0f32..500.0f32,
         initial_storage in currency_amount(),
         toxicity_threshold in 10.0f32..90.0f32,
         poly_rate in polymer_rate(),
-        simulation_steps in 1..5usize  // Reduced steps for performance
+        simulation_steps in 1..5usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut commands = app.world_mut().commands();
-            commands.spawn((
-                metabolistic3d::cell::Cell, Genome::default(), CurrencyPools::default(),
-            )).id()
-        };
-        app.world_mut().flush();
-
-        // Set up conditions for polymerization (FFA above threshold)
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-            currency_pools.set(Currency::StorageBeads, initial_storage);
-            currency_pools.set(Currency::ATP, 100.0); // Sufficient ATP
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-        set_fat_storage_rates(&mut app, cell_entity, poly_rate, 5.0);
+        let cell = spawn_test_cell(&mut app, &[BlockKind::FatStorage], &[
+            (Currency::Lipids, initial_lipids),
+            (Currency::ATP, 100.0),
+        ]);
+        set_stored_lipids(&mut app, cell, initial_storage);
+        set_fat_storage_rates(&mut app, cell, poly_rate, 5.0);
+        let initial_total = initial_lipids + initial_storage;
 
-        let initial_total_lipids = initial_ffa + initial_storage;
-
-        // Run simulation
         for _ in 0..simulation_steps {
             sim_step(&mut app);
-
-            let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-            let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
-            let current_storage = currency_pools.get(Currency::StorageBeads);
-            let current_total = current_ffa + current_storage;
-
-            // Verify zero-sum property: total lipids should remain constant
-            // (allowing for small floating-point precision differences)
-            assert_relative_eq!(current_total, initial_total_lipids, epsilon = 0.1);
-
-            // All amounts should remain non-negative
-            prop_assert!(current_ffa >= 0.0);
-            prop_assert!(current_storage >= 0.0);
+            assert_relative_eq!(total_lipids(&app, cell), initial_total, epsilon = 0.1);
+            prop_assert!(pool(&app, cell, Currency::Lipids) >= 0.0);
+            prop_assert!(stored_lipids(&app, cell) >= 0.0);
         }
+        prop_assert!(pool(&app, cell, Currency::Lipids) < initial_lipids, "lipids were stored");
     }
 }
 
@@ -196,126 +136,72 @@ proptest! {
         max_shrink_iters: 5,
         .. ProptestConfig::default()
     })]
-    /// Test that vesicle export only removes waste (doesn't create currency from nothing)
+    /// Vesicle export only removes waste. It makes nothing.
     #[test]
     fn vesicle_export_only_removes(
         initial_waste in 50.0f32..300.0f32,
-        simulation_steps in 1..10usize  // Reduced steps for performance
+        simulation_steps in 1..10usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut commands = app.world_mut().commands();
-            commands.spawn((
-                metabolistic3d::cell::Cell, Genome::default(), CurrencyPools::default(),
-            )).id()
-        };
-        app.world_mut().flush();
+        let cell = spawn_test_cell(&mut app, &[BlockKind::VesicleExport], &[
+            (Currency::Waste, initial_waste),
+        ]);
+        no_maintenance(&mut app, cell);
+        // No uptake from the outside pools.
+        app.world_mut().remove_resource::<EnvironmentalCurrencyPools>();
+        let initial = cell_snapshot(&app, cell);
+        let waste_index = Currency::ALL.iter().position(|&c| c == Currency::Waste).unwrap();
 
-        app.world_mut().get_entity_mut(cell_entity).unwrap().get_mut::<CurrencyPools>().unwrap().set(Currency::OrganicWaste, initial_waste);
-        express_blocks(&mut app, cell_entity, &[BlockKind::VesicleExport]);
-
-        let initial_snapshot = {
-            let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-            vec![
-                currency_pools.get(Currency::ATP),
-                currency_pools.get(Currency::ReducingPower),
-                currency_pools.get(Currency::AcetylCoA),
-                currency_pools.get(Currency::CarbonSkeletons),
-                currency_pools.get(Currency::FreeFattyAcids),
-                currency_pools.get(Currency::Pyruvate),
-                currency_pools.get(Currency::OrganicWaste),
-                currency_pools.get(Currency::StorageBeads),
-            ]
-        };
-        let initial_total = initial_snapshot.iter().sum::<f32>();
-
-        // Run simulation
         for _ in 0..simulation_steps {
             sim_step(&mut app);
-
-            let current_snapshot = {
-                let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-                vec![
-                    currency_pools.get(Currency::ATP),
-                    currency_pools.get(Currency::ReducingPower),
-                    currency_pools.get(Currency::AcetylCoA),
-                    currency_pools.get(Currency::CarbonSkeletons),
-                    currency_pools.get(Currency::FreeFattyAcids),
-                    currency_pools.get(Currency::Pyruvate),
-                    currency_pools.get(Currency::OrganicWaste),
-                    currency_pools.get(Currency::StorageBeads),
-                ]
-            };
-            let current_total = current_snapshot.iter().sum::<f32>();
-
-            // Total currency should only decrease (vesicle export removes waste)
-            prop_assert!(current_total <= initial_total + 0.1); // Allow small epsilon for floating-point
-
-            // Waste specifically should only decrease
-            let current_waste = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::OrganicWaste);
-            prop_assert!(current_waste <= initial_waste + 0.1);
-
-            // No currency should go negative
-            let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-            for currency in [Currency::ATP, Currency::ReducingPower, Currency::AcetylCoA, Currency::CarbonSkeletons, Currency::FreeFattyAcids, Currency::Pyruvate, Currency::OrganicWaste, Currency::StorageBeads] {
-                prop_assert!(currency_pools.get(currency) >= 0.0, "Currency {:?} went negative", currency);
+            let now = cell_snapshot(&app, cell);
+            for (i, (&before, &after)) in initial.iter().zip(&now).enumerate() {
+                if i == waste_index {
+                    prop_assert!(after < before, "waste goes down");
+                } else {
+                    prop_assert!(after <= before + 1e-4, "pool {} grew: {} -> {}", i, before, after);
+                }
+                prop_assert!(after >= 0.0);
             }
         }
     }
 }
 
-// --- Combined System Invariant Tests ---
+// --- Combined blocks ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 8, // Even fewer cases for complex multi-system test
+        cases: 8,
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that complex multi-system interactions maintain all invariants
+    /// Fermentation, vesicle export and fat storage together keep all pools at
+    /// 0 or more.
     #[test]
     fn multi_system_invariants(
         initial_pyruvate in 100.0f32..300.0f32,
         initial_rp in 100.0f32..300.0f32,
-        initial_ffa in 150.0f32..400.0f32,
+        initial_lipids in 150.0f32..400.0f32,
         toxicity_threshold in 50.0f32..100.0f32,
-        simulation_steps in 1..8usize  // Reduced steps for performance
+        simulation_steps in 1..8usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut commands = app.world_mut().commands();
-            commands.spawn((
-                metabolistic3d::cell::Cell, Genome::default(), CurrencyPools::default(),
-            )).id()
-        };
-        app.world_mut().flush();
-
-        // Initialize all currencies
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-            currency_pools.set(Currency::ReducingPower, initial_rp);
-            currency_pools.set(Currency::ATP, 50.0);
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-            currency_pools.set(Currency::StorageBeads, 10.0);
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
-        app.world_mut().flush(); // Ensure resources are initialized before spawning entities
+        let cell = spawn_test_cell(
+            &mut app,
+            &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage],
+            &[
+                (Currency::Pyruvate, initial_pyruvate),
+                (Currency::ReducingPower, initial_rp),
+                (Currency::ATP, 50.0),
+                (Currency::Lipids, initial_lipids),
+            ],
+        );
+        set_stored_lipids(&mut app, cell, 10.0);
 
-        // Spawn all system blocks
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
-
-        // Run multi-system simulation
         for step in 0..simulation_steps {
             sim_step(&mut app);
-
-            // Verify all invariants hold at each step
-            let currency_pools = &app.world().get::<CurrencyPools>(cell_entity).unwrap();
-            for currency in [Currency::ATP, Currency::ReducingPower, Currency::AcetylCoA, Currency::CarbonSkeletons, Currency::FreeFattyAcids, Currency::Pyruvate, Currency::OrganicWaste, Currency::StorageBeads] {
-                prop_assert!(currency_pools.get(currency) >= 0.0, "Currency {:?} went negative at step {}", currency, step);
-            }
+            prop_assert!(cell_currencies_non_negative(&app, cell), "negative pool at step {}", step);
         }
     }
 }

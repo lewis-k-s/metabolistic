@@ -12,7 +12,8 @@ use crate::molecules::Currency;
 #[derive(Component)]
 pub struct FermentationBlock;
 
-/// Full rate, per second: 1 Pyruvate + 1 ReducingPower -> 1 ATP + 1 OrganicWaste.
+/// Per second, one enzyme at full saturation:
+/// 1 Pyruvate + 1 ReducingPower -> 1 ATP + 1 Waste.
 pub const RATE: f32 = 1.0;
 
 pub fn flux_profile() -> FluxProfile {
@@ -20,6 +21,6 @@ pub fn flux_profile() -> FluxProfile {
     profile.set_demand(Currency::Pyruvate, RATE);
     profile.set_demand(Currency::ReducingPower, RATE);
     profile.set_production(Currency::ATP, RATE);
-    profile.set_production(Currency::OrganicWaste, RATE);
+    profile.set_production(Currency::Waste, RATE);
     profile
 }

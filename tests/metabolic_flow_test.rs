@@ -7,6 +7,7 @@ use metabolistic3d::cell::{CellBlocks, OwnedBy};
 use metabolistic3d::metabolism::*;
 use metabolistic3d::molecules::Currency;
 use metabolistic3d::player::spawn_local_player_cell;
+use metabolistic3d::proteins::Proteome;
 
 fn app(timing: FlowmapTimingConfig) -> App {
     let mut app = App::new();
@@ -17,9 +18,15 @@ fn app(timing: FlowmapTimingConfig) -> App {
     app
 }
 
+/// Spawns a cell with one enzyme for each gene in `genome`.
 fn spawn_cell(app: &mut App, genome: Genome) -> Entity {
+    let enzymes: Vec<_> = genome.table.keys().map(|&k| (k, 1)).collect();
     let mut commands = app.world_mut().commands();
-    spawn_local_player_cell(&mut commands, genome).1
+    let cell = spawn_local_player_cell(&mut commands, genome).1;
+    commands
+        .entity(cell)
+        .insert(Proteome::with_enzymes(&enzymes));
+    cell
 }
 
 fn block_status(app: &App, cell: Entity, kind: BlockKind) -> Option<BlockStatus> {
@@ -147,7 +154,7 @@ fn real_time_driver_runs_ticks_unless_manual() {
         .world_mut()
         .get_mut::<CurrencyPools>(cell)
         .unwrap()
-        .set(Currency::OrganicWaste, 10.0);
+        .set(Currency::Waste, 10.0);
     manual
         .world_mut()
         .resource_mut::<FlowmapTimingConfig>()
@@ -157,7 +164,7 @@ fn real_time_driver_runs_ticks_unless_manual() {
         .world()
         .get::<CurrencyPools>(cell)
         .unwrap()
-        .get(Currency::OrganicWaste);
+        .get(Currency::Waste);
     assert_eq!(waste, 10.0);
 
     // Real time: one full tick of accumulated time runs one tick.
@@ -168,7 +175,7 @@ fn real_time_driver_runs_ticks_unless_manual() {
         .world_mut()
         .get_mut::<CurrencyPools>(cell)
         .unwrap()
-        .set(Currency::OrganicWaste, 10.0);
+        .set(Currency::Waste, 10.0);
     let step = timed
         .world()
         .resource::<FlowmapTimingConfig>()
@@ -182,6 +189,6 @@ fn real_time_driver_runs_ticks_unless_manual() {
         .world()
         .get::<CurrencyPools>(cell)
         .unwrap()
-        .get(Currency::OrganicWaste);
+        .get(Currency::Waste);
     assert!(waste < 10.0);
 }

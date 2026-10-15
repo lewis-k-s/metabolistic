@@ -71,7 +71,7 @@ fn test_environment_snapshot_creation() {
 #[test]
 fn test_environment_snapshot_with_data() {
     let mut currencies = HashMap::new();
-    currencies.insert(Currency::OrganicWaste, 25.0);
+    currencies.insert(Currency::Waste, 25.0);
     currencies.insert(Currency::CarbonSkeletons, 75.0);
 
     let snapshot = EnvironmentSnapshot::new()

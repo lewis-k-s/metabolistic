@@ -1,142 +1,156 @@
-//! # Currency System & Metabolic Pools
+//! # Internal pools (currencies)
 //!
-//! This module defines the core metabolic "currencies" and currency management systems.
-//! Unlike traditional global resource pools, this system uses component-based currency pools
-//! for individual cells and environmental resource pools for shared/external metabolites.
+//! A cell keeps nine internal pools. See `docs/gameplay-roadmap.md`, section
+//! "Internal pools".
 //!
-//! ## Architecture:
-//! - **CurrencyPools (Component)**: Per-cell currency management attached to individual cell entities
-//! - **EnvironmentalCurrencyPools (Resource)**: Global pools for environmental/external metabolites
-//! - **Currency (Enum)**: Type-safe identifiers for different metabolic currencies
+//! | Group | Pools |
+//! |---|---|
+//! | Energy | ATP, ReducingPower |
+//! | Carbon hub | Pyruvate, CarbonSkeletons (includes acetyl-CoA) |
+//! | Building | AminoAcids (proteins), Nucleotides (genome repair), Lipids (membrane repair and growth) |
+//! | Cofactor | Metals (Fe-S clusters) |
+//! | Waste | Waste |
 //!
-//! ## Core Currencies:
-//! - **ATP**: The main energy currency
-//! - **ReducingPower**: Represents NADH, NADPH, etc., used in biosynthesis
-//! - **AcetylCoA**: A key carbon carrier for lipid synthesis and the TCA cycle
-//! - **CarbonSkeletons**: Precursor molecules for amino acids and nucleotides
-//! - **FreeFattyAcids**: Available fatty acids for various metabolic processes
-//! - **Pyruvate**: Key input for fermentation and TCA cycle
-//! - **OrganicWaste**: Byproducts that can become toxic if not managed
+//! Lipids have a stored form, `StoredLipids` (lipid beads), on the cell. Fat
+//! storage moves lipids between the pool and the store.
+//!
+//! - **CurrencyPools (Component)**: the pools of one cell.
+//! - **EnvironmentalCurrencyPools (Resource)**: global outside pools. The
+//!   spatial grid replaces them in milestone M2.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 use tracing::debug;
 
-// --- Currency System Core ---
-
-/// An enum representing the different types of metabolic currencies.
-/// This is used as a key in currency pools and flux profiles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// One internal pool. A key in `CurrencyPools` and in `FluxProfile`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Currency {
+    /// The main energy currency.
     ATP,
+    /// NADH, NADPH and other electron carriers.
     ReducingPower,
-    AcetylCoA,
-    CarbonSkeletons,
-    FreeFattyAcids,
-    StorageBeads,
+    /// The end of glycolysis, and the input of fermentation.
     Pyruvate,
-    OrganicWaste,
+    /// Precursor carbon for biosynthesis. Includes acetyl-CoA.
+    CarbonSkeletons,
+    /// Material for proteins (enzymes and membrane proteins).
+    AminoAcids,
+    /// Material for genome repair.
+    Nucleotides,
+    /// Free lipids for membrane repair and growth.
+    Lipids,
+    /// Metal cofactors (Fe-S clusters).
+    Metals,
+    /// Metabolic byproducts. Toxic when they collect.
+    Waste,
 }
 
-/// Central currency pools managed by the metabolic flow system.
-/// This is exclusively a Component attached to individual cells.
-/// For global/environmental currencies, use EnvironmentalCurrencyPools resource.
+impl Currency {
+    /// All pools, in a fixed order.
+    pub const ALL: [Currency; 9] = [
+        Currency::ATP,
+        Currency::ReducingPower,
+        Currency::Pyruvate,
+        Currency::CarbonSkeletons,
+        Currency::AminoAcids,
+        Currency::Nucleotides,
+        Currency::Lipids,
+        Currency::Metals,
+        Currency::Waste,
+    ];
+}
+
+/// The internal pools of one cell.
 #[derive(Component, Default, Debug, Clone)]
 pub struct CurrencyPools {
     pub pools: HashMap<Currency, f32>,
 }
 
 impl CurrencyPools {
-    /// Get the amount of a specific currency
+    /// The amount in a pool. A missing pool holds 0.
     pub fn get(&self, currency: Currency) -> f32 {
         self.pools.get(&currency).copied().unwrap_or(0.0)
     }
 
-    /// Set the amount of a specific currency
+    /// Sets a pool. Negative amounts become 0.
     pub fn set(&mut self, currency: Currency, amount: f32) {
-        self.pools.insert(currency, amount.max(0.0)); // Prevent negative currencies
+        self.pools.insert(currency, amount.max(0.0));
     }
 
-    /// Add to a currency (positive) or subtract (negative)
+    /// Adds `delta` to a pool (subtracts if negative). The pool stays at 0 or more.
     pub fn modify(&mut self, currency: Currency, delta: f32) {
         let current = self.get(currency);
         self.set(currency, current + delta);
     }
 
-    /// Check if there's enough of a currency available
+    /// True if the pool holds at least `amount`.
     pub fn can_consume(&self, currency: Currency, amount: f32) -> bool {
         self.get(currency) >= amount
     }
 
-    /// Initialize with default starting amounts for a new cell
+    /// Start amounts for a new cell.
     pub fn with_defaults() -> Self {
-        let mut pools = HashMap::new();
-        pools.insert(Currency::ATP, 100.0);
-        pools.insert(Currency::ReducingPower, 50.0);
-        pools.insert(Currency::AcetylCoA, 20.0);
-        pools.insert(Currency::CarbonSkeletons, 30.0);
-        pools.insert(Currency::FreeFattyAcids, 10.0);
-        pools.insert(Currency::StorageBeads, 0.0);
-        pools.insert(Currency::Pyruvate, 25.0);
-        pools.insert(Currency::OrganicWaste, 0.0);
-
+        let pools = HashMap::from([
+            (Currency::ATP, 100.0),
+            (Currency::ReducingPower, 50.0),
+            (Currency::Pyruvate, 25.0),
+            (Currency::CarbonSkeletons, 30.0),
+            (Currency::AminoAcids, 20.0),
+            (Currency::Nucleotides, 10.0),
+            (Currency::Lipids, 20.0),
+            (Currency::Metals, 5.0),
+            (Currency::Waste, 0.0),
+        ]);
         Self { pools }
     }
 }
 
-/// Environmental currency pools for shared/external metabolites.
-/// These represent currencies that exist in the environment outside of cells,
-/// such as waste products, external carbon sources, or shared metabolite pools.
-/// Unlike internal CurrencyPools (Component), this is a global resource.
+/// Lipids that a cell keeps as storage beads. Fat storage moves lipids between
+/// this store and the `Lipids` pool. Beads are not toxic.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
+pub struct StoredLipids(pub f32);
+
+/// Global outside pools. M2 replaces this resource with the spatial grid.
 #[derive(Resource, Default, Debug, Clone)]
 pub struct EnvironmentalCurrencyPools {
     pub pools: HashMap<Currency, f32>,
 }
 
 impl EnvironmentalCurrencyPools {
-    /// Get the amount of a specific environmental currency
+    /// The amount in an outside pool. A missing pool holds 0.
     pub fn get(&self, currency: Currency) -> f32 {
         self.pools.get(&currency).copied().unwrap_or(0.0)
     }
 
-    /// Set the amount of a specific environmental currency
+    /// Sets an outside pool. Negative amounts become 0.
     pub fn set(&mut self, currency: Currency, amount: f32) {
-        self.pools.insert(currency, amount.max(0.0)); // Prevent negative currencies
+        self.pools.insert(currency, amount.max(0.0));
     }
 
-    /// Add to an environmental currency (positive) or subtract (negative)
+    /// Adds `delta` to an outside pool (subtracts if negative).
     pub fn modify(&mut self, currency: Currency, delta: f32) {
         let current = self.get(currency);
         self.set(currency, current + delta);
     }
 
-    /// Check if there's enough of an environmental currency available
+    /// True if the outside pool holds at least `amount`.
     pub fn can_consume(&self, currency: Currency, amount: f32) -> bool {
         self.get(currency) >= amount
     }
 
-    /// Initialize with default environmental starting amounts
-    /// Environmental pools typically start lower since they represent external resources
+    /// Start amounts for the outside pools.
     pub fn with_defaults() -> Self {
-        let mut pools = HashMap::new();
-        // Environmental waste accumulation starts at zero
-        pools.insert(Currency::OrganicWaste, 0.0);
-        // External carbon sources might be limited
-        pools.insert(Currency::CarbonSkeletons, 50.0);
-        // Environmental ATP/ReducingPower typically minimal (cells produce internally)
-        pools.insert(Currency::ATP, 0.0);
-        pools.insert(Currency::ReducingPower, 0.0);
-        pools.insert(Currency::AcetylCoA, 0.0);
-        pools.insert(Currency::FreeFattyAcids, 0.0);
-        pools.insert(Currency::StorageBeads, 0.0);
-        pools.insert(Currency::Pyruvate, 10.0); // Some external pyruvate sources
-
+        let pools = HashMap::from([
+            (Currency::Waste, 0.0),
+            (Currency::CarbonSkeletons, 50.0),
+            (Currency::Pyruvate, 10.0),
+        ]);
         Self { pools }
     }
 }
 
-/// Free fatty acid level above which fat storage stores lipids as beads, to
-/// protect the cell from lipid toxicity. At or below it, fat storage releases them.
+/// Free lipid level above which fat storage stores lipids as beads, to protect
+/// the cell from lipid toxicity. Below it, fat storage releases them.
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct LipidToxicityThreshold(pub f32);
 
@@ -146,11 +160,8 @@ impl Default for LipidToxicityThreshold {
     }
 }
 
-// --- Plugin for Initialization ---
-
-/// A Bevy `Plugin` that initializes the currency system.
-/// This plugin sets up environmental currency pools and system configuration.
-/// Individual cell currency pools are managed as components, not global resources.
+/// Adds the outside pools and the lipid toxicity threshold. Cell pools are
+/// components, not resources.
 pub struct CurrencyPlugin;
 
 impl Plugin for CurrencyPlugin {
@@ -158,8 +169,6 @@ impl Plugin for CurrencyPlugin {
         app.init_resource::<EnvironmentalCurrencyPools>()
             .init_resource::<LipidToxicityThreshold>();
 
-        debug!(
-            "CurrencyPlugin loaded: Initialized EnvironmentalCurrencyPools and LipidToxicityThreshold. Cell currency pools are managed as components."
-        );
+        debug!("CurrencyPlugin loaded: EnvironmentalCurrencyPools and LipidToxicityThreshold.");
     }
 }

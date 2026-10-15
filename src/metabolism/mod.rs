@@ -1,22 +1,26 @@
 //! # Metabolic flux engine
 //!
-//! Each cell owns metabolic blocks. Each block has a `FluxProfile`: the rate (per
-//! second) at which it consumes (negative) and produces (positive) currencies at
-//! full activity.
+//! Each cell owns metabolic blocks. Each block has a `FluxProfile`: its flows
+//! per second for one enzyme at full saturation. Negative flows consume a
+//! pool, positive flows produce one. The cell's `Proteome` sets how many
+//! enzymes each block has. See `solver` for the rate law and the sharing rule.
 //!
 //! The engine runs in `MetabolicSchedule`, one fixed tick at a time. A tick:
 //!
 //! 1. `MetabolicSet::Genome`: random mutations.
-//! 2. `MetabolicSet::Regulate`: regulated blocks (for example fat storage) set
-//!    their flux profile from the cell's current pools.
-//! 3. `MetabolicSet::Solve`: for each cell, `solve_tick` runs the blocks in
-//!    dependency order. Each block runs at the largest activity in [0, 1] that its
-//!    inputs allow. Mass is conserved per block, and pools never go negative.
-//! 4. `MetabolicSet::Exchange`: the cell exchanges waste and nutrients with the
-//!    environment.
+//! 2. `MetabolicSet::Regulate`: regulated blocks set their drive or move pools
+//!    (for example fat storage and protein synthesis).
+//! 3. `MetabolicSet::Solve`: for each cell, `solve_tick` runs all blocks and
+//!    the cell's maintenance cost together.
+//! 4. `MetabolicSet::Build`: the cell uses the products of the tick. Protein
+//!    synthesis advances the synthesis queue, and lipids repair the membrane.
+//! 5. `MetabolicSet::Exchange`: the cell exchanges waste and nutrients with the
+//!    outside pools.
 //!
 //! In the game, `run_metabolic_schedule_timed` runs ticks from real time. Tests
 //! set `FlowmapTimingConfig::manual` and call `run_metabolic_tick` directly.
+
+pub mod solver;
 
 use std::collections::HashMap;
 
@@ -24,9 +28,15 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 
 use crate::blocks::genome::{BlockKind, GeneState};
-use crate::cell::{Cell, CellBlocks};
+use crate::cell::{Cell, CellBlocks, CellSize, maintenance_atp_per_sec};
+use crate::environment::{Channel, LocalEnvironment, external_saturation};
 pub use crate::molecules::CurrencyPools; // Re-export for backward compatibility
 use crate::molecules::{Currency, EnvironmentalCurrencyPools};
+use crate::proteins::Proteome;
+pub use solver::{
+    BlockInput, MAX_SUBSTEP, TickResult, block_demand, block_rates, dependency_lists, solve_order,
+    solve_tick,
+};
 
 // --- Components ---
 
@@ -34,8 +44,8 @@ use crate::molecules::{Currency, EnvironmentalCurrencyPools};
 #[derive(Component, Default)]
 pub struct MetabolicBlock;
 
-/// Defines the flux profile (production/consumption) of a metabolic block.
-/// Keys are Currency types, values are flux amounts (positive for production, negative for consumption).
+/// Flows of a block per second, for one enzyme at full saturation.
+/// Negative values consume a currency, positive values produce it.
 #[derive(Component, Default, Debug, Clone)]
 pub struct FluxProfile(pub HashMap<Currency, f32>);
 
@@ -119,6 +129,46 @@ impl FluxProfile {
     }
 }
 
+/// Saturation data of a block. See `solver` for the rate law.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Kinetics {
+    /// Half-saturation constant `K` for inputs, cofactors and outside channels.
+    pub k_half: f32,
+    /// Pools that the block needs but does not use up.
+    pub cofactors: &'static [Currency],
+    /// Outside channels that the block needs (constant supply in M1).
+    pub external: &'static [Channel],
+}
+
+impl Default for Kinetics {
+    fn default() -> Self {
+        Self {
+            k_half: DEFAULT_K_HALF,
+            cofactors: &[],
+            external: &[],
+        }
+    }
+}
+
+/// Default half-saturation constant of a block.
+pub const DEFAULT_K_HALF: f32 = 5.0;
+
+/// Regulation multiplier of a block: 0 is off, 1 is normal. Regulated blocks
+/// set it in `MetabolicSet::Regulate`. M4 action slots (Off / Low / High) will
+/// also set it.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Drive(pub f32);
+
+impl Default for Drive {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+/// Turnovers of a block in the last metabolic tick.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
+pub struct BlockTurnover(pub f32);
+
 // --- Resources ---
 
 /// Configuration for metabolic tick timing
@@ -189,11 +239,11 @@ impl FlowmapTimingConfig {
     }
 }
 
-/// The solve order of a cell's blocks from the last metabolic tick.
+/// The block graph of a cell from the last metabolic tick.
 /// Kept on the cell for the flowmap and debug views.
 #[derive(Component, Default, Clone, Debug)]
 pub struct MetabolicGraph {
-    /// Block entities in the order the solver ran them
+    /// Block entities, producers before consumers (see `solve_order`)
     pub nodes: Vec<Entity>,
     /// block -> blocks that produce something it consumes
     pub dependencies: HashMap<Entity, Vec<Entity>>,
@@ -235,119 +285,6 @@ pub struct MetabolicNode {
     pub status: BlockStatus,
 }
 
-// --- Pure solver ---
-
-/// Returns the order in which to run blocks: producers of a currency before its
-/// consumers. Blocks in a cycle keep their input order. The result is a
-/// permutation of `0..profiles.len()`.
-pub fn solve_order(profiles: &[&FluxProfile]) -> Vec<usize> {
-    let n = profiles.len();
-    let deps = dependency_lists(profiles);
-    let mut order = Vec::with_capacity(n);
-    let mut visited = vec![false; n];
-    let mut on_stack = vec![false; n];
-
-    fn visit(
-        i: usize,
-        deps: &[Vec<usize>],
-        visited: &mut [bool],
-        on_stack: &mut [bool],
-        order: &mut Vec<usize>,
-    ) {
-        if visited[i] || on_stack[i] {
-            return; // done, or a cycle: keep input order
-        }
-        on_stack[i] = true;
-        for &d in &deps[i] {
-            visit(d, deps, visited, on_stack, order);
-        }
-        on_stack[i] = false;
-        visited[i] = true;
-        order.push(i);
-    }
-
-    for i in 0..n {
-        visit(i, &deps, &mut visited, &mut on_stack, &mut order);
-    }
-    order
-}
-
-/// For each block, the blocks that produce at least one currency it consumes.
-pub fn dependency_lists(profiles: &[&FluxProfile]) -> Vec<Vec<usize>> {
-    profiles
-        .iter()
-        .enumerate()
-        .map(|(i, consumer)| {
-            let inputs = consumer.get_demanded_currencies();
-            (0..profiles.len())
-                .filter(|&j| j != i && inputs.iter().any(|&c| profiles[j].produces(c)))
-                .collect()
-        })
-        .collect()
-}
-
-/// Result of one metabolic tick for one cell.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct TickResult {
-    /// Net change of each currency over the tick
-    pub deltas: HashMap<Currency, f32>,
-    /// Activity in [0, 1] of each block, in the same order as the input
-    pub activity: Vec<f32>,
-}
-
-/// Runs one tick of `dt` seconds over `blocks`, in the order given.
-///
-/// Each block runs at `status.throughput()` times its full rate, reduced to the
-/// largest fraction that the current pools can supply. All of a block's flows
-/// scale by the same fraction, so each block conserves its stoichiometry. Blocks
-/// later in the order see the products of earlier blocks.
-pub fn solve_tick(
-    pools: &CurrencyPools,
-    blocks: &[(BlockStatus, &FluxProfile)],
-    dt: f32,
-) -> TickResult {
-    let mut working: HashMap<Currency, f32> = pools.pools.clone();
-    let mut activity = Vec::with_capacity(blocks.len());
-
-    for (status, profile) in blocks {
-        let scale = status.throughput() * dt;
-        if scale <= 0.0 {
-            activity.push(0.0);
-            continue;
-        }
-
-        let mut fraction = 1.0f32;
-        for (currency, &rate) in &profile.0 {
-            if rate < 0.0 {
-                let need = -rate * scale;
-                let available = working.get(currency).copied().unwrap_or(0.0).max(0.0);
-                fraction = fraction.min(available / need);
-            }
-        }
-        let fraction = fraction.clamp(0.0, 1.0);
-        activity.push(fraction);
-        if fraction == 0.0 {
-            continue;
-        }
-
-        for (currency, &rate) in &profile.0 {
-            let entry = working.entry(*currency).or_insert(0.0);
-            // Guard against float error taking a pool below zero.
-            *entry = (*entry + rate * scale * fraction).max(0.0);
-        }
-    }
-
-    let mut deltas = HashMap::new();
-    for (currency, &after) in &working {
-        let before = pools.get(*currency);
-        let delta = after - before;
-        if delta != 0.0 {
-            deltas.insert(*currency, delta);
-        }
-    }
-    TickResult { deltas, activity }
-}
-
 // --- Schedule ---
 
 #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -359,6 +296,7 @@ pub enum MetabolicSet {
     Genome,
     Regulate,
     Solve,
+    Build,
     Exchange,
 }
 
@@ -392,40 +330,105 @@ fn run_metabolic_schedule_timed(world: &mut World) {
 
 // --- Systems ---
 
+/// One block of a cell, as fetched for the solver.
+struct OwnedBlock<'a> {
+    entity: Entity,
+    kind: BlockKind,
+    status: BlockStatus,
+    profile: &'a FluxProfile,
+    kinetics: Kinetics,
+    drive: f32,
+}
+
 /// Solves one tick for every cell and applies the result to its pools.
+#[allow(clippy::type_complexity)]
 pub fn solve_cell_flux_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&CellBlocks, &mut CurrencyPools, &mut MetabolicGraph), With<Cell>>,
-    blocks: Query<(&MetabolicNode, &FluxProfile)>,
+    mut cells: Query<
+        (
+            &CellBlocks,
+            &Proteome,
+            &CellSize,
+            &LocalEnvironment,
+            &mut CurrencyPools,
+            &mut MetabolicGraph,
+        ),
+        With<Cell>,
+    >,
+    blocks: Query<(&MetabolicNode, &FluxProfile, &Kinetics, &Drive)>,
+    mut turnovers: Query<&mut BlockTurnover>,
 ) {
     let dt = timing.target_delta();
-    for (cell_blocks, mut pools, mut graph) in &mut cells {
-        // Sort by kind so the result does not depend on HashMap order.
-        let mut owned: Vec<(Entity, BlockStatus, &FluxProfile, BlockKind)> = cell_blocks
+    for (cell_blocks, proteome, size, env, mut pools, mut graph) in &mut cells {
+        // Sort by kind so that the graph does not depend on HashMap order.
+        let mut owned: Vec<OwnedBlock> = cell_blocks
             .0
             .values()
-            .filter_map(|&e| blocks.get(e).ok().map(|(n, p)| (e, n.status, p, n.kind)))
+            .filter_map(|&entity| {
+                let (node, profile, kinetics, drive) = blocks.get(entity).ok()?;
+                Some(OwnedBlock {
+                    entity,
+                    kind: node.kind,
+                    status: node.status,
+                    profile,
+                    kinetics: *kinetics,
+                    drive: drive.0,
+                })
+            })
             .collect();
-        owned.sort_by_key(|b| b.3);
+        owned.sort_by_key(|b| b.kind);
 
-        let profiles: Vec<&FluxProfile> = owned.iter().map(|b| b.2).collect();
-        let order = solve_order(&profiles);
-        let deps = dependency_lists(&profiles);
-        let ordered: Vec<(BlockStatus, &FluxProfile)> =
-            order.iter().map(|&i| (owned[i].1, owned[i].2)).collect();
+        let maintenance = maintenance_profile(size);
+        let mut inputs: Vec<BlockInput> = owned
+            .iter()
+            .map(|b| BlockInput {
+                profile: b.profile,
+                enzymes: proteome.enzymes(b.kind) as f32,
+                status: b.status,
+                drive: b.drive,
+                k_half: b.kinetics.k_half,
+                cofactors: b.kinetics.cofactors,
+                external: external_saturation(env, b.kinetics.external, b.kinetics.k_half),
+            })
+            .collect();
+        // Maintenance competes for ATP like a block, at a fixed rate.
+        inputs.push(BlockInput::new(&maintenance, 1.0));
 
-        let result = solve_tick(&pools, &ordered, dt);
+        let result = solve_tick(&pools, &inputs, dt);
         for (currency, delta) in result.deltas {
             pools.modify(currency, delta);
         }
+        for (block, turnover) in owned.iter().zip(&result.turnover) {
+            if let Ok(mut t) = turnovers.get_mut(block.entity) {
+                t.0 = *turnover;
+            }
+        }
 
-        graph.nodes = order.iter().map(|&i| owned[i].0).collect();
+        let profiles: Vec<&FluxProfile> = owned.iter().map(|b| b.profile).collect();
+        let order = solve_order(&profiles);
+        let deps = dependency_lists(&profiles);
+        graph.nodes = order.iter().map(|&i| owned[i].entity).collect();
         graph.dependencies = deps
             .iter()
             .enumerate()
-            .map(|(i, d)| (owned[i].0, d.iter().map(|&j| owned[j].0).collect()))
+            .map(|(i, d)| {
+                (
+                    owned[i].entity,
+                    d.iter().map(|&j| owned[j].entity).collect(),
+                )
+            })
             .collect();
     }
+}
+
+/// The maintenance cost of a cell as a flux profile: ATP per second.
+pub fn maintenance_profile(size: &CellSize) -> FluxProfile {
+    let mut profile = FluxProfile::default();
+    let atp = maintenance_atp_per_sec(size);
+    if atp > 0.0 {
+        profile.set_demand(Currency::ATP, atp);
+    }
+    profile
 }
 
 // Exchange rates with the environment. Placeholder tuning values, per second.
@@ -444,11 +447,11 @@ const ENV_PYRUVATE_REPLENISH: f32 = 2.5;
 
 /// Fraction of a pool lost in `dt` seconds at a continuous rate `k` per second.
 /// Exact for any tick length, unlike `k * dt`.
-fn decay_fraction(k: f32, dt: f32) -> f32 {
+pub fn decay_fraction(k: f32, dt: f32) -> f32 {
     1.0 - (-k * dt).exp()
 }
 
-/// Cells leak organic waste into the environment when it builds up.
+/// Cells leak waste into the environment when it builds up.
 pub fn cell_waste_export_system(
     timing: Res<FlowmapTimingConfig>,
     mut cells: Query<&mut CurrencyPools, With<Cell>>,
@@ -456,11 +459,11 @@ pub fn cell_waste_export_system(
 ) {
     let dt = timing.target_delta();
     for mut pools in &mut cells {
-        let waste = pools.get(Currency::OrganicWaste);
+        let waste = pools.get(Currency::Waste);
         if waste > WASTE_LEAK_THRESHOLD {
             let amount = waste * decay_fraction(WASTE_LEAK_FRACTION_PER_SEC, dt);
-            pools.modify(Currency::OrganicWaste, -amount);
-            env_pools.modify(Currency::OrganicWaste, amount);
+            pools.modify(Currency::Waste, -amount);
+            env_pools.modify(Currency::Waste, amount);
         }
     }
 }
@@ -504,10 +507,10 @@ pub fn environmental_currency_processing_system(
     mut env_pools: ResMut<EnvironmentalCurrencyPools>,
 ) {
     let dt = timing.target_delta();
-    let waste = env_pools.get(Currency::OrganicWaste);
+    let waste = env_pools.get(Currency::Waste);
     if waste > 0.0 {
         let decay = waste * decay_fraction(ENV_WASTE_DECAY_FRACTION_PER_SEC, dt);
-        env_pools.modify(Currency::OrganicWaste, -decay);
+        env_pools.modify(Currency::Waste, -decay);
         env_pools.modify(Currency::CarbonSkeletons, decay * ENV_WASTE_TO_CARBON);
     }
     if env_pools.get(Currency::CarbonSkeletons) < ENV_CARBON_CAP {
@@ -532,6 +535,7 @@ impl Plugin for MetabolicFlowPlugin {
                     MetabolicSet::Genome,
                     MetabolicSet::Regulate,
                     MetabolicSet::Solve,
+                    MetabolicSet::Build,
                     MetabolicSet::Exchange,
                 )
                     .chain(),
@@ -553,91 +557,5 @@ impl Plugin for MetabolicFlowPlugin {
             )
             .add_systems(Update, run_metabolic_schedule_timed)
             .add_observer(crate::cell::despawn_blocks_of_removed_cell);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn profile(entries: &[(Currency, f32)]) -> FluxProfile {
-        FluxProfile(entries.iter().copied().collect())
-    }
-
-    fn pools(entries: &[(Currency, f32)]) -> CurrencyPools {
-        CurrencyPools {
-            pools: entries.iter().copied().collect(),
-        }
-    }
-
-    #[test]
-    fn full_activity_when_inputs_suffice() {
-        let p = profile(&[(Currency::Pyruvate, -1.0), (Currency::ATP, 1.0)]);
-        let r = solve_tick(
-            &pools(&[(Currency::Pyruvate, 10.0)]),
-            &[(BlockStatus::Active, &p)],
-            0.5,
-        );
-        assert_eq!(r.activity, vec![1.0]);
-        assert_eq!(r.deltas[&Currency::Pyruvate], -0.5);
-        assert_eq!(r.deltas[&Currency::ATP], 0.5);
-    }
-
-    #[test]
-    fn limiting_input_throttles_all_flows() {
-        let p = profile(&[
-            (Currency::Pyruvate, -2.0),
-            (Currency::ReducingPower, -2.0),
-            (Currency::ATP, 2.0),
-        ]);
-        let start = pools(&[(Currency::Pyruvate, 0.5), (Currency::ReducingPower, 10.0)]);
-        let r = solve_tick(&start, &[(BlockStatus::Active, &p)], 1.0);
-        assert!((r.activity[0] - 0.25).abs() < 1e-6);
-        assert!((r.deltas[&Currency::Pyruvate] + 0.5).abs() < 1e-6);
-        assert!((r.deltas[&Currency::ReducingPower] + 0.5).abs() < 1e-6);
-        assert!((r.deltas[&Currency::ATP] - 0.5).abs() < 1e-6);
-    }
-
-    #[test]
-    fn status_scales_throughput() {
-        let p = profile(&[(Currency::ATP, 1.0)]);
-        let empty = CurrencyPools::default();
-        let mutated = solve_tick(&empty, &[(BlockStatus::Mutated, &p)], 1.0);
-        let silent = solve_tick(&empty, &[(BlockStatus::Silent, &p)], 1.0);
-        assert_eq!(mutated.deltas[&Currency::ATP], 0.5);
-        assert!(silent.deltas.is_empty());
-    }
-
-    #[test]
-    fn producers_run_before_consumers() {
-        let consumer = profile(&[(Currency::Pyruvate, -1.0), (Currency::ATP, 1.0)]);
-        let producer = profile(&[(Currency::Pyruvate, 1.0)]);
-        let order = solve_order(&[&consumer, &producer]);
-        assert_eq!(order, vec![1, 0]);
-
-        // With the producer first, the consumer can use its product in the same tick.
-        let ordered: Vec<(BlockStatus, &FluxProfile)> = order
-            .iter()
-            .map(|&i| (BlockStatus::Active, [&consumer, &producer][i]))
-            .collect();
-        let r = solve_tick(&CurrencyPools::default(), &ordered, 1.0);
-        assert_eq!(r.deltas[&Currency::ATP], 1.0);
-    }
-
-    #[test]
-    fn cycles_do_not_hang() {
-        let a = profile(&[(Currency::Pyruvate, -1.0), (Currency::ATP, 1.0)]);
-        let b = profile(&[(Currency::ATP, -1.0), (Currency::Pyruvate, 1.0)]);
-        let mut order = solve_order(&[&a, &b]);
-        order.sort();
-        assert_eq!(order, vec![0, 1]);
-    }
-
-    #[test]
-    fn pools_never_go_negative() {
-        let p = profile(&[(Currency::ATP, -100.0)]);
-        let start = pools(&[(Currency::ATP, 3.0)]);
-        let r = solve_tick(&start, &[(BlockStatus::Active, &p)], 1.0);
-        assert_eq!(r.deltas[&Currency::ATP], -3.0);
     }
 }

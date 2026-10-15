@@ -12,12 +12,12 @@ fn test_flux_profile_demand_methods() {
     // Test has_demand_for
     assert!(profile.has_demand_for(Currency::Pyruvate));
     assert!(profile.has_demand_for(Currency::ATP));
-    assert!(!profile.has_demand_for(Currency::OrganicWaste));
+    assert!(!profile.has_demand_for(Currency::Waste));
 
     // Test get_demand
     assert_eq!(profile.get_demand(Currency::Pyruvate), 5.0);
     assert_eq!(profile.get_demand(Currency::ATP), 2.0);
-    assert_eq!(profile.get_demand(Currency::OrganicWaste), 0.0);
+    assert_eq!(profile.get_demand(Currency::Waste), 0.0);
 
     // Test get_demanded_currencies
     let demanded = profile.get_demanded_currencies();
@@ -32,23 +32,23 @@ fn test_flux_profile_production_methods() {
 
     // Test setting production
     profile.set_production(Currency::ATP, 10.0);
-    profile.set_production(Currency::OrganicWaste, 3.5);
+    profile.set_production(Currency::Waste, 3.5);
 
     // Test produces
     assert!(profile.produces(Currency::ATP));
-    assert!(profile.produces(Currency::OrganicWaste));
+    assert!(profile.produces(Currency::Waste));
     assert!(!profile.produces(Currency::Pyruvate));
 
     // Test get_production
     assert_eq!(profile.get_production(Currency::ATP), 10.0);
-    assert_eq!(profile.get_production(Currency::OrganicWaste), 3.5);
+    assert_eq!(profile.get_production(Currency::Waste), 3.5);
     assert_eq!(profile.get_production(Currency::Pyruvate), 0.0);
 
     // Test get_produced_currencies
     let produced = profile.get_produced_currencies();
     assert_eq!(produced.len(), 2);
     assert!(produced.contains(&Currency::ATP));
-    assert!(produced.contains(&Currency::OrganicWaste));
+    assert!(produced.contains(&Currency::Waste));
 }
 
 #[test]
@@ -59,19 +59,19 @@ fn test_flux_profile_mixed_operations() {
     profile.set_demand(Currency::Pyruvate, 1.0);
     profile.set_demand(Currency::ReducingPower, 1.0);
     profile.set_production(Currency::ATP, 1.0);
-    profile.set_production(Currency::OrganicWaste, 1.0);
+    profile.set_production(Currency::Waste, 1.0);
 
     // Verify demands
     assert!(profile.has_demand_for(Currency::Pyruvate));
     assert!(profile.has_demand_for(Currency::ReducingPower));
     assert!(!profile.has_demand_for(Currency::ATP));
-    assert!(!profile.has_demand_for(Currency::OrganicWaste));
+    assert!(!profile.has_demand_for(Currency::Waste));
 
     // Verify productions
     assert!(!profile.produces(Currency::Pyruvate));
     assert!(!profile.produces(Currency::ReducingPower));
     assert!(profile.produces(Currency::ATP));
-    assert!(profile.produces(Currency::OrganicWaste));
+    assert!(profile.produces(Currency::Waste));
 
     // Test scaling
     profile.scale(2.0);

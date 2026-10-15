@@ -294,37 +294,14 @@ pub fn collect_cell_data_system(
     }
 }
 
-/// Helper function to get currency snapshot
+/// All internal pools of a cell, for the TUI.
 fn get_currency_snapshot(
     currency_pools: &crate::molecules::CurrencyPools,
 ) -> HashMap<Currency, f32> {
-    let mut snapshot = HashMap::new();
-
-    snapshot.insert(Currency::ATP, currency_pools.get(Currency::ATP));
-    snapshot.insert(
-        Currency::ReducingPower,
-        currency_pools.get(Currency::ReducingPower),
-    );
-    snapshot.insert(Currency::AcetylCoA, currency_pools.get(Currency::AcetylCoA));
-    snapshot.insert(
-        Currency::CarbonSkeletons,
-        currency_pools.get(Currency::CarbonSkeletons),
-    );
-    snapshot.insert(
-        Currency::FreeFattyAcids,
-        currency_pools.get(Currency::FreeFattyAcids),
-    );
-    snapshot.insert(
-        Currency::StorageBeads,
-        currency_pools.get(Currency::StorageBeads),
-    );
-    snapshot.insert(Currency::Pyruvate, currency_pools.get(Currency::Pyruvate));
-    snapshot.insert(
-        Currency::OrganicWaste,
-        currency_pools.get(Currency::OrganicWaste),
-    );
-
-    snapshot
+    Currency::ALL
+        .iter()
+        .map(|&c| (c, currency_pools.get(c)))
+        .collect()
 }
 
 // Fallback implementations for when TUI feature is not enabled

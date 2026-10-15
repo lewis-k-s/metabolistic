@@ -86,7 +86,7 @@ fn test_tui_with_cell_data() {
     let mut pools = metabolistic3d::molecules::CurrencyPools::default();
     pools.set(Currency::ATP, 100.0);
     pools.set(Currency::ReducingPower, 50.0);
-    pools.set(Currency::OrganicWaste, 10.0);
+    pools.set(Currency::Waste, 10.0);
 
     app.world_mut().spawn((
         metabolistic3d::cell::Cell,

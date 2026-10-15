@@ -4,9 +4,12 @@ use bevy::state::app::StatesPlugin;
 // Simulation modules: always compiled, no graphics dependencies.
 pub mod blocks;
 pub mod cell;
+pub mod environment;
+pub mod membrane;
 pub mod metabolism;
 pub mod molecules;
 pub mod player;
+pub mod proteins;
 pub mod shared;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -61,7 +64,8 @@ impl MetabolisticApp {
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::MetabolicBlocksPlugin)
-            .add_plugins(metabolism::MetabolicFlowPlugin);
+            .add_plugins(metabolism::MetabolicFlowPlugin)
+            .add_plugins(proteins::ProteinPlugin);
 
         #[cfg(feature = "tui")]
         app.add_plugins(tui::CellTuiPlugin);
@@ -96,6 +100,7 @@ impl MetabolisticApp {
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
+            .add_plugins(proteins::ProteinPlugin)
             // Deterministic for tests: no random mutations, and metabolic ticks run
             // only on `metabolism::run_metabolic_tick`, not from real time.
             .insert_resource(blocks::genome::MutationConfig::deterministic())

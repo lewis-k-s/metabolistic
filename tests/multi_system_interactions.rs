@@ -1,108 +1,47 @@
-//! # Multi-System Interaction Property Tests
+//! # Interactions between blocks
 //!
-//! These tests verify that multiple metabolic systems can operate together
-//! without creating conflicts, race conditions, or invariant violations.
-//! Focus on fermentation + fat storage + vesicle export interactions.
+//! Property tests for blocks that share pools in one cell.
 
 use approx::assert_relative_eq;
-use bevy::prelude::*;
 use metabolistic3d::MetabolisticApp;
-use metabolistic3d::blocks::genome::{BlockKind, Genome};
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
 
 mod common;
 use common::*;
 
-// Helper function to get currency from a cell using ECS patterns
-fn get_cell_currency_value(app: &App, cell_entity: Entity, currency: Currency) -> f32 {
-    if let Ok(entity) = app.world().get_entity(cell_entity)
-        && let Some(currency_pools) = entity.get::<CurrencyPools>()
-    {
-        return currency_pools.get(currency);
-    }
-    0.0
-}
-
-// --- Multi-System Coordination Tests ---
-
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 8,
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that fermentation and vesicle export work together correctly
-    /// Fermentation produces organic waste, vesicle export removes it
+    /// Fermentation makes waste, and vesicle export removes it. With more
+    /// export enzymes, less waste stays in the cell.
     #[test]
     fn fermentation_vesicle_export_coordination(
         initial_pyruvate in 100.0f32..500.0f32,
         initial_rp in 100.0f32..500.0f32,
-        simulation_steps in 3..15usize  // Reduced for performance
+        simulation_steps in 3..15usize
     ) {
-        // Create test cell with fermentation and lipid metabolism genes
-        let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut genome = Genome::default();
-            genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
-            genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-
-            app.world_mut().spawn((
-                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
-            )).id()
-        };
-
-        // Initialize fermentation inputs, disable fat storage by removing its resources
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            if let Some(mut currency_pools) = entity_mut.get_mut::<CurrencyPools>() {
-                currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-                currency_pools.set(Currency::ReducingPower, initial_rp);
-                currency_pools.set(Currency::ATP, 0.0);
-                currency_pools.set(Currency::OrganicWaste, 0.0);
-                currency_pools.set(Currency::FreeFattyAcids, 0.0);  // Disable fat storage
-                currency_pools.set(Currency::StorageBeads, 0.0);
+        let pools = [
+            (Currency::Pyruvate, initial_pyruvate),
+            (Currency::ReducingPower, initial_rp),
+            (Currency::ATP, 50.0),
+        ];
+        let mut waste = Vec::new();
+        for export_enzymes in [0, 1, 4] {
+            let mut app = MetabolisticApp::new_headless();
+            let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation, BlockKind::VesicleExport], &pools);
+            set_enzymes(&mut app, cell, BlockKind::VesicleExport, export_enzymes);
+            for _ in 0..simulation_steps {
+                sim_step(&mut app);
+                prop_assert!(cell_currencies_non_negative(&app, cell));
             }
+            waste.push(pool(&app, cell, Currency::Waste));
         }
-
-        // Trigger metabolic processing to ensure blocks are spawned and working
-        run_cell_metabolic_cycle(&mut app, cell_entity);
-
-        let mut max_waste_observed = 0.0f32;
-        let mut waste_production_observed = false;
-
-        // Run simulation and observe interactions
-        for _ in 0..simulation_steps {
-            let waste_before = get_cell_currency_value(&app, cell_entity, Currency::OrganicWaste);
-
-            sim_step(&mut app);
-
-            // Run per-cell metabolic processing each step
-            run_cell_metabolic_cycle(&mut app, cell_entity);
-
-            let waste_after = get_cell_currency_value(&app, cell_entity, Currency::OrganicWaste);
-
-            // Track waste dynamics
-            if waste_after > waste_before {
-                waste_production_observed = true;
-            }
-            if waste_after < waste_before && waste_before > 0.0 {
-                // waste_removal_observed = true;
-            }
-
-            max_waste_observed = max_waste_observed.max(waste_after);
-
-            // Verify waste doesn't accumulate indefinitely
-            prop_assert!(waste_after >= 0.0, "Organic waste went negative");
-
-            // Verify all other currencies remain non-negative
-            prop_assert!(cell_currencies_non_negative(&app, cell_entity));
-        }
-
-        // Verify that both systems actually operated
-        // (At least one should have produced waste, vesicle export should have removed some)
-        prop_assert!(waste_production_observed || max_waste_observed > 0.0,
-            "No waste production observed - fermentation may not be working");
+        prop_assert!(waste[0] > 0.0, "fermentation makes waste");
+        prop_assert!(waste[1] < waste[0] && waste[2] < waste[1], "more export, less waste: {:?}", waste);
     }
 }
 
@@ -112,72 +51,33 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test fermentation + fat storage interaction with shared ATP consumption
+    /// Fermentation and fat storage together keep all pools at 0 or more, and
+    /// fermentation only uses pyruvate.
     #[test]
     fn fermentation_fat_storage_atp_competition(
         initial_pyruvate in 100.0f32..300.0f32,
         initial_rp in 100.0f32..300.0f32,
-        initial_ffa in 200.0f32..600.0f32,
+        initial_lipids in 200.0f32..600.0f32,
         initial_atp in 20.0f32..100.0f32,
         toxicity_threshold in 50.0f32..150.0f32,
-        simulation_steps in 3..10usize  // Reduced for performance
+        simulation_steps in 3..10usize
     ) {
-        // Create test cell with fermentation gene
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut genome = Genome::default();
-            genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
-
-            app.world_mut().spawn((
-                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
-            )).id()
-        };
-
-        // Set up conditions where both systems compete for ATP
-        modify_cell_currencies(&mut app, cell_entity, |currency_pools| {
-            currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-            currency_pools.set(Currency::ReducingPower, initial_rp);
-            currency_pools.set(Currency::ATP, initial_atp);
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-            currency_pools.set(Currency::StorageBeads, 10.0);
-        });
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
+        let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation, BlockKind::FatStorage], &[
+            (Currency::Pyruvate, initial_pyruvate),
+            (Currency::ReducingPower, initial_rp),
+            (Currency::Lipids, initial_lipids),
+            (Currency::ATP, initial_atp),
+        ]);
 
-        // Trigger metabolic processing to ensure blocks are spawned and working
-        run_cell_metabolic_cycle(&mut app, cell_entity);
-
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-
-        // Run simulation with ATP competition
         for step in 0..simulation_steps {
             sim_step(&mut app);
-
-            // Run per-cell metabolic processing each step
-            run_cell_metabolic_cycle(&mut app, cell_entity);
-
-            // Verify ATP never goes negative despite competition
-            let current_atp = get_cell_currency_value(&app, cell_entity, Currency::ATP);
-            prop_assert!(current_atp >= 0.0,
-                "ATP went negative due to system competition at step {}", step);
-
-            // Verify all currencies remain non-negative
-            prop_assert!(cell_currencies_non_negative(&app, cell_entity),
-                "Currency went negative during ATP competition at step {}", step);
-
-            // Verify systems operate consistently despite resource constraints
-            let pyruvate = get_cell_currency_value(&app, cell_entity, Currency::Pyruvate);
-            let ffa = get_cell_currency_value(&app, cell_entity, Currency::FreeFattyAcids);
-
-            prop_assert!(pyruvate <= initial_pyruvate + 0.1);
-            prop_assert!(ffa >= 0.0);
+            prop_assert!(cell_currencies_non_negative(&app, cell), "negative pool at step {}", step);
+            prop_assert!(pool(&app, cell, Currency::Pyruvate) <= initial_pyruvate + 1e-3);
         }
     }
 }
-
-// --- Resource Contention and Priority Tests ---
-
-// --- System Interaction Patterns ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -185,100 +85,53 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test all three systems operating simultaneously with realistic parameters
+    /// Fermentation, lipid metabolism and fat storage together. With no carbon,
+    /// lipid metabolism makes no lipids, so free + stored lipids stay constant.
     #[test]
     fn three_system_integration(
         metabolic_inputs in (
             100.0f32..400.0f32, // pyruvate
             100.0f32..400.0f32, // reducing power
-            200.0f32..800.0f32, // free fatty acids
-            50.0f32..200.0f32   // initial atp
+            200.0f32..800.0f32, // lipids
+            50.0f32..200.0f32   // atp
         ),
         system_parameters in (
             20.0f32..100.0f32, // toxicity threshold
-            10.0f32..40.0f32,  // poly rate
-            2.0f32..15.0f32    // lipo rate
+            10.0f32..40.0f32,  // storage rate
+            2.0f32..15.0f32    // release rate
         ),
-        simulation_steps in 5..15usize  // Reduced for performance
+        simulation_steps in 5..15usize
     ) {
-        let (pyruvate, rp, ffa, atp) = metabolic_inputs;
+        let (pyruvate, rp, lipids, atp) = metabolic_inputs;
         let (toxicity_threshold, poly_rate, lipo_rate) = system_parameters;
-
-        // Create test cell with fermentation and lipid metabolism genes
         let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut genome = Genome::default();
-            genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
-            genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-
-            app.world_mut().spawn((
-                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
-            )).id()
-        };
-
-        // Initialize full system state
-        modify_cell_currencies(&mut app, cell_entity, |currency_pools| {
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::ATP, atp);
-            currency_pools.set(Currency::OrganicWaste, 10.0); // Small initial waste
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::StorageBeads, 20.0);
-        });
         app.world_mut().insert_resource(LipidToxicityThreshold(toxicity_threshold));
+        // No outside carbon, so lipid metabolism has no input.
+        app.world_mut().remove_resource::<EnvironmentalCurrencyPools>();
+        let cell = spawn_test_cell(
+            &mut app,
+            &[BlockKind::Fermentation, BlockKind::LipidMetabolism, BlockKind::FatStorage],
+            &[
+                (Currency::Pyruvate, pyruvate),
+                (Currency::ReducingPower, rp),
+                (Currency::Lipids, lipids),
+                (Currency::ATP, atp),
+            ],
+        );
+        set_stored_lipids(&mut app, cell, 20.0);
+        set_fat_storage_rates(&mut app, cell, poly_rate, lipo_rate);
+        let initial_total: f32 = cell_snapshot(&app, cell).iter().sum();
 
-        // Trigger metabolic processing to ensure blocks are spawned and working
-        run_cell_metabolic_cycle(&mut app, cell_entity);
-
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-        set_fat_storage_rates(&mut app, cell_entity, poly_rate, lipo_rate);
-
-        let initial_total = if let Some(snapshot) = get_cell_currencies(&app, cell_entity) {
-            snapshot.pools.values().sum::<f32>()
-        } else {
-            0.0
-        };
-
-        // Run integrated three-system simulation
         for step in 0..simulation_steps {
             sim_step(&mut app);
-
-            // Run per-cell metabolic processing each step
-            run_cell_metabolic_cycle(&mut app, cell_entity);
-
-            let current_total = if let Some(snapshot) = get_cell_currencies(&app, cell_entity) {
-                snapshot.pools.values().sum::<f32>()
-            } else {
-                0.0
-            };
-
-            // Verify system integration maintains fundamental invariants
-            prop_assert!(cell_currencies_non_negative(&app, cell_entity),
-                "Three-system integration violated non-negative invariant at step {}", step);
-
-            // Verify no runaway resource generation
-            prop_assert!(current_total <= initial_total * 1.1,
-                "Suspicious resource generation: initial {}, current {}",
-                initial_total, current_total);
-
-            // Verify individual system constraints
-            let current_ffa = get_cell_currency_value(&app, cell_entity, Currency::FreeFattyAcids);
-            let current_storage = get_cell_currency_value(&app, cell_entity, Currency::StorageBeads);
-            let current_waste = get_cell_currency_value(&app, cell_entity, Currency::OrganicWaste);
-
-            prop_assert!(current_ffa >= 0.0);
-            prop_assert!(current_storage >= 0.0);
-            prop_assert!(current_waste >= 0.0);
-
-            // Verify lipid conservation in fat storage system
-            let total_lipids = current_ffa + current_storage;
-            let initial_lipids = ffa + 20.0;
-            assert_relative_eq!(total_lipids, initial_lipids, epsilon = 1.0);
+            prop_assert!(cell_currencies_non_negative(&app, cell), "negative pool at step {}", step);
+            // Fermentation conserves the sum of its pools; maintenance only uses ATP.
+            let total: f32 = cell_snapshot(&app, cell).iter().sum();
+            prop_assert!(total <= initial_total + 1e-2, "pools grew: {} -> {}", initial_total, total);
+            assert_relative_eq!(total_lipids(&app, cell), lipids + 20.0, epsilon = 1e-2);
         }
     }
 }
-
-// --- Edge Case Interaction Tests ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -286,91 +139,50 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test system interactions when one system is completely depleted
+    /// A cell with one pool at zero keeps all pools finite and at 0 or more.
     #[test]
     fn depleted_system_interactions(
         depletion_scenario in prop_oneof![
             Just("no_fermentation_inputs"),
             Just("no_atp"),
-            Just("no_ffa"),
+            Just("no_lipids"),
             Just("no_waste")
         ],
-        simulation_steps in 3..10usize  // Reduced for performance
+        simulation_steps in 3..10usize
     ) {
-        // Create test cell with fermentation and lipid metabolism genes
-        let mut app = MetabolisticApp::new_headless();
-        let cell_entity = {
-            let mut genome = Genome::default();
-            genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
-            genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-
-            app.world_mut().spawn((
-                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
-            )).id()
+        let mut pools = vec![
+            (Currency::Pyruvate, 50.0),
+            (Currency::ReducingPower, 50.0),
+            (Currency::ATP, 50.0),
+            (Currency::Lipids, 100.0),
+            (Currency::Waste, 10.0),
+            (Currency::CarbonSkeletons, 20.0),
+        ];
+        let empty: &[Currency] = match depletion_scenario {
+            "no_fermentation_inputs" => &[Currency::Pyruvate, Currency::ReducingPower],
+            "no_atp" => &[Currency::ATP],
+            "no_lipids" => &[Currency::Lipids],
+            "no_waste" => &[Currency::Waste],
+            _ => unreachable!(),
         };
-
-        // Set up depletion scenario
-        modify_cell_currencies(&mut app, cell_entity, |currency_pools| {
-            match depletion_scenario {
-                "no_fermentation_inputs" => {
-                    currency_pools.set(Currency::Pyruvate, 0.0);
-                    currency_pools.set(Currency::ReducingPower, 0.0);
-                    currency_pools.set(Currency::ATP, 100.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 300.0);
-                    currency_pools.set(Currency::OrganicWaste, 50.0);
-                },
-                "no_atp" => {
-                    currency_pools.set(Currency::Pyruvate, 100.0);
-                    currency_pools.set(Currency::ReducingPower, 100.0);
-                    currency_pools.set(Currency::ATP, 0.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 300.0);
-                    currency_pools.set(Currency::OrganicWaste, 50.0);
-                },
-                "no_ffa" => {
-                    currency_pools.set(Currency::Pyruvate, 100.0);
-                    currency_pools.set(Currency::ReducingPower, 100.0);
-                    currency_pools.set(Currency::ATP, 100.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 0.0);
-                    currency_pools.set(Currency::OrganicWaste, 50.0);
-                },
-                "no_waste" => {
-                    currency_pools.set(Currency::Pyruvate, 100.0);
-                    currency_pools.set(Currency::ReducingPower, 100.0);
-                    currency_pools.set(Currency::ATP, 100.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 300.0);
-                    currency_pools.set(Currency::OrganicWaste, 0.0);
-                },
-                _ => unreachable!()
+        for entry in &mut pools {
+            if empty.contains(&entry.0) {
+                entry.1 = 0.0;
             }
-
-            currency_pools.set(Currency::StorageBeads, 20.0);
-        });
+        }
+        let mut app = MetabolisticApp::new_headless();
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
+        let cell = spawn_test_cell(
+            &mut app,
+            &[BlockKind::Fermentation, BlockKind::LipidMetabolism, BlockKind::FatStorage],
+            &pools,
+        );
 
-        // Trigger metabolic processing to ensure blocks are spawned and working
-        run_cell_metabolic_cycle(&mut app, cell_entity);
-
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-
-        // Run simulation with depleted resources
         for step in 0..simulation_steps {
             sim_step(&mut app);
-
-            // Run per-cell metabolic processing each step
-            run_cell_metabolic_cycle(&mut app, cell_entity);
-
-            // Verify systems handle depletion gracefully
-            prop_assert!(cell_currencies_non_negative(&app, cell_entity),
-                "System failed with depletion scenario '{}' at step {}",
-                depletion_scenario, step);
-
-            // Verify no system creates resources from nothing
-            if let Some(current_snapshot) = get_cell_currencies(&app, cell_entity) {
-                for &amount in current_snapshot.pools.values() {
-                    prop_assert!(amount.is_finite(),
-                        "Currency became non-finite in depletion scenario '{}': {}",
-                        depletion_scenario, amount);
-                }
+            for &amount in &cell_snapshot(&app, cell) {
+                prop_assert!(amount.is_finite() && amount >= 0.0,
+                    "{}: bad pool at step {}: {}", depletion_scenario, step, amount);
             }
         }
     }

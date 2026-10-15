@@ -1,8 +1,11 @@
 //! # Metabolic Blocks
 //!
 //! A metabolic block is an entity owned by one cell (`OwnedBy`). It has a
-//! `MetabolicNode` (kind and status) and a `FluxProfile` (rates per second). The
-//! flux engine in `metabolism` runs all blocks of a cell each tick.
+//! `MetabolicNode` (kind and status), a `FluxProfile` (flows per second for one
+//! enzyme at saturation), `Kinetics` (half-saturation, cofactors, outside
+//! channels), a `Drive` (regulation) and a `BlockTurnover` (last tick). The
+//! number of enzymes is in the cell's `Proteome`. The flux engine in
+//! `metabolism` runs all blocks of a cell each tick.
 //!
 //! ## Genome sync
 //!
@@ -10,28 +13,41 @@
 //! genome changes, or on `MetabolicUpdateEvent`:
 //! - Each implemented gene in the genome has one block. Its status follows the
 //!   gene state: Expressed = Active, Mutated = half rate, Silent = no flux.
-//! - A block whose gene leaves the genome is despawned.
+//! - A block whose gene leaves the genome is despawned. Its enzymes stay in
+//!   the proteome.
 //!
 //! ## Block kinds
 //!
-//! - **Fermentation** (`FermentationBlock`): Pyruvate + ReducingPower -> ATP + OrganicWaste
-//! - **Fat storage** (`FatStorageBlock`): regulated. Stores FreeFattyAcids as
-//!   StorageBeads above the lipid toxicity threshold and releases them below it.
-//! - **Vesicle export** (`VesicleExportBlock`): removes OrganicWaste from the cell.
+//! - **Chemosynthesis** (`ChemosynthesisBlock`): Minerals + Heat (outside) ->
+//!   ATP + ReducingPower + CarbonSkeletons. Metals are a cofactor.
+//! - **Amino acid biosynthesis**, **lipid metabolism** (`biosynthesis`):
+//!   CarbonSkeletons + ATP + ReducingPower -> AminoAcids or Lipids.
+//! - **Protein synthesis** (`ProteinSynthesisBlock`): AminoAcids + ATP ->
+//!   protein units for the synthesis queue. Regulated: on while the queue has orders.
+//! - **Fermentation** (`FermentationBlock`): Pyruvate + ReducingPower -> ATP + Waste
+//! - **Fat storage** (`FatStorageBlock`): regulated. Stores Lipids as
+//!   StoredLipids above the lipid toxicity threshold and releases them below it.
+//! - **Vesicle export** (`VesicleExportBlock`): removes Waste from the cell.
 
+pub mod biosynthesis;
+pub mod chemosynthesis;
 pub mod fat_storage;
 pub mod fermentation;
 pub mod genome;
+pub mod protein_synthesis;
 pub mod vesicle_export;
 
 use bevy::prelude::*;
 
 use crate::cell::{Cell, CellBlocks, OwnedBy};
-use crate::metabolism::{BlockStatus, FluxProfile, MetabolicBlock, MetabolicNode, MetabolicSet};
+use crate::metabolism::{
+    BlockStatus, BlockTurnover, Drive, FluxProfile, Kinetics, MetabolicBlock, MetabolicNode,
+    MetabolicSet,
+};
 use genome::{BlockKind, Genome, MetabolicUpdateEvent};
 
 /// Plugin that keeps each cell's blocks in sync with its genome and runs block
-/// regulation in the metabolic tick.
+/// regulation and the synthesis queue in the metabolic tick.
 pub struct MetabolicBlocksPlugin;
 
 impl Plugin for MetabolicBlocksPlugin {
@@ -40,18 +56,54 @@ impl Plugin for MetabolicBlocksPlugin {
             .add_systems(Update, sync_cell_blocks_system)
             .add_systems(
                 crate::metabolism::MetabolicSchedule,
-                fat_storage::regulate_fat_storage_system.in_set(MetabolicSet::Regulate),
+                (
+                    (
+                        fat_storage::regulate_fat_storage_system,
+                        protein_synthesis::regulate_protein_synthesis_system,
+                    )
+                        .in_set(MetabolicSet::Regulate),
+                    (
+                        protein_synthesis::advance_protein_queue_system,
+                        crate::membrane::membrane_repair_system,
+                    )
+                        .in_set(MetabolicSet::Build),
+                ),
             );
     }
 }
 
-/// The full-rate flux profile of a block kind, or `None` if the kind has no
-/// implementation yet. Regulated blocks start with an empty profile.
-pub fn block_flux_profile(kind: BlockKind) -> Option<FluxProfile> {
+/// The data that a block kind starts with.
+#[derive(Debug, Clone)]
+pub struct BlockSpec {
+    pub profile: FluxProfile,
+    pub kinetics: Kinetics,
+}
+
+impl BlockSpec {
+    fn new(profile: FluxProfile) -> Self {
+        Self {
+            profile,
+            kinetics: Kinetics::default(),
+        }
+    }
+}
+
+/// The spec of a block kind, or `None` if the kind has no implementation yet.
+/// Regulated blocks that only move pools (fat storage) have an empty profile.
+pub fn block_spec(kind: BlockKind) -> Option<BlockSpec> {
     match kind {
-        BlockKind::Fermentation => Some(fermentation::flux_profile()),
-        BlockKind::VesicleExport => Some(vesicle_export::flux_profile()),
-        BlockKind::FatStorage => Some(FluxProfile::default()),
+        BlockKind::Chemosynthesis => Some(BlockSpec {
+            profile: chemosynthesis::flux_profile(),
+            kinetics: chemosynthesis::kinetics(),
+        }),
+        BlockKind::AminoAcidBiosynthesis => {
+            Some(BlockSpec::new(biosynthesis::amino_acid_profile()))
+        }
+        BlockKind::LipidMetabolism => Some(BlockSpec::new(biosynthesis::lipid_profile())),
+        BlockKind::ProteinSynthesis => Some(BlockSpec::new(protein_synthesis::flux_profile())),
+        BlockKind::Fermentation => Some(BlockSpec::new(fermentation::flux_profile())),
+        BlockKind::VesicleExport => Some(BlockSpec::new(vesicle_export::flux_profile())),
+        BlockKind::FatStorage => Some(BlockSpec::new(FluxProfile::default())),
         _ => None,
     }
 }
@@ -71,7 +123,7 @@ pub fn plan_blocks(genome: &Genome, existing: &CellBlocks) -> BlockPlan {
     let mut genes: Vec<_> = genome.table.iter().collect();
     genes.sort_by_key(|(kind, _)| **kind);
     for (&kind, state) in genes {
-        if block_flux_profile(kind).is_none() {
+        if block_spec(kind).is_none() {
             continue;
         }
         let status = BlockStatus::from(state.clone());
@@ -98,15 +150,30 @@ pub fn spawn_block(
     kind: BlockKind,
     status: BlockStatus,
 ) -> Option<Entity> {
-    let profile = block_flux_profile(kind)?;
+    let spec = block_spec(kind)?;
     let mut entity = commands.spawn((
         MetabolicBlock,
         MetabolicNode { kind, status },
-        profile,
+        spec.profile,
+        spec.kinetics,
+        Drive::default(),
+        BlockTurnover::default(),
         OwnedBy(cell),
         Name::new(format!("{kind:?} block")),
     ));
     match kind {
+        BlockKind::Chemosynthesis => {
+            entity.insert(chemosynthesis::ChemosynthesisBlock);
+        }
+        BlockKind::AminoAcidBiosynthesis => {
+            entity.insert(biosynthesis::AminoAcidBiosynthesisBlock);
+        }
+        BlockKind::LipidMetabolism => {
+            entity.insert(biosynthesis::LipidMetabolismBlock);
+        }
+        BlockKind::ProteinSynthesis => {
+            entity.insert(protein_synthesis::ProteinSynthesisBlock);
+        }
         BlockKind::Fermentation => {
             entity.insert(fermentation::FermentationBlock);
         }

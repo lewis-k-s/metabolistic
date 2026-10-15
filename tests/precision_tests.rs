@@ -6,6 +6,7 @@
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::Genome;
+use metabolistic3d::cell::CellSize;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use metabolistic3d::player::spawn_local_player_cell;
@@ -22,8 +23,8 @@ const CURRENCY_RELATIVE_EPSILON: f32 = 1e-3;
 /// Acceptable absolute error for small currency amounts
 const CURRENCY_ABSOLUTE_EPSILON: f32 = 1e-6;
 
-/// Maximum acceptable drift in long-running simulations
-const LONG_SIMULATION_EPSILON: f32 = 1e-2;
+/// Maximum acceptable drift in long-running simulations, relative to the pool sizes
+const LONG_SIMULATION_RELATIVE_EPSILON: f32 = 1e-5;
 
 // --- Precision Tests for Currency Operations ---
 
@@ -76,49 +77,29 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test precision in currency transfer operations (polymerization/lipolysis)
+    /// Fat storage conserves free + stored lipids over many ticks.
     #[test]
     fn transfer_precision(
-        initial_ffa in 200.0f32..800.0f32,
+        initial_lipids in 200.0f32..800.0f32,
         poly_rate in 0.5f32..25.0f32,
         lipo_rate in 0.1f32..10.0f32,
-        cycles in 5..20usize  // Reduced for performance
+        cycles in 5..20usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-            currency_pools.set(Currency::StorageBeads, 50.0);
-            currency_pools.set(Currency::ATP, 1000.0); // Plenty of ATP
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
+        let cell = spawn_test_cell(&mut app, &[BlockKind::FatStorage], &[
+            (Currency::Lipids, initial_lipids),
+            (Currency::ATP, 1000.0),
+        ]);
+        set_stored_lipids(&mut app, cell, 50.0);
+        set_fat_storage_rates(&mut app, cell, poly_rate, lipo_rate);
+        let initial_total = initial_lipids + 50.0;
 
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-        set_fat_storage_rates(&mut app, cell_entity, poly_rate, lipo_rate);
-
-        let initial_total_lipids = initial_ffa + 50.0;
-
-        // Run multiple cycles to test precision over time
         for _ in 0..cycles {
             sim_step(&mut app);
-
-            let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
-            let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
-            let current_storage = currency_pools.get(Currency::StorageBeads);
-            let current_total = current_ffa + current_storage;
-
-            // Verify lipid conservation with tight precision bounds
             assert_relative_eq!(
-                current_total,
-                initial_total_lipids,
+                total_lipids(&app, cell),
+                initial_total,
                 epsilon = CURRENCY_RELATIVE_EPSILON
             );
         }
@@ -133,78 +114,48 @@ proptest! {
         max_shrink_iters: 2,
         .. ProptestConfig::default()
     })]
-    /// Test that fermentation maintains precision over extended simulations
+    /// Fermentation inputs used equal its outputs over a long run, and the
+    /// error does not grow.
     #[test]
     fn long_fermentation_precision(
         initial_pyruvate in 500.0f32..2000.0f32,
         initial_rp in 500.0f32..2000.0f32,
-        long_simulation_steps in 20..50usize  // Reduced for performance
+        long_simulation_steps in 20..50usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, initial_pyruvate);
-            currency_pools.set(Currency::ReducingPower, initial_rp);
-            currency_pools.set(Currency::ATP, 0.0);
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-        }
-
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation]);
-
-        let initial_total_inputs = initial_pyruvate + initial_rp;
-
-        // Track precision over long simulation
+        let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation], &[
+            (Currency::Pyruvate, initial_pyruvate),
+            (Currency::ReducingPower, initial_rp),
+        ]);
+        // No maintenance cost: only fermentation changes the pools.
+        *app.world_mut().get_mut::<CellSize>(cell).unwrap() = CellSize { radius: 0.0 };
+        let initial_inputs = initial_pyruvate + initial_rp;
         let mut precision_errors = Vec::new();
 
         for step in 0..long_simulation_steps {
             sim_step(&mut app);
-
-            // Check mass balance precision every 10 steps
             if step % 10 == 0 {
-                let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
-                let current_pyruvate = currency_pools.get(Currency::Pyruvate);
-                let current_rp = currency_pools.get(Currency::ReducingPower);
-                let current_atp = currency_pools.get(Currency::ATP);
-                let current_waste = currency_pools.get(Currency::OrganicWaste);
-
-                let remaining_inputs = current_pyruvate + current_rp;
-                let total_outputs = current_atp + current_waste;
-                let consumed_inputs = initial_total_inputs - remaining_inputs;
-
-                let precision_error = (consumed_inputs - total_outputs).abs();
+                let remaining = pool(&app, cell, Currency::Pyruvate) + pool(&app, cell, Currency::ReducingPower);
+                let outputs = pool(&app, cell, Currency::ATP) + pool(&app, cell, Currency::Waste);
+                let precision_error = ((initial_inputs - remaining) - outputs).abs();
                 precision_errors.push(precision_error);
-
-                // Verify precision doesn't degrade beyond acceptable bounds
+                let threshold = LONG_SIMULATION_RELATIVE_EPSILON * initial_inputs;
                 prop_assert!(
-                    precision_error <= LONG_SIMULATION_EPSILON,
+                    precision_error <= threshold,
                     "Precision error {} exceeded threshold {} at step {}",
                     precision_error,
-                    LONG_SIMULATION_EPSILON,
+                    threshold,
                     step
                 );
             }
         }
 
-        // Verify precision errors don't trend upward (no systematic drift)
         if precision_errors.len() > 2 {
-            let first_half_avg: f32 = precision_errors[..precision_errors.len()/2].iter().sum::<f32>()
-                / (precision_errors.len()/2) as f32;
-            let second_half_avg: f32 = precision_errors[precision_errors.len()/2..].iter().sum::<f32>()
-                / (precision_errors.len() - precision_errors.len()/2) as f32;
-
-            // Second half should not have significantly higher errors than first half.
-            // Below the f32 rounding bound (epsilon x magnitude x steps) the
-            // errors are noise, not drift.
-            let rounding_bound =
-                f32::EPSILON * initial_total_inputs * long_simulation_steps as f32;
+            let half = precision_errors.len() / 2;
+            let first_half_avg: f32 = precision_errors[..half].iter().sum::<f32>() / half as f32;
+            let second_half_avg: f32 = precision_errors[half..].iter().sum::<f32>()
+                / (precision_errors.len() - half) as f32;
+            let rounding_bound = f32::EPSILON * initial_inputs * long_simulation_steps as f32;
             prop_assert!(
                 second_half_avg <= first_half_avg * 2.0 || second_half_avg <= rounding_bound,
                 "Precision degradation detected: early avg {}, late avg {}",
@@ -321,60 +272,37 @@ proptest! {
         max_shrink_iters: 2,
         .. ProptestConfig::default()
     })]
-    /// Test precision in complex multi-system scenarios
+    /// Large pools in several blocks stay finite and at 0 or more.
     #[test]
     fn multi_system_precision(
         initial_values in (
             200.0f32..1000.0f32, // pyruvate
             200.0f32..1000.0f32, // reducing power
-            300.0f32..1500.0f32, // free fatty acids
-            100.0f32..500.0f32   // organic waste
+            300.0f32..1500.0f32, // lipids
+            100.0f32..500.0f32   // waste
         ),
         simulation_steps in 20..100usize
     ) {
-        let (pyruvate, rp, ffa, waste) = initial_values;
-
+        let (pyruvate, rp, lipids, waste) = initial_values;
         let mut app = MetabolisticApp::new_headless();
-
-        // Initialize all systems
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::OrganicWaste, waste);
-            currency_pools.set(Currency::ATP, 100.0);
-            currency_pools.set(Currency::StorageBeads, 50.0);
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
+        let cell = spawn_test_cell(
+            &mut app,
+            &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage],
+            &[
+                (Currency::Pyruvate, pyruvate),
+                (Currency::ReducingPower, rp),
+                (Currency::Lipids, lipids),
+                (Currency::Waste, waste),
+                (Currency::ATP, 100.0),
+            ],
+        );
+        set_stored_lipids(&mut app, cell, 50.0);
 
-        // Spawn all metabolic blocks
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
-
-        let initial_snapshot = get_currency_snapshot(&app);
-
-        // Run multi-system simulation
         for _ in 0..simulation_steps {
             sim_step(&mut app);
-
-            let current_snapshot = get_currency_snapshot(&app);
-
-            // Verify all amounts remain within reasonable precision bounds
-            for (i, (&_initial, &current)) in initial_snapshot.iter().zip(current_snapshot.iter()).enumerate() {
-                prop_assert!(
-                    current.is_finite(),
-                    "Currency {} became non-finite: {}",
-                    i,
-                    current
-                );
-
+            for (i, &current) in cell_snapshot(&app, cell).iter().enumerate() {
+                prop_assert!(current.is_finite(), "Currency {} became non-finite: {}", i, current);
                 prop_assert!(
                     current >= -CURRENCY_ABSOLUTE_EPSILON,
                     "Currency {} went significantly negative: {}",

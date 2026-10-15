@@ -1,22 +1,27 @@
 //! Fat storage metabolic block.
 //!
-//! A regulated block. Each tick, `regulate_fat_storage_system` sets its flux
-//! profile from the owning cell's pools. It moves FreeFattyAcids toward the
-//! lipid toxicity threshold:
-//! - **Polymerization**: above the threshold, FreeFattyAcids become StorageBeads.
-//! - **Lipolysis**: below the threshold, StorageBeads become FreeFattyAcids.
+//! A regulated block. Each tick, `regulate_fat_storage_system` moves lipids
+//! between the cell's `Lipids` pool and its `StoredLipids` (lipid beads),
+//! toward the lipid toxicity threshold:
+//! - **Storage**: above the threshold, free lipids become beads.
+//! - **Lipolysis**: below the threshold, beads become free lipids.
 //!
-//! The rate is capped so that one tick never moves past the threshold. Without
-//! the cap, the block overshoots by up to `rate * dt`, and the result depends on
-//! the tick length. Both directions conserve FreeFattyAcids + StorageBeads.
+//! Beads are not an internal pool, so the block has no flux profile. Its rates
+//! scale with its enzymes and gene state.
+//!
+//! The transfer is capped so that one tick never moves past the threshold.
+//! Without the cap, the block overshoots by up to `rate * dt`, and the result
+//! depends on the tick length. Both directions conserve Lipids + StoredLipids.
 
 use bevy::prelude::*;
 
+use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, OwnedBy};
-use crate::metabolism::{CurrencyPools, FlowmapTimingConfig, FluxProfile};
-use crate::molecules::{Currency, LipidToxicityThreshold};
+use crate::metabolism::{CurrencyPools, Drive, FlowmapTimingConfig, MetabolicNode};
+use crate::molecules::{Currency, LipidToxicityThreshold, StoredLipids};
+use crate::proteins::Proteome;
 
-/// Fat storage block with its rates, per second.
+/// Fat storage block with its rates, per second for one enzyme.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct FatStorageBlock {
     pub poly_rate: f32,
@@ -32,40 +37,55 @@ impl Default for FatStorageBlock {
     }
 }
 
-/// The flux profile (per second) for the current pools and a tick of `dt` seconds.
-pub fn fat_storage_profile(
+/// Lipids to move from the pool into storage in a tick of `dt` seconds
+/// (negative: from storage into the pool). `scale` is enzymes x throughput x drive.
+pub fn fat_storage_transfer(
     block: &FatStorageBlock,
-    free_fatty_acids: f32,
+    lipids: f32,
+    stored: f32,
     threshold: f32,
+    scale: f32,
     dt: f32,
-) -> FluxProfile {
-    let mut profile = FluxProfile::default();
-    let gap = free_fatty_acids - threshold;
+) -> f32 {
+    let scale = scale.max(0.0);
+    let gap = lipids - threshold;
     if gap > 0.0 {
-        let rate = block.poly_rate.min(gap / dt);
-        profile.set_demand(Currency::FreeFattyAcids, rate);
-        profile.set_production(Currency::StorageBeads, rate);
+        (block.poly_rate * scale * dt).min(gap)
     } else if gap < 0.0 {
-        let rate = block.lipo_rate.min(-gap / dt);
-        profile.set_demand(Currency::StorageBeads, rate);
-        profile.set_production(Currency::FreeFattyAcids, rate);
+        -(block.lipo_rate * scale * dt)
+            .min(-gap)
+            .min(stored.max(0.0))
+    } else {
+        0.0
     }
-    profile
 }
 
-/// Sets each fat storage block's profile from its cell's pools.
+/// Moves lipids between each cell's pool and its storage.
 pub fn regulate_fat_storage_system(
     threshold: Option<Res<LipidToxicityThreshold>>,
     timing: Res<FlowmapTimingConfig>,
-    cells: Query<&CurrencyPools, With<Cell>>,
-    mut blocks: Query<(&FatStorageBlock, &OwnedBy, &mut FluxProfile)>,
+    mut cells: Query<(&mut CurrencyPools, &mut StoredLipids, &Proteome), With<Cell>>,
+    blocks: Query<(&FatStorageBlock, &MetabolicNode, &Drive, &OwnedBy)>,
 ) {
     let threshold = threshold.map(|t| *t).unwrap_or_default();
     let dt = timing.target_delta();
-    for (block, owner, mut profile) in &mut blocks {
-        if let Ok(pools) = cells.get(owner.0) {
-            *profile =
-                fat_storage_profile(block, pools.get(Currency::FreeFattyAcids), threshold.0, dt);
+    for (block, node, drive, owner) in &blocks {
+        let Ok((mut pools, mut stored, proteome)) = cells.get_mut(owner.0) else {
+            continue;
+        };
+        let scale =
+            proteome.enzymes(BlockKind::FatStorage) as f32 * node.status.throughput() * drive.0;
+        let moved = fat_storage_transfer(
+            block,
+            pools.get(Currency::Lipids),
+            stored.0,
+            threshold.0,
+            scale,
+            dt,
+        );
+        if moved != 0.0 {
+            pools.modify(Currency::Lipids, -moved);
+            stored.0 = (stored.0 + moved).max(0.0);
         }
     }
 }
@@ -77,16 +97,28 @@ mod tests {
     #[test]
     fn regulation_moves_toward_threshold_without_overshoot() {
         let block = FatStorageBlock::default();
-        // Far above: full poly rate.
-        let p = fat_storage_profile(&block, 100.0, 50.0, 0.2);
-        assert_eq!(p.get_demand(Currency::FreeFattyAcids), block.poly_rate);
-        // Just above: only the excess, spread over the tick.
-        let p = fat_storage_profile(&block, 51.0, 50.0, 0.2);
-        assert!((p.get_demand(Currency::FreeFattyAcids) * 0.2 - 1.0).abs() < 1e-5);
-        // Below: lipolysis, capped by the deficit.
-        let p = fat_storage_profile(&block, 49.5, 50.0, 0.2);
-        assert!((p.get_production(Currency::FreeFattyAcids) * 0.2 - 0.5).abs() < 1e-5);
-        // At the threshold: nothing.
-        assert!(fat_storage_profile(&block, 50.0, 50.0, 0.2).0.is_empty());
+        // Far above: full storage rate.
+        let m = fat_storage_transfer(&block, 100.0, 0.0, 50.0, 1.0, 0.2);
+        assert!((m - block.poly_rate * 0.2).abs() < 1e-5);
+        // Two enzymes: twice the rate.
+        let m2 = fat_storage_transfer(&block, 100.0, 0.0, 50.0, 2.0, 0.2);
+        assert!((m2 - 2.0 * m).abs() < 1e-5);
+        // Just above: only the excess.
+        let m = fat_storage_transfer(&block, 51.0, 0.0, 50.0, 1.0, 0.2);
+        assert!((m - 1.0).abs() < 1e-5);
+        // Below: lipolysis, capped by the deficit and by the store.
+        let m = fat_storage_transfer(&block, 49.5, 10.0, 50.0, 1.0, 0.2);
+        assert!((m + 0.5).abs() < 1e-5);
+        let m = fat_storage_transfer(&block, 10.0, 0.3, 50.0, 1.0, 0.2);
+        assert!((m + 0.3).abs() < 1e-5);
+        // At the threshold, or no enzymes: nothing.
+        assert_eq!(
+            fat_storage_transfer(&block, 50.0, 10.0, 50.0, 1.0, 0.2),
+            0.0
+        );
+        assert_eq!(
+            fat_storage_transfer(&block, 90.0, 10.0, 50.0, 0.0, 0.2),
+            0.0
+        );
     }
 }

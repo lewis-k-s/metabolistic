@@ -1,20 +1,27 @@
-//! # Game-Specific Metabolic Invariant Tests  
+//! # Game-level metabolic invariants
 //!
-//! These tests verify higher-level game logic invariants specific to the
-//! metabolic simulation, including economic balance, genetic-metabolic
-//! consistency, and cellular viability constraints.
+//! Property tests for economic balance, genome-to-block consistency, and the
+//! limits of cell viability.
 
 use metabolistic3d::MetabolisticApp;
+use metabolistic3d::blocks::block_spec;
 use metabolistic3d::blocks::genome::{GeneState, Genome};
-use metabolistic3d::metabolism::CurrencyPools;
+use metabolistic3d::cell::CellBlocks;
+use metabolistic3d::metabolism::{BlockStatus, MetabolicNode};
 use metabolistic3d::molecules::*;
-use metabolistic3d::player::spawn_local_player_cell;
 use proptest::prelude::*;
 
 mod common;
 use common::*;
 
-// --- Economic Balance Invariants ---
+/// Blocks of a cell that runs on fermentation.
+const FERMENTER: [BlockKind; 3] = [
+    BlockKind::Fermentation,
+    BlockKind::VesicleExport,
+    BlockKind::FatStorage,
+];
+
+// --- Economic balance ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -22,91 +29,34 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that cellular metabolism maintains economic viability over time
-    /// (enough ATP production to sustain cellular processes)
+    /// A fermenting cell with enough inputs makes more ATP than it uses.
     #[test]
     fn metabolic_economic_viability(
         initial_resources in (
             100.0f32..400.0f32, // pyruvate
             100.0f32..400.0f32, // reducing power
-            50.0f32..200.0f32,  // initial atp
-            200.0f32..600.0f32  // free fatty acids
+            50.0f32..200.0f32,  // atp
+            200.0f32..600.0f32  // lipids
         ),
-        economic_stress_duration in 5..20usize  // Reduced for performance
+        economic_stress_duration in 5..20usize
     ) {
-        let (pyruvate, rp, atp, ffa) = initial_resources;
-
+        let (pyruvate, rp, atp, lipids) = initial_resources;
         let mut app = MetabolisticApp::new_headless();
-
-        // Set up economically stressed but viable cell
-        let (_player_entity, cell_entity) = {
-            let mut genome = Genome::default();
-            genome.add_gene(metabolistic3d::blocks::genome::BlockKind::Fermentation);
-            genome.express_gene(metabolistic3d::blocks::genome::BlockKind::Fermentation);
-            genome.add_gene(metabolistic3d::blocks::genome::BlockKind::LipidMetabolism);
-            genome.express_gene(metabolistic3d::blocks::genome::BlockKind::LipidMetabolism);
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, genome)
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::ATP, atp);
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::StorageBeads, 30.0);
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
+        let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation], &[
+            (Currency::Pyruvate, pyruvate),
+            (Currency::ReducingPower, rp),
+            (Currency::ATP, atp),
+            (Currency::Lipids, lipids),
+        ]);
 
-        // Run an update to spawn the blocks from the genome
-        app.update();
-
-        let mut atp_levels = Vec::new();
-        let mut total_energy_production = 0.0f32;
-
-        // Monitor economic health over stress period
         for step in 0..economic_stress_duration {
-            let atp_before = {
-                app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP)
-            };
-
+            let before = pool(&app, cell, Currency::ATP);
             sim_step(&mut app);
-
-            let atp_after = {
-                app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP)
-            };
-            let atp_produced_this_step = (atp_after - atp_before).max(0.0);
-            total_energy_production += atp_produced_this_step;
-
-            atp_levels.push(atp_after);
-
-            // Verify cell doesn't enter economic death spiral
-            prop_assert!(atp_after >= 0.0, "ATP went negative at step {}", step);
-            prop_assert!(all_currencies_non_negative(&app),
-                "Economic collapse detected at step {}", step);
+            let after = pool(&app, cell, Currency::ATP);
+            prop_assert!(after > before, "ATP did not grow at step {}: {} -> {}", step, before, after);
+            prop_assert!(cell_currencies_non_negative(&app, cell));
         }
-
-        // Analyze economic sustainability
-        let avg_atp = atp_levels.iter().sum::<f32>() / atp_levels.len() as f32;
-        let final_atp = atp_levels.last().copied().unwrap_or(0.0);
-
-        // Verify economic viability metrics
-        prop_assert!(avg_atp >= 1.0,
-            "Average ATP too low for viability: {}", avg_atp);
-
-        if initial_resources.0 > 50.0 && initial_resources.1 > 50.0 {
-            prop_assert!(total_energy_production > 0.0,
-                "No net energy production observed with sufficient inputs");
-        }
-
-        // Verify no catastrophic economic collapse
-        prop_assert!(final_atp >= avg_atp * 0.1,
-            "Economic collapse: final ATP {} much lower than average {}",
-            final_atp, avg_atp);
     }
 }
 
@@ -116,84 +66,53 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that resource scarcity leads to graceful degradation, not system failure
+    /// Scarcity slows the cell down. It never makes a pool negative, infinite or huge.
     #[test]
     fn scarcity_graceful_degradation(
         scarcity_scenario in prop_oneof![
-            Just("energy_scarce"),      // Low ATP/pyruvate/RP
-            Just("carbon_scarce"),      // Low carbon skeletons/acetyl-CoA
-            Just("lipid_overwhelmed")   // Too much FFA, insufficient processing
+            Just("energy_scarce"),
+            Just("carbon_scarce"),
+            Just("lipid_overwhelmed")
         ],
-        degradation_period in 5..15usize  // Reduced for performance
+        degradation_period in 5..15usize
     ) {
-        let mut app = MetabolisticApp::new_headless();
-
-        // Set up scarcity conditions
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
+        let pools: &[(Currency, f32)] = match scarcity_scenario {
+            "energy_scarce" => &[
+                (Currency::ATP, 1.0),
+                (Currency::Pyruvate, 2.0),
+                (Currency::ReducingPower, 1.0),
+                (Currency::Lipids, 50.0),
+            ],
+            "carbon_scarce" => &[
+                (Currency::ATP, 50.0),
+                (Currency::Pyruvate, 50.0),
+                (Currency::ReducingPower, 50.0),
+                (Currency::CarbonSkeletons, 0.5),
+            ],
+            "lipid_overwhelmed" => &[
+                (Currency::ATP, 20.0),
+                (Currency::Pyruvate, 30.0),
+                (Currency::ReducingPower, 30.0),
+                (Currency::Lipids, 5000.0),
+            ],
+            _ => unreachable!(),
         };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            match scarcity_scenario {
-                "energy_scarce" => {
-                    currency_pools.set(Currency::Pyruvate, 10.0);   // Very low
-                    currency_pools.set(Currency::ReducingPower, 5.0); // Very low
-                    currency_pools.set(Currency::ATP, 2.0);          // Very low
-                    currency_pools.set(Currency::FreeFattyAcids, 100.0);
-                    currency_pools.set(Currency::OrganicWaste, 50.0);
-                },
-                "carbon_scarce" => {
-                    currency_pools.set(Currency::Pyruvate, 5.0);     // Very low
-                    currency_pools.set(Currency::ReducingPower, 100.0);
-                    currency_pools.set(Currency::ATP, 50.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 20.0); // Low
-                    currency_pools.set(Currency::OrganicWaste, 10.0);
-                },
-                "lipid_overwhelmed" => {
-                    currency_pools.set(Currency::Pyruvate, 200.0);
-                    currency_pools.set(Currency::ReducingPower, 200.0);
-                    currency_pools.set(Currency::ATP, 100.0);
-                    currency_pools.set(Currency::FreeFattyAcids, 1000.0); // Overwhelming
-                    currency_pools.set(Currency::OrganicWaste, 300.0);   // High waste
-                },
-                _ => unreachable!()
-            }
-            currency_pools.set(Currency::StorageBeads, 20.0);
-        }
-
+        let mut app = MetabolisticApp::new_headless();
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
+        let cell = spawn_test_cell(&mut app, &FERMENTER, pools);
 
-        // Spawn all systems under stress
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
-
-        // Monitor graceful degradation
         for step in 0..degradation_period {
             sim_step(&mut app);
-
-            // Verify graceful degradation properties
-            prop_assert!(all_currencies_non_negative(&app),
-                "System failure under {} scarcity at step {}", scarcity_scenario, step);
-
-            // Verify no overflow/underflow in stress conditions
-            let snapshot = get_currency_snapshot(&app);
-            for (i, &amount) in snapshot.iter().enumerate() {
-                prop_assert!(amount.is_finite(),
-                    "Currency {} became non-finite under {} at step {}: {}",
-                    i, scarcity_scenario, step, amount);
-
-                prop_assert!(amount <= 1e9,
-                    "Currency {} overflow under {} at step {}: {}",
-                    i, scarcity_scenario, step, amount);
+            for (i, &amount) in cell_snapshot(&app, cell).iter().enumerate() {
+                prop_assert!(amount >= 0.0, "{}: pool {} negative at step {}", scarcity_scenario, i, step);
+                prop_assert!(amount.is_finite() && amount <= 1e9,
+                    "{}: pool {} out of range at step {}: {}", scarcity_scenario, i, step, amount);
             }
         }
     }
 }
 
-// --- Genetic-Metabolic Consistency Tests ---
+// --- Genome and blocks ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -201,101 +120,62 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that genome state changes properly propagate to metabolic system state
+    /// Each implemented gene has one block, and the block status follows the
+    /// gene state.
     #[test]
     fn genome_metabolic_consistency(
-        gene_operations in prop::collection::vec(
-            (block_kind(), gene_state()),
-            1..6
-        ),
-        consistency_check_steps in 3..8usize  // Reduced for performance
+        gene_operations in prop::collection::vec((block_kind(), gene_state()), 1..6),
+        consistency_check_steps in 3..8usize
     ) {
         let mut app = MetabolisticApp::new_headless();
-
-        // Initialize full system
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
+        let cell = spawn_test_cell(&mut app, &[], &[
+            (Currency::ATP, 100.0),
+            (Currency::Pyruvate, 100.0),
+            (Currency::ReducingPower, 100.0),
+        ]);
         {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, 200.0);
-            currency_pools.set(Currency::ReducingPower, 200.0);
-            currency_pools.set(Currency::ATP, 100.0);
-            currency_pools.set(Currency::OrganicWaste, 10.0);
-            currency_pools.set(Currency::FreeFattyAcids, 300.0);
-            currency_pools.set(Currency::StorageBeads, 25.0);
-        }
-        app.world_mut().insert_resource(LipidToxicityThreshold(120.0));
-
-        // Add all possible genes to the genome that we might operate on
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            if let Some(mut genome) = entity_mut.get_mut::<Genome>() {
-                for (block_kind, _) in &gene_operations {
-                    genome.add_gene(*block_kind);
-                }
+            let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
+            for (kind, _) in &gene_operations {
+                genome.add_gene(*kind);
             }
         }
-        app.update(); // Run update to process added genes if necessary
+        app.update();
 
-        // Apply gene operations and verify consistency
-        for &(block_kind, ref target_state) in &gene_operations {
-            // Modify genome state
+        for &(kind, ref target_state) in &gene_operations {
             {
-                let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-                if let Some(mut genome) = entity_mut.get_mut::<Genome>() {
-                    match target_state {
-                        GeneState::Expressed => {
-                            genome.express_gene(block_kind);
-                        },
-                        GeneState::Mutated => {
-                            // To mutate, it must first be expressed then mutated
-                            genome.express_gene(block_kind);
-                            genome.mutate_gene(block_kind);
-                        },
-                        GeneState::Silent => {
-                            genome.silence_gene(block_kind);
-                        },
+                let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
+                match target_state {
+                    GeneState::Expressed => {
+                        genome.express_gene(kind);
+                    }
+                    GeneState::Mutated => {
+                        genome.express_gene(kind);
+                        genome.mutate_gene(kind);
+                    }
+                    GeneState::Silent => {
+                        genome.silence_gene(kind);
                     }
                 }
             }
-
-            // Run simulation to propagate changes
-            for step in 0..consistency_check_steps {
+            for _ in 0..consistency_check_steps {
                 sim_step(&mut app);
-
-                // After a few steps, check for consistency
-                if step > 5 {
-                    // Every implemented gene in the genome has a block. Its status
-                    // follows the gene's current state (silent blocks run no flux).
-                    let genome = app.world().get::<Genome>(cell_entity).unwrap();
-                    let gene_state = genome.get_gene_state(&block_kind).cloned();
-                    let implemented = metabolistic3d::blocks::block_flux_profile(block_kind).is_some();
-                    let block = app.world()
-                        .get::<metabolistic3d::cell::CellBlocks>(cell_entity)
-                        .unwrap()
-                        .get(block_kind);
-
-                    prop_assert_eq!(block.is_some(), implemented && gene_state.is_some(),
-                        "Block existence inconsistency for {:?}", block_kind);
-                    if let (Some(block), Some(state)) = (block, gene_state) {
-                        let node = app.world().get::<metabolistic3d::metabolism::MetabolicNode>(block).unwrap();
-                        prop_assert_eq!(node.status, metabolistic3d::metabolism::BlockStatus::from(state));
-                    }
-                }
             }
-             // Verify consistency doesn't break other invariants
-            prop_assert!(all_currencies_non_negative(&app),
-                "Currency invariant violated during genome-metabolic consistency test");
+
+            let state = app.world().get::<Genome>(cell).unwrap().get_gene_state(&kind).cloned();
+            let implemented = block_spec(kind).is_some();
+            let block = app.world().get::<CellBlocks>(cell).unwrap().get(kind);
+            prop_assert_eq!(block.is_some(), implemented && state.is_some(),
+                "block existence for {:?}", kind);
+            if let (Some(block), Some(state)) = (block, state) {
+                let node = app.world().get::<MetabolicNode>(block).unwrap();
+                prop_assert_eq!(node.status, BlockStatus::from(state));
+            }
+            prop_assert!(cell_currencies_non_negative(&app, cell));
         }
     }
 }
 
-// --- Cellular Viability Constraints ---
+// --- Cell viability ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -303,77 +183,32 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that toxic waste levels trigger appropriate protective responses
+    /// High waste goes down when the cell has vesicle export.
     #[test]
     fn toxicity_response_mechanisms(
         toxicity_scenario in (
-            200.0f32..800.0f32, // high initial organic waste
-            50.0f32..150.0f32,  // toxicity threshold
-            20.0f32..100.0f32   // vesicle export capacity
+            200.0f32..800.0f32, // initial waste
+            50.0f32..150.0f32   // toxicity threshold
         ),
-        toxicity_resolution_time in 5..15usize  // Reduced for performance
+        toxicity_resolution_time in 5..15usize
     ) {
-        let (initial_waste, threshold, _export_capacity) = toxicity_scenario;
-
+        let (initial_waste, threshold) = toxicity_scenario;
         let mut app = MetabolisticApp::new_headless();
-
-        // Set up high toxicity scenario
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::OrganicWaste, initial_waste);
-            currency_pools.set(Currency::Pyruvate, 50.0);
-            currency_pools.set(Currency::ReducingPower, 50.0);
-            currency_pools.set(Currency::ATP, 100.0);
-            currency_pools.set(Currency::FreeFattyAcids, 200.0);
-            currency_pools.set(Currency::StorageBeads, 30.0);
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(threshold));
+        let cell = spawn_test_cell(&mut app, &[BlockKind::Fermentation, BlockKind::VesicleExport], &[
+            (Currency::Waste, initial_waste),
+            (Currency::ATP, 50.0),
+            (Currency::Pyruvate, 50.0),
+            (Currency::ReducingPower, 50.0),
+        ]);
 
-        // Spawn detoxification systems
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport]);
-
-        let mut waste_levels = Vec::new();
-        let mut toxicity_responses_observed = false;
-
-        // Monitor toxicity response
+        let mut previous = initial_waste;
         for step in 0..toxicity_resolution_time {
-            let waste_before = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::OrganicWaste);
-
             sim_step(&mut app);
-
-            let waste_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::OrganicWaste);
-            waste_levels.push(waste_after);
-
-            // Check for toxicity response (waste removal)
-            if waste_after < waste_before && waste_before > threshold {
-                toxicity_responses_observed = true;
-            }
-
-            // Verify toxicity doesn't kill the cell
-            prop_assert!(waste_after >= 0.0, "Waste went negative at step {}", step);
-            prop_assert!(all_currencies_non_negative(&app),
-                "Toxicity caused system failure at step {}", step);
-        }
-
-        let final_waste = waste_levels.last().copied().unwrap_or(0.0);
-        let max_waste = waste_levels.iter().copied().fold(0.0f32, f32::max);
-
-        // Verify toxicity response effectiveness
-        if initial_waste > threshold {
-            prop_assert!(toxicity_responses_observed,
-                "No toxicity response observed despite waste {} > threshold {}",
-                initial_waste, threshold);
-
-            prop_assert!(final_waste <= max_waste,
-                "Waste increased over time despite toxicity: initial {}, final {}, max {}",
-                initial_waste, final_waste, max_waste);
+            let waste = pool(&app, cell, Currency::Waste);
+            prop_assert!(waste < previous, "waste did not go down at step {}: {} -> {}", step, previous, waste);
+            prop_assert!(cell_currencies_non_negative(&app, cell));
+            previous = waste;
         }
     }
 }
@@ -384,85 +219,38 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that lipid toxicity triggers polymerization protective responses
+    /// Free lipids above the toxicity threshold go into storage.
     #[test]
     fn lipid_toxicity_protection(
         lipid_stress in (
-            300.0f32..1000.0f32, // high initial FFA
+            300.0f32..1000.0f32, // initial lipids
             50.0f32..200.0f32,   // toxicity threshold
-            15.0f32..50.0f32     // polymerization rate
+            15.0f32..50.0f32     // storage rate
         ),
-        protection_duration in 5..15usize  // Reduced for performance
+        protection_duration in 5..15usize
     ) {
-        let (initial_ffa, threshold, poly_rate) = lipid_stress;
-
+        let (initial_lipids, threshold, poly_rate) = lipid_stress;
         let mut app = MetabolisticApp::new_headless();
-
-        // Set up lipid toxicity scenario
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
         app.world_mut().insert_resource(LipidToxicityThreshold(threshold));
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::FreeFattyAcids, initial_ffa);
-            currency_pools.set(Currency::StorageBeads, 10.0);
-            currency_pools.set(Currency::ATP, 200.0); // Sufficient for polymerization
-            currency_pools.set(Currency::Pyruvate, 100.0);
-            currency_pools.set(Currency::ReducingPower, 100.0);
-            currency_pools.set(Currency::OrganicWaste, 5.0);
-        }
+        let cell = spawn_test_cell(&mut app, &[BlockKind::FatStorage], &[
+            (Currency::Lipids, initial_lipids),
+            (Currency::ATP, 50.0),
+        ]);
+        set_fat_storage_rates(&mut app, cell, poly_rate, 5.0);
 
-        // Spawn lipid management system
-        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
-        set_fat_storage_rates(&mut app, cell_entity, poly_rate, 5.0);
-
-        let mut ffa_levels = Vec::new();
-        let mut protection_activated = false;
-
-        // Monitor lipid toxicity protection
         for step in 0..protection_duration {
-            let ffa_before = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::FreeFattyAcids);
-
+            let before = pool(&app, cell, Currency::Lipids);
             sim_step(&mut app);
-
-            let ffa_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::FreeFattyAcids);
-            let storage_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::StorageBeads);
-
-            ffa_levels.push(ffa_after);
-
-            // Check for protection activation (FFA reduction when above threshold)
-            if ffa_after < ffa_before && ffa_before > threshold {
-                protection_activated = true;
+            let after = pool(&app, cell, Currency::Lipids);
+            if before > threshold {
+                prop_assert!(after < before, "no storage at step {}", step);
             }
-
-            // Verify protection doesn't break system
-            prop_assert!(ffa_after >= 0.0, "FFA went negative at step {}", step);
-            prop_assert!(storage_after >= 0.0, "Storage went negative at step {}", step);
-            prop_assert!(all_currencies_non_negative(&app),
-                "Lipid protection caused system failure at step {}", step);
+            prop_assert!(after >= threshold - 1e-3, "storage went below the threshold");
+            prop_assert!(cell_currencies_non_negative(&app, cell));
         }
-
-        let final_ffa = ffa_levels.last().copied().unwrap_or(0.0);
-
-        // Verify protection effectiveness
-        if initial_ffa > threshold {
-            prop_assert!(protection_activated,
-                "Lipid protection not activated despite FFA {} > threshold {}",
-                initial_ffa, threshold);
-
-            prop_assert!(final_ffa <= initial_ffa,
-                "Lipid protection failed: FFA increased from {} to {}",
-                initial_ffa, final_ffa);
-        }
+        prop_assert!((total_lipids(&app, cell) - initial_lipids).abs() < 1e-2);
     }
 }
-
-// --- System Integration Health Tests ---
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -470,84 +258,37 @@ proptest! {
         max_shrink_iters: 3,
         .. ProptestConfig::default()
     })]
-    /// Test that full metabolic system maintains overall cellular health
+    /// A full fermenting cell keeps ATP, and keeps waste and free lipids under
+    /// control.
     #[test]
     fn cellular_health_maintenance(
         health_scenario in (
             100.0f32..300.0f32, // pyruvate
             100.0f32..300.0f32, // reducing power
-            200.0f32..600.0f32, // free fatty acids
-            50.0f32..150.0f32,  // initial atp
+            200.0f32..600.0f32, // lipids
+            50.0f32..150.0f32,  // atp
             100.0f32..300.0f32  // toxicity threshold
         ),
-        health_monitoring_period in 10..25usize  // Reduced for performance
+        health_monitoring_period in 10..25usize
     ) {
-        let (pyruvate, rp, ffa, atp, threshold) = health_scenario;
-
+        let (pyruvate, rp, lipids, atp, threshold) = health_scenario;
         let mut app = MetabolisticApp::new_headless();
-
-        // Set up full cellular system
-        let (_player_entity, cell_entity) = {
-            let mut commands = app.world_mut().commands();
-            spawn_local_player_cell(&mut commands, Genome::default())
-        };
-        app.world_mut().flush();
-
-        {
-            let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-            let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-            currency_pools.set(Currency::Pyruvate, pyruvate);
-            currency_pools.set(Currency::ReducingPower, rp);
-            currency_pools.set(Currency::ATP, atp);
-            currency_pools.set(Currency::OrganicWaste, 20.0);
-            currency_pools.set(Currency::FreeFattyAcids, ffa);
-            currency_pools.set(Currency::StorageBeads, 25.0);
-        }
         app.world_mut().insert_resource(LipidToxicityThreshold(threshold));
+        let cell = spawn_test_cell(&mut app, &FERMENTER, &[
+            (Currency::Pyruvate, pyruvate),
+            (Currency::ReducingPower, rp),
+            (Currency::ATP, atp),
+            (Currency::Waste, 20.0),
+            (Currency::Lipids, lipids),
+        ]);
+        set_stored_lipids(&mut app, cell, 25.0);
 
-        // Spawn complete metabolic system
-        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
-
-        let mut health_metrics = Vec::new();
-
-        // Monitor cellular health over time
         for step in 0..health_monitoring_period {
             sim_step(&mut app);
-
-            // Calculate health metrics
-            let snapshot = get_currency_snapshot(&app);
-            let atp_health = snapshot[0]; // ATP index
-            let waste_health = threshold - snapshot[6].min(threshold); // Waste below threshold is good
-            let lipid_health = threshold - snapshot[4].min(threshold); // FFA below threshold is good
-
-            let overall_health = atp_health + waste_health + lipid_health;
-            health_metrics.push(overall_health);
-
-            // Verify fundamental health constraints
-            prop_assert!(all_currencies_non_negative(&app),
-                "Health failure: currency went negative at step {}", step);
-
-            prop_assert!(overall_health >= 0.0,
-                "Health calculation error at step {}: {}", step, overall_health);
+            prop_assert!(cell_currencies_non_negative(&app, cell), "negative pool at step {}", step);
+            prop_assert!(pool(&app, cell, Currency::ATP) >= atp, "ATP fell at step {}", step);
         }
-
-        // Analyze health trends
-        if health_metrics.len() >= 20 {
-            let early_health: f32 = health_metrics[0..10].iter().sum::<f32>() / 10.0;
-            let late_health: f32 = health_metrics[health_metrics.len()-10..].iter().sum::<f32>() / 10.0;
-
-            // Verify cellular health doesn't degrade catastrophically
-            prop_assert!(late_health >= early_health * 0.1,
-                "Catastrophic health degradation: early {}, late {}",
-                early_health, late_health);
-
-            // Verify health remains within reasonable bounds
-            let max_health = health_metrics.iter().copied().fold(0.0f32, f32::max);
-            let min_health = health_metrics.iter().copied().fold(f32::INFINITY, f32::min);
-
-            prop_assert!(max_health - min_health <= max_health * 2.0,
-                "Excessive health volatility: range {} vs max {}",
-                max_health - min_health, max_health);
-        }
+        prop_assert!(pool(&app, cell, Currency::Waste) < 20.0 + health_monitoring_period as f32);
+        prop_assert!(pool(&app, cell, Currency::Lipids) <= lipids.max(threshold));
     }
 }

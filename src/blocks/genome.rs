@@ -59,8 +59,12 @@ pub enum BlockKind {
     Polymerization,
     /// Stores free fatty acids as storage beads and releases them again.
     FatStorage,
-    /// Removes organic waste from the cell in vesicles.
+    /// Removes waste from the cell in vesicles.
     VesicleExport,
+    /// Makes ATP, reducing power and carbon from vent minerals and heat.
+    Chemosynthesis,
+    /// Ribosomes: make protein units from amino acids and ATP.
+    ProteinSynthesis,
 }
 
 impl BlockKind {
@@ -79,8 +83,10 @@ impl BlockKind {
             BlockKind::SecondaryMetabolites => "Produce pigments and toxins",
             BlockKind::AromaticPrecursorSynthesis => "Create aromatic precursors",
             BlockKind::Polymerization => "Polymerize lignin and other biopolymers",
-            BlockKind::FatStorage => "Store free fatty acids as lipid beads",
-            BlockKind::VesicleExport => "Export organic waste in vesicles",
+            BlockKind::FatStorage => "Store free lipids as lipid beads",
+            BlockKind::VesicleExport => "Export waste in vesicles",
+            BlockKind::Chemosynthesis => "Make energy and carbon from vent minerals and heat",
+            BlockKind::ProteinSynthesis => "Make proteins from amino acids",
         }
     }
 }
@@ -472,14 +478,20 @@ pub fn mutation_system(
     }
 }
 
-/// Helper function to create a basic genome with some starting genes
+/// The starter genome of a vent cell: chemosynthesis for energy and carbon,
+/// biosynthesis of amino acids and lipids, and protein synthesis. Fermentation
+/// is present but silent.
 pub fn create_starter_genome() -> Genome {
     let mut genome = Genome::default();
-
-    // Add some basic metabolic pathways as starter genes
-    genome.add_gene(BlockKind::SugarCatabolism);
+    for kind in [
+        BlockKind::Chemosynthesis,
+        BlockKind::AminoAcidBiosynthesis,
+        BlockKind::LipidMetabolism,
+        BlockKind::ProteinSynthesis,
+    ] {
+        genome.add_gene(kind);
+        genome.express_gene(kind);
+    }
     genome.add_gene(BlockKind::Fermentation);
-    genome.add_gene(BlockKind::AminoAcidBiosynthesis);
-
     genome
 }

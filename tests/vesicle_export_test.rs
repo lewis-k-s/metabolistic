@@ -1,4 +1,4 @@
-//! Vesicle export block: removes OrganicWaste from the cell.
+//! Vesicle export block: removes Waste from the cell.
 
 use bevy::prelude::*;
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
@@ -6,6 +6,7 @@ use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationCo
 use metabolistic3d::metabolism::{FlowmapTimingConfig, MetabolicFlowPlugin, run_metabolic_tick};
 use metabolistic3d::molecules::{Currency, CurrencyPools};
 use metabolistic3d::player::spawn_local_player_cell;
+use metabolistic3d::proteins::Proteome;
 
 fn app_with_cell(genes: &[BlockKind]) -> (App, Entity) {
     let mut app = App::new();
@@ -23,6 +24,10 @@ fn app_with_cell(genes: &[BlockKind]) -> (App, Entity) {
         let mut commands = app.world_mut().commands();
         spawn_local_player_cell(&mut commands, genome)
     };
+    app.world_mut().flush();
+    app.world_mut()
+        .entity_mut(cell)
+        .insert(Proteome::with_enzymes(&[(BlockKind::VesicleExport, 1)]));
     app.update();
     (app, cell)
 }
@@ -31,16 +36,16 @@ fn waste(app: &App, cell: Entity) -> f32 {
     app.world()
         .get::<CurrencyPools>(cell)
         .unwrap()
-        .get(Currency::OrganicWaste)
+        .get(Currency::Waste)
 }
 
 #[test]
-fn test_vesicle_export_decreases_organic_waste() {
+fn test_vesicle_export_decreases_waste() {
     let (mut app, cell) = app_with_cell(&[BlockKind::VesicleExport]);
     app.world_mut()
         .get_mut::<CurrencyPools>(cell)
         .unwrap()
-        .set(Currency::OrganicWaste, 100.0);
+        .set(Currency::Waste, 100.0);
 
     run_metabolic_tick(app.world_mut());
     let after_one = waste(&app, cell);
@@ -49,7 +54,11 @@ fn test_vesicle_export_decreases_organic_waste() {
     for _ in 0..1000 {
         run_metabolic_tick(app.world_mut());
     }
-    assert_eq!(waste(&app, cell), 0.0, "export stops at zero");
+    let left = waste(&app, cell);
+    assert!(
+        (0.0..1e-3).contains(&left),
+        "export empties the pool: {left}"
+    );
 }
 
 #[test]
@@ -58,7 +67,7 @@ fn test_no_export_without_gene() {
     app.world_mut()
         .get_mut::<CurrencyPools>(cell)
         .unwrap()
-        .set(Currency::OrganicWaste, 100.0);
+        .set(Currency::Waste, 100.0);
 
     run_metabolic_tick(app.world_mut());
 
