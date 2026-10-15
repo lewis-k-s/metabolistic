@@ -66,8 +66,9 @@ fn create_button(parent: &mut ChildSpawnerCommands, text: &str, button_type: Men
         .spawn((
             Button,
             Node {
-                width: Val::Px(250.0),
+                min_width: Val::Px(250.0),
                 height: Val::Px(65.0),
+                padding: UiRect::horizontal(Val::Px(20.0)),
                 margin: UiRect::all(Val::Px(10.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,

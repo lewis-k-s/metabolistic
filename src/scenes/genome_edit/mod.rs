@@ -35,7 +35,10 @@ pub struct GenomeSceneEntity;
 /// Cleans up all entities created for the genome scene upon exiting the state.
 /// This is placed here because it needs to despawn entities from both the
 /// logic and view modules.
-fn cleanup_genome_scene(mut commands: Commands, entities: Query<Entity, With<GenomeSceneEntity>>) {
+fn cleanup_genome_scene(
+    mut commands: Commands,
+    entities: Query<Entity, (With<GenomeSceneEntity>, Without<ChildOf>)>,
+) {
     for entity in &entities {
         commands.entity(entity).despawn();
     }

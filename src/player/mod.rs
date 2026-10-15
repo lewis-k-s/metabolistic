@@ -17,6 +17,12 @@ pub struct Player {
     pub client_id: u32,
 }
 
+/// Marker for the physics ball the player rolls in the 3D scene. It is spawned
+/// on entering the scene and despawned on leaving it. The player-cell link
+/// (`Player` + `ControlledCell`) is a separate entity that persists.
+#[derive(Component)]
+pub struct PlayerAvatar;
+
 /// Marker component for the local player (the one controlled by this client)
 #[derive(Component)]
 pub struct LocalPlayer;
@@ -32,7 +38,9 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(controller::CharacterControllerPlugin)
-            .add_systems(Startup, spawn_player);
+            // Spawn with the floor, not at startup: before the scene exists
+            // there is nothing to land on, and the ball falls forever.
+            .add_systems(OnEnter(crate::GameState::Scene3D), spawn_player);
     }
 }
 
@@ -49,6 +57,7 @@ pub fn spawn_player(
     // (see `spawn_local_player_cell`).
     commands.spawn((
         Player { client_id: 0 },
+        PlayerAvatar,
         Mesh3d(meshes.add(Sphere::new(radius).mesh())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         player_transform,

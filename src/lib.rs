@@ -24,6 +24,8 @@ pub mod dev_tools;
 pub mod inspector;
 #[cfg(feature = "full")]
 pub mod scenes;
+#[cfg(feature = "full")]
+pub mod smoke_test;
 
 /// Game states for scene management
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -78,6 +80,9 @@ impl MetabolisticApp {
                     Update,
                     (shared::state_transition_input, shared::genome_demo_system),
                 );
+            if smoke_test::requested() {
+                app.add_plugins(smoke_test::plugin);
+            }
         }
 
         app

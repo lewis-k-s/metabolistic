@@ -27,7 +27,8 @@ struct Player2D {
 
 impl Default for Player2D {
     fn default() -> Self {
-        Self { speed: 200.0 }
+        // World units per second (the camera shows 60 units of height).
+        Self { speed: 15.0 }
     }
 }
 
@@ -47,7 +48,14 @@ fn setup_2d_scene(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 20.0, 0.0).looking_at(Vec3::ZERO, Vec3::Z),
-        Projection::Orthographic(OrthographicProjection::default_3d()),
+        // Show the 50-unit ground. The default WindowSize scaling maps one unit
+        // to one pixel, so the ground was a tiny square.
+        Projection::Orthographic(OrthographicProjection {
+            scaling_mode: bevy::camera::ScalingMode::FixedVertical {
+                viewport_height: 60.0,
+            },
+            ..OrthographicProjection::default_3d()
+        }),
         Camera2D,
         Scene2DEntity,
     ));
@@ -65,7 +73,9 @@ fn setup_2d_scene(
     commands.spawn((
         Mesh3d(meshes.add(Circle::new(1.0).mesh())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.4, 0.2))),
-        Transform::from_xyz(0.0, 0.1, 0.0),
+        // The circle mesh faces +Z; turn it to face the camera above (+Y).
+        Transform::from_xyz(0.0, 0.1, 0.0)
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         Player2D::default(),
         Scene2DEntity,
     ));
@@ -137,8 +147,8 @@ fn update_2d_camera(
 /// Clean up 2D scene entities when leaving
 fn cleanup_2d_scene(
     mut commands: Commands,
-    scene_entities: Query<Entity, With<Scene2DEntity>>,
-    camera_entities: Query<Entity, With<Camera2D>>,
+    scene_entities: Query<Entity, (With<Scene2DEntity>, Without<ChildOf>)>,
+    camera_entities: Query<Entity, (With<Camera2D>, Without<Scene2DEntity>)>,
 ) {
     info!("Cleaning up 2D scene");
 

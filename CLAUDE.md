@@ -44,6 +44,11 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Headless build**: `cargo build --no-default-features --features headless` (no graphics/audio)
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 
+### Smoke Test (full game)
+- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, visits every `GameState`, holds W in the 3D scene, saves one screenshot per state to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the ball's position, and exits. A panic fails the run (non-zero exit).
+- Use it after engine upgrades or changes to scenes, cameras, physics or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
+- Expected noise: bevy_egui "Bindless textures are not yet supported on metal", bevy_gltf "Unknown vertex attribute TEXCOORD_2", and a winit "Skipped event Destroyed" on exit.
+
 ### Testing
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.

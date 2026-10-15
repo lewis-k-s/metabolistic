@@ -81,9 +81,10 @@ fn setup_3d_scene(
 /// Clean up 3D scene entities when leaving
 fn cleanup_3d_scene(
     mut commands: Commands,
-    scene_entities: Query<Entity, With<Scene3DEntity>>,
-    player_entities: Query<Entity, With<player::Player>>,
-    camera_entities: Query<Entity, With<Camera3D>>,
+    scene_entities: Query<Entity, (With<Scene3DEntity>, Without<ChildOf>)>,
+    // Only the physics ball: the player-cell link must survive scene changes.
+    player_entities: Query<Entity, (With<player::PlayerAvatar>, Without<Scene3DEntity>)>,
+    camera_entities: Query<Entity, (With<Camera3D>, Without<Scene3DEntity>)>,
 ) {
     info!("Cleaning up 3D scene");
 
