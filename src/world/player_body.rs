@@ -14,10 +14,10 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
+use crate::actions::{ActionState, action_damping, action_thrust};
 use crate::cell::{Cell, CellSize};
 use crate::movement::{
-    MoveInput, ThrustEffort, body_drag, body_mass, thrust_capacity, thrust_force, wasd_direction,
-    world_radius,
+    MoveInput, ThrustEffort, body_drag, body_mass, thrust_capacity, wasd_direction, world_radius,
 };
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::Proteome;
@@ -81,13 +81,14 @@ pub fn attach_body(commands: &mut Commands, sheets: &Sheets, cell: Entity) {
         .with_child((Name::new("Cell Sprite"), BlobSprite, body, Transform::default()));
 }
 
-/// WASD sets the wanted direction on the Run screen. In Manage, time runs but
-/// the keys are for the editor, so the cell stops pushing.
+/// WASD sets the wanted direction on the Run screen, and the aim of the actions.
+/// In Manage, time may run but the keys are for the editor, so the cell stops
+/// pushing.
 fn read_move_input(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    mut inputs: Query<&mut MoveInput, With<Cell>>,
+    mut inputs: Query<(&mut MoveInput, &mut ActionState), With<Cell>>,
 ) {
     let direction = if *state.get() == GameState::Run {
         wasd_direction(
@@ -100,8 +101,9 @@ fn read_move_input(
         Vec2::ZERO
     };
     for controlled in &players {
-        if let Ok(mut input) = inputs.get_mut(controlled.0) {
+        if let Ok((mut input, mut actions)) = inputs.get_mut(controlled.0) {
             input.0 = direction;
+            actions.aim_at(direction);
         }
     }
 }
@@ -114,15 +116,19 @@ fn apply_thrust(
         (
             &MoveInput,
             &Proteome,
+            &CellSize,
+            &ActionState,
             &mut ConstantForce,
+            &mut LinearDamping,
             &mut ThrustEffort,
         ),
         With<Cell>,
     >,
 ) {
-    for (input, proteome, mut force, mut effort) in &mut cells {
-        let thrust = thrust_force(input.0, thrust_capacity(proteome));
+    for (input, proteome, size, actions, mut force, mut damping, mut effort) in &mut cells {
+        let thrust = action_thrust(input.0, thrust_capacity(proteome), actions);
         force.0 = thrust;
+        damping.0 = action_damping(body_drag(size), actions);
         effort.0 += thrust.length() * time.delta_secs();
     }
 }

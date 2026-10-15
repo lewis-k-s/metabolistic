@@ -99,6 +99,10 @@ pub enum GeneState {
     Expressed,
     /// Gene is mutated and temporarily non-functional
     Mutated,
+    /// Gene had a beneficial mutation (only from induced mutation): its block
+    /// runs faster. A later mutation turns it into `Mutated`, and repair then
+    /// gives `Expressed`: the bonus is lost.
+    Enhanced,
 }
 
 /// Resource/Component containing the entire chromosome of gene tiles
@@ -213,6 +217,17 @@ impl Genome {
         }
     }
 
+    /// Turns an expressed gene into an enhanced one (a beneficial mutation).
+    pub fn enhance_gene(&mut self, block_kind: BlockKind) -> bool {
+        match self.table.get_mut(&block_kind) {
+            Some(state) if *state == GeneState::Expressed => {
+                *state = GeneState::Enhanced;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Repair a mutated gene back to expressed. Only expressed genes mutate,
     /// so this restores what UV damaged.
     pub fn restore_gene(&mut self, block_kind: BlockKind) -> bool {
@@ -244,6 +259,16 @@ impl Genome {
     /// Get the current state of a gene
     pub fn get_gene_state(&self, block_kind: &BlockKind) -> Option<&GeneState> {
         self.table.get(block_kind)
+    }
+
+    /// Genes that a mutation can hit: expressed and enhanced ones. An enhanced
+    /// gene that mutates loses its bonus; repair then gives `Expressed`.
+    pub fn get_mutable_genes(&self) -> Vec<BlockKind> {
+        self.table
+            .iter()
+            .filter(|(_, state)| matches!(state, GeneState::Expressed | GeneState::Enhanced))
+            .map(|(kind, _)| *kind)
+            .collect()
     }
 
     /// Get all expressed genes

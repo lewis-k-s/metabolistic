@@ -10,6 +10,8 @@
 //!   mineral particles.
 //! - `player_body`: the physics body, thrust, camera and blob look of the
 //!   player's cell. The cell plays baked sprite sheets.
+//! - `actions_view`: slot hotkeys, toxin droplets, membrane protein overlays,
+//!   shelter discs.
 //! - `hud`: ATP, membrane, genome, UV and pool bars.
 
 use avian2d::prelude::*;
@@ -19,9 +21,11 @@ use crate::genome_damage::UvFraction;
 use crate::level::{self, VENTS};
 use crate::pickups::GeneOrb;
 use crate::shared::spawn_starter_cell_at_start;
+use crate::shelter::Shelters;
 use crate::sprites::Sheets;
 use crate::InRun;
 
+pub mod actions_view;
 pub mod grid_view;
 pub mod hud;
 pub mod player_body;
@@ -36,12 +40,22 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(PhysicsPlugins::default().with_length_unit(20.0))
         .insert_resource(Gravity(Vec2::ZERO))
         .insert_resource(ClearColor(WATER_COLOR))
-        .add_plugins((grid_view::plugin, player_body::plugin, hud::plugin))
+        .add_plugins((
+            grid_view::plugin,
+            player_body::plugin,
+            hud::plugin,
+            actions_view::plugin,
+        ))
         .add_systems(OnEnter(InRun), spawn_world)
         .add_systems(OnExit(InRun), remove_grid);
 }
 
-fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>, sheets: Res<Sheets>) {
+fn spawn_world(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    sheets: Res<Sheets>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let grid = level::vent_field();
     let world_size = grid.world_size();
     let origin = grid.origin();
@@ -55,6 +69,10 @@ fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>, sheets: R
     commands.insert_resource(grid);
     commands.insert_resource(UvFraction(level::UV_FRACTION));
     spawn_gene_orb(&mut commands, &sheets);
+    for shelter in level::SHELTERS {
+        actions_view::spawn_shelter(&mut commands, &mut images, shelter);
+    }
+    commands.insert_resource(Shelters(level::SHELTERS.to_vec()));
 
     let (player, cell) = spawn_starter_cell_at_start(&mut commands);
     commands.entity(player).insert(DespawnOnExit(InRun));
@@ -81,6 +99,7 @@ fn spawn_gene_orb(commands: &mut Commands, sheets: &Sheets) {
 
 fn remove_grid(mut commands: Commands) {
     commands.remove_resource::<crate::envgrid::EnvGrid>();
+    commands.insert_resource(Shelters::default());
 }
 
 /// Four invisible walls keep the player inside the field.

@@ -150,6 +150,7 @@ fn render_genome_panel(
             GeneState::Expressed => "✓",
             GeneState::Silent => "○",
             GeneState::Mutated => "✗",
+            GeneState::Enhanced => "▲",
         };
         text.push_line(format!("{} {:?}", status_symbol, block_kind));
     }

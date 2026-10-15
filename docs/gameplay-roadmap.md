@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 is done (not committed yet). Next: M4.
+merged to `master` (2026-10-15). M3 is done. M4 is done (not committed yet). Next: M5.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -185,13 +185,13 @@ Updated after M2.
 | Solver | Enzymes x saturation, proportional sharing, fixed 0.05 s sub-steps (`metabolism/solver.rs`) | - |
 | Pools | The pools above (with Pigments), plus a `StoredLipids` component | - |
 | Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites | photosynthesis, catalase, respiration (M7, M8) |
-| Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size | Editor UI (M4) |
-| Genome | `Silent` / `Expressed` / `Mutated`; UV mutation load, repair, translation efficiency, `GenomeIntegrity` | Mutation from ROS; gene transfer (M5) |
+| Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size, editor UI | - |
+| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity` | Mutation from ROS; gene transfer (M5) |
 | Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
-| Run screen | The player is a `Cell` with a body; vent field level; HUD; run-over screen with the cause of death | Shelters, action bar (M4) |
+| Run screen | The player is a `Cell` with a body; vent field level; HUD; run-over screen with the cause of death | - |
 | Physics | avian2d, 64 Hz, no interpolation | - |
-| Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | Overlays for membrane proteins; a final light colour |
-| Manage screen | Placeholder | Editor, synthesis queue, action slots (M4) |
+| Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | A final light colour; a sprite for the shelter disc |
+| Manage screen | Editor: genome, enzymes, membrane slots, queue with time to finish, action slots | - |
 | Run structure | `InRun` state covers Run and Manage; death and restart | Levels, victory, codex (M6) |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
@@ -312,7 +312,40 @@ Original plan:
 Done when: light zones kill a cell without pigment, and a cell with pigment
 survives.
 
-### M4. Build and regulate
+### M4. Build and regulate - done (not committed yet)
+
+Notes:
+- Time rule in one pure function, `shelter::sim_paused(in_shelter, editor_open)`:
+  stop only in a shelter with Manage open. It pauses `Time<Virtual>`, so the
+  metabolic tick, the grid and physics all stop. Outside a shelter, full speed.
+  **Playtest** (maybe slow time instead).
+- Shelters: `level::SHELTERS`, two circles of radius 48: (120, -130) near the
+  start and (480, 380) near vent 2 / the far plume. Heat and UV damage are 0
+  inside (`InShelter`). Resources are unlimited. The disc is a generated dark
+  translucent sprite with a lighter rim (water colours): **art owner** may
+  replace it.
+- Slots (`actions.rs`): Off 0 / Low 0.5 / High 1.0, ramp 1.0 per second capped
+  at the gap, 1 ATP per change (refused with less). The level is a `Throttle`
+  on the block that multiplies `Drive`, not `Drive` itself, because regulated
+  blocks (protein synthesis, fat storage, refill) rewrite `Drive` every tick.
+- Flagellum burst: thrust x3 for 1.5 s, 3 ATP, 4 s cooldown that starts when
+  the burst ends. Movement ATP also rises x3 (it follows thrust). Adhesin:
+  toggle, thrust off, damping 60, 0.2 ATP/s, lets go at 0 ATP. Toxin: droplet
+  (240 px/s, 1.2 s, fades), 2 ATP + 1 Metals. Metals has no source yet, so the
+  starting 5 limit the shots (and low Metals slow chemosynthesis, its cofactor).
+- Induced mutation: 10 ATP, +1.0 `MutationLoad` and +1 `InducedMutations`.
+  When the unit turns into a mutation, 15% (`ENHANCE_CHANCE`, `GeneRng`) become
+  `Enhanced` (x1.25; repair of integrity leaves it, but a later mutation, UV or induced, turns it to `Mutated`, and repair then gives `Expressed`: the bonus is lost). UV mutations never enhance.
+- A pathway that is not in any slot runs at High, so a level cannot get stuck
+  at Off after the slot changes (`effective_level`).
+- Starter bar: slot 1 Chemosynthesis, slot 2 Induce mutation. Hotkeys 1-4 on
+  Run; in Manage they re-assign the slot. Overlays: flagellum, adhesin, toxin,
+  mineral transporter (idle only), max 2 of a kind and 6 in all. The flagellum
+  points away from the aim.
+- Editor ETA uses the last tick's synthesis rate, or the ribosome estimate
+  when the queue was empty.
+
+Original plan:
 
 1. Manage screen: genome, enzyme allocation, membrane slots, synthesis queue.
 2. Shelters: calm zones where game time stops while the editor is open.

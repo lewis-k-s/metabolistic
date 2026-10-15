@@ -172,6 +172,7 @@ pub fn spawn_block(
         spec.profile,
         spec.kinetics,
         Drive::default(),
+        crate::actions::Throttle::default(),
         BlockTurnover::default(),
         OwnedBy(cell),
         Name::new(format!("{kind:?} block")),

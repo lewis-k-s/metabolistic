@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::actions::{ActionBar, ActionState, PathwayLevels, SLOT_COUNT, slot_status};
 use crate::cell::Cell;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::exchange::{HEAT_DAMAGE_THRESHOLD, MINERAL_STOCK_CAP};
@@ -15,6 +16,8 @@ use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
+use crate::proteins::Proteome;
+use crate::shelter::InShelter;
 use crate::screens::label;
 use crate::GameState;
 
@@ -36,9 +39,14 @@ enum HudLine {
     AminoAcids,
     Heat,
     Uv,
+    Shelter,
 }
 
-const LINES: [HudLine; 8] = [
+/// One slot of the action bar (0-based).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+struct HudSlot(usize);
+
+const LINES: [HudLine; 9] = [
     HudLine::Atp,
     HudLine::Membrane,
     HudLine::Genome,
@@ -47,6 +55,7 @@ const LINES: [HudLine; 8] = [
     HudLine::AminoAcids,
     HudLine::Heat,
     HudLine::Uv,
+    HudLine::Shelter,
 ];
 
 pub fn plugin(app: &mut App) {
@@ -73,6 +82,24 @@ fn spawn_hud(mut commands: Commands) {
                 parent.spawn((line, label("", 18.0)));
             }
         });
+    commands
+        .spawn((
+            Name::new("Action Bar"),
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(44.0),
+                left: Val::Px(12.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                ..default()
+            },
+            DespawnOnExit(GameState::Run),
+        ))
+        .with_children(|parent| {
+            for slot in 0..SLOT_COUNT {
+                parent.spawn((HudSlot(slot), label("", 18.0)));
+            }
+        });
 }
 
 /// A text bar: `[#####---]` with `value` out of `max`, `width` characters wide.
@@ -95,20 +122,42 @@ fn bar_line(name: &str, value: f32, max: f32) -> String {
 fn update_hud(
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<
-        (&CurrencyPools, &Membrane, &LocalEnvironment, &GenomeIntegrity),
+        (
+            &CurrencyPools,
+            &Membrane,
+            &LocalEnvironment,
+            &GenomeIntegrity,
+            &InShelter,
+            &ActionBar,
+            &PathwayLevels,
+            &ActionState,
+            &Proteome,
+        ),
         With<Cell>,
     >,
     fraction: Res<UvFraction>,
-    mut lines: Query<(&HudLine, &mut Text)>,
+    mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
+    mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
 ) {
-    let Some((pools, membrane, env, genome)) = players
+    let Some((pools, membrane, env, genome, shelter, bar, levels, actions, proteome)) = players
         .iter()
         .find_map(|controlled| cells.get(controlled.0).ok())
     else {
         return;
     };
+    for (slot, mut text) in &mut slots {
+        let kind = bar.slots.get(slot.0).copied().flatten();
+        text.0 = format!("[{}] {}", slot.0 + 1, slot_status(kind, levels, actions, proteome));
+    }
     for (line, mut text) in &mut lines {
         text.0 = match line {
+            HudLine::Shelter => {
+                if shelter.0 {
+                    "SHELTER: heat and UV are calm".to_string()
+                } else {
+                    String::new()
+                }
+            }
             HudLine::Atp => bar_line("ATP", pools.get(Currency::ATP), ATP_BAR_MAX),
             HudLine::Membrane => bar_line("Membrane", membrane.integrity, membrane.max),
             HudLine::Genome => {
@@ -118,7 +167,7 @@ fn update_hud(
             HudLine::Uv => {
                 let uv = uv_level(env.get(Channel::Light), fraction.0);
                 let shield = shield(pools.get(Currency::Pigments));
-                let warning = if uv > 1.0 && shield < 0.5 { "  UV!" } else { "" };
+                let warning = if uv > 1.0 && shield < 0.5 && !shelter.0 { "  UV!" } else { "" };
                 format!("UV {uv:6.1}  shield {:3.0}%{warning}", shield * 100.0)
             }
             HudLine::Minerals => bar_line("Minerals", pools.get(Currency::Minerals), MINERAL_STOCK_CAP),
@@ -128,7 +177,11 @@ fn update_hud(
             }
             HudLine::Heat => {
                 let heat = env.get(Channel::Heat);
-                let warning = if heat > HEAT_DAMAGE_THRESHOLD { "  TOO HOT!" } else { "" };
+                let warning = if heat > HEAT_DAMAGE_THRESHOLD && !shelter.0 {
+                    "  TOO HOT!"
+                } else {
+                    ""
+                };
                 format!("Heat {heat:6.1}{warning}")
             }
         };

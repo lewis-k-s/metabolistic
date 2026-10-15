@@ -6,12 +6,19 @@
 //! missing resource fails the run. So do these, on the Run screen: the player
 //! dies, or the player does not move while W is held. Screenshots go to
 //! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
+//!
+//! M4 steps (`smoke_actions`): on the first Run step the cell gets one flagellum,
+//! one adhesin and one toxin, so that the overlays show. On the Manage step the
+//! test queues one enzyme. Back on Run, it uses slot 1 and checks that the
+//! enzyme order is in the queue and that the slot changed the pathway level.
 
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
 use std::path::PathBuf;
 
 use crate::GameState;
+use crate::actions::{Level, PathwayLevels, UseSlot};
+use crate::blocks::genome::BlockKind;
 use crate::cell::Cell;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::genome_damage::GenomeIntegrity;
@@ -19,6 +26,7 @@ use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
+use crate::proteins::{MembraneProtein, ProteinTarget, Proteome, QueueProtein, SynthesisQueue};
 use crate::screens::menu::MenuPage;
 
 /// Frames to stay in each state before the screenshot. The first frames compile
@@ -32,14 +40,20 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 6] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 7] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Run, None),
     (GameState::Manage, None),
+    (GameState::Run, None),
     (GameState::RunOver, None),
     (GameState::Menu, Some(MenuPage::Main)),
 ];
+
+/// Steps of the M4 checks.
+const STEP_RUN: usize = 2;
+const STEP_MANAGE: usize = 3;
+const STEP_RUN_AGAIN: usize = 4;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -65,7 +79,7 @@ pub fn plugin(app: &mut App) {
         screenshot_requested_at: None,
         run_start: None,
     })
-    .add_systems(Update, drive_smoke_test)
+    .add_systems(Update, (drive_smoke_test, smoke_actions))
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
 }
@@ -213,4 +227,66 @@ fn hold_forward(mut keys: ResMut<ButtonInput<KeyCode>>) {
 
 fn release_forward(mut keys: ResMut<ButtonInput<KeyCode>>) {
     keys.release(KeyCode::KeyW);
+}
+
+/// The M4 checks: overlays, the editor queue, and a slot use.
+#[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
+fn smoke_actions(
+    smoke: Res<SmokeTest>,
+    state: Res<State<GameState>>,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut cells: Query<(&mut Proteome, &SynthesisQueue, &PathwayLevels, &CurrencyPools), With<Cell>>,
+    mut queue: MessageWriter<QueueProtein>,
+    mut slots: MessageWriter<UseSlot>,
+    mut done: Local<[bool; 3]>,
+) {
+    let target = SEQUENCE.get(smoke.step).map(|(state, _)| state.clone());
+    if target.as_ref() != Some(state.get()) {
+        return;
+    }
+    let Some(cell) = players.iter().next().map(|c| c.0) else {
+        return;
+    };
+    let Ok((mut proteome, order_queue, levels, pools)) = cells.get_mut(cell) else {
+        return;
+    };
+    match smoke.step {
+        STEP_RUN if !done[0] && smoke.frames_in_step >= 5 => {
+            for protein in [
+                MembraneProtein::Flagellum,
+                MembraneProtein::Adhesin,
+                MembraneProtein::Toxin,
+            ] {
+                proteome.add(ProteinTarget::Membrane(protein));
+            }
+            done[0] = true;
+            info!("smoke test: gave the cell a flagellum, an adhesin and a toxin");
+        }
+        STEP_MANAGE if !done[1] && smoke.frames_in_step >= 10 => {
+            queue.write(QueueProtein {
+                cell,
+                target: ProteinTarget::Enzyme(BlockKind::Chemosynthesis),
+            });
+            done[1] = true;
+            info!("smoke test: queued one Chemosynthesis enzyme in the editor");
+        }
+        STEP_RUN_AGAIN if !done[2] && smoke.frames_in_step >= 20 => {
+            assert!(
+                !order_queue.is_empty() || proteome.enzymes(BlockKind::Chemosynthesis) > 2,
+                "smoke test: the queued enzyme is neither in the queue nor built"
+            );
+            let atp = pools.get(Currency::ATP);
+            slots.write(UseSlot { cell, slot: 0 });
+            done[2] = true;
+            info!("smoke test: used slot 1 at ATP {atp:.1}");
+        }
+        STEP_RUN_AGAIN if done[2] && smoke.frames_in_step == 40 => {
+            assert_eq!(
+                levels.level(BlockKind::Chemosynthesis),
+                Level::Off,
+                "smoke test: slot 1 did not switch the pathway off"
+            );
+        }
+        _ => {}
+    }
 }

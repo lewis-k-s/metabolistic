@@ -14,6 +14,8 @@
 //!   player must go round them. Light has no drift, and its sources are fixed.
 //! - **Gene orb**: a pickup in the dim edge of shaft A. It stands in for gene
 //!   transfer (M5) and gives the pigment gene.
+//! - **Shelters**: two vent crevices (`SHELTERS`), one near the start and one
+//!   near the far plume. Hazards do no damage inside.
 //! - **Cold zones**: far from the vents there is no heat and no minerals.
 //!
 //! `vent_field` builds the grid and runs it to a steady state, so the player
@@ -86,6 +88,20 @@ pub const SHAFTS: [Shaft; 2] = [
     },
 ];
 
+/// The shelters (vent crevices) of the field: one near the start, one near the
+/// far plume. Inside, heat and UV do no damage, and time stops while the
+/// editor is open (see `shelter`).
+pub const SHELTERS: [crate::shelter::Shelter; 2] = [
+    crate::shelter::Shelter {
+        position: Vec2::new(120.0, -130.0),
+        radius: 48.0,
+    },
+    crate::shelter::Shelter {
+        position: Vec2::new(480.0, 380.0),
+        radius: 48.0,
+    },
+];
+
 /// Where the gene orb lies: in the dim edge at the lower end of shaft A.
 pub const GENE_ORB_POSITION: Vec2 = Vec2::new(320.0, 92.0);
 /// The gene that the orb gives. Stand-in for gene transfer (M5).
@@ -155,6 +171,19 @@ pub fn vent_field() -> EnvGrid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shelters_are_in_the_field_clear_of_the_vents_and_one_is_near_the_start() {
+        let half = Vec2::new(FIELD_WIDTH as f32, FIELD_HEIGHT as f32) * 16.0;
+        for shelter in SHELTERS {
+            assert!(shelter.position.abs().cmplt(half - Vec2::splat(shelter.radius)).all());
+            for vent in VENTS {
+                assert!(shelter.position.distance(vent.position) > shelter.radius + 40.0);
+            }
+        }
+        assert!(SHELTERS[0].position.distance(START_POSITION) < 250.0);
+        assert!(SHELTERS[1].position.distance(VENTS[1].position) < 250.0);
+    }
 
     /// Prints the field as text. Run with `cargo th print_field -- --ignored --nocapture`.
     #[test]

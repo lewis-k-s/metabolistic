@@ -139,6 +139,34 @@ pub enum QueueError {
     NoMembraneSlot,
 }
 
+/// Membrane slots in use and in total. Membrane proteins in the queue count as
+/// used, as in `queue_protein`.
+pub fn membrane_slot_usage(queue: &SynthesisQueue, proteome: &Proteome, slots: u32) -> (u32, u32) {
+    let queued = queue
+        .orders
+        .iter()
+        .filter(|o| matches!(o, ProteinTarget::Membrane(_)))
+        .count() as u32;
+    (proteome.membrane_total() + queued, slots)
+}
+
+/// Protein units still to make for the whole queue.
+pub fn units_left(queue: &SynthesisQueue) -> f32 {
+    (queue.orders.len() as f32 * UNITS_PER_PROTEIN - queue.progress).max(0.0)
+}
+
+/// Seconds until the queue is done at `units_per_sec`. `None` if the queue is
+/// empty or the rate is 0.
+pub fn synthesis_eta(queue: &SynthesisQueue, units_per_sec: f32) -> Option<f32> {
+    (!queue.is_empty() && units_per_sec > 0.0).then(|| units_left(queue) / units_per_sec)
+}
+
+/// Seconds until the first order is done at `units_per_sec`.
+pub fn first_order_eta(queue: &SynthesisQueue, units_per_sec: f32) -> Option<f32> {
+    (!queue.is_empty() && units_per_sec > 0.0)
+        .then(|| (UNITS_PER_PROTEIN - queue.progress).max(0.0) / units_per_sec)
+}
+
 /// Adds an order to the queue. A membrane protein needs a free slot. Slots of
 /// membrane proteins already in the queue count as used.
 pub fn queue_protein(
@@ -291,6 +319,30 @@ mod tests {
         );
         // Enzymes do not use membrane slots.
         queue_protein(&mut queue, &proteome, 2, CHEMO).unwrap();
+    }
+
+    #[test]
+    fn slot_usage_counts_queued_membrane_proteins_only() {
+        let mut queue = SynthesisQueue::default();
+        let mut proteome = Proteome::default();
+        proteome.add(FLAGELLUM);
+        queue_protein(&mut queue, &proteome, 6, FLAGELLUM).unwrap();
+        queue_protein(&mut queue, &proteome, 6, CHEMO).unwrap();
+        assert_eq!(membrane_slot_usage(&queue, &proteome, 6), (2, 6));
+    }
+
+    #[test]
+    fn the_eta_follows_the_queue_and_the_rate() {
+        let mut queue = SynthesisQueue::default();
+        assert_eq!(synthesis_eta(&queue, 1.0), None, "empty queue");
+        let proteome = Proteome::default();
+        queue_protein(&mut queue, &proteome, 6, CHEMO).unwrap();
+        queue_protein(&mut queue, &proteome, 6, CHEMO).unwrap();
+        queue.progress = 4.0;
+        assert_eq!(units_left(&queue), 16.0);
+        assert_eq!(synthesis_eta(&queue, 2.0), Some(8.0));
+        assert_eq!(first_order_eta(&queue, 2.0), Some(3.0));
+        assert_eq!(synthesis_eta(&queue, 0.0), None, "no synthesis");
     }
 
     #[test]

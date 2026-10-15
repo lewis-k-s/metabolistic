@@ -155,6 +155,10 @@ proptest! {
                     GeneState::Silent => {
                         genome.silence_gene(kind);
                     }
+                    GeneState::Enhanced => {
+                        genome.express_gene(kind);
+                        genome.enhance_gene(kind);
+                    }
                 }
             }
             for _ in 0..consistency_check_steps {

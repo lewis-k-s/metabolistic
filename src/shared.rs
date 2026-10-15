@@ -29,6 +29,7 @@ pub fn spawn_starter_cell(commands: &mut Commands, position: Vec2) -> (Entity, E
     commands.entity(cell).insert((
         CurrencyPools::with_defaults(),
         starter_proteome(),
+        crate::actions::starter_action_bar(),
         LocalEnvironment::default(),
         Transform::from_translation(position.extend(0.0)),
     ));

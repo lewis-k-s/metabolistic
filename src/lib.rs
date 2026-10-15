@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
 // Simulation modules: always compiled, no graphics dependencies.
+pub mod actions;
 pub mod blocks;
 pub mod cell;
 pub mod envgrid;
@@ -17,6 +18,7 @@ pub mod pickups;
 pub mod player;
 pub mod proteins;
 pub mod run;
+pub mod shelter;
 pub mod shared;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -105,6 +107,8 @@ impl MetabolisticApp {
             .add_plugins(genome_damage::GenomeDamagePlugin)
             .add_plugins(pickups::PickupPlugin)
             .add_plugins(run::RunPlugin)
+            .add_plugins(shelter::ShelterPlugin)
+            .add_plugins(actions::ActionsPlugin)
             // The game picks mutated genes at random; tests use a fixed seed.
             .insert_resource(genome_damage::GeneRng::from_entropy());
 
@@ -147,6 +151,8 @@ impl MetabolisticApp {
             .add_plugins(genome_damage::GenomeDamagePlugin)
             .add_plugins(pickups::PickupPlugin)
             .add_plugins(run::RunPlugin)
+            .add_plugins(shelter::ShelterPlugin)
+            .add_plugins(actions::ActionsPlugin)
             // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not
             // from real time.
             .insert_resource(metabolism::FlowmapTimingConfig::manual());

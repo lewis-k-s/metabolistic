@@ -37,6 +37,7 @@ use crate::environment::{Channel, LocalEnvironment};
 use crate::membrane::Membrane;
 use crate::metabolism::{CurrencyPools, FlowmapTimingConfig, MetabolicSet, decay_fraction};
 use crate::molecules::Currency;
+use crate::shelter::InShelter;
 
 // --- Tuning. All of these need **playtest**. ---
 
@@ -72,6 +73,9 @@ pub const GENE_REPAIR_WORK: f32 = 0.1;
 /// Float tolerance, in work units, when progress is compared with a gene's cost.
 const WORK_EPSILON: f32 = 1e-6;
 
+/// Chance that an induced mutation gives an `Enhanced` gene. **Playtest.**
+pub const ENHANCE_CHANCE: f32 = 0.15;
+
 /// Seed of `GeneRng` unless the game sets another one.
 pub const DEFAULT_GENE_SEED: u64 = 0x5EED_0F_6E_4E;
 
@@ -90,6 +94,11 @@ impl Default for GenomeIntegrity {
 /// UV damage that waits to become mutations. Each full unit mutates one gene.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
 pub struct MutationLoad(pub f32);
+
+/// Induced mutations (see `actions`) that wait in the `MutationLoad`. Each one
+/// is a chance for an `Enhanced` gene when its load unit turns into a mutation.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InducedMutations(pub u32);
 
 /// Repair work done on the next mutated gene, in work units.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
@@ -193,20 +202,68 @@ pub fn apply_mutation_load(
     load: f32,
     rng: &mut impl Rng,
 ) -> (f32, Vec<BlockKind>) {
+    let outcome = apply_induced_mutation_load(genome, load, 0, 0.0, rng);
+    let kinds = outcome.changes.into_iter().map(|(kind, _)| kind).collect();
+    (outcome.load, kinds)
+}
+
+/// The result of `apply_induced_mutation_load`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MutationOutcome {
+    /// Mutation load that is left.
+    pub load: f32,
+    /// Induced mutations not used yet.
+    pub induced: u32,
+    /// Genes that changed, in order, with their new state (`Mutated` or
+    /// `Enhanced`).
+    pub changes: Vec<(BlockKind, GeneState)>,
+}
+
+/// Like `apply_mutation_load`, with `induced` of the load units coming from
+/// induced mutation. Each mutation uses one induced unit first, and then has
+/// a chance `enhance_chance` to be an `Enhanced` gene instead of a `Mutated`
+/// one. UV mutations never enhance. Without induced units the function takes
+/// no extra number from `rng`.
+pub fn apply_induced_mutation_load(
+    genome: &mut Genome,
+    load: f32,
+    induced: u32,
+    enhance_chance: f32,
+    rng: &mut impl Rng,
+) -> MutationOutcome {
     let mut load = load.max(0.0);
-    let mut mutated = Vec::new();
+    let mut induced = induced;
+    let mut changes = Vec::new();
     while load >= 1.0 {
-        let mut candidates = genome.get_expressed_genes();
+        let mut candidates = genome.get_mutable_genes();
         if candidates.is_empty() {
-            return (load.fract(), mutated);
+            return MutationOutcome {
+                load: load.fract(),
+                induced: 0,
+                changes,
+            };
         }
         candidates.sort();
         let kind = candidates[rng.random_range(0..candidates.len())];
-        genome.mutate_gene(kind);
-        mutated.push(kind);
+        let enhanced = induced > 0 && {
+            induced -= 1;
+            rng.random::<f32>() < enhance_chance
+        };
+        // Only an expressed gene can be enhanced; an enhanced one that is hit
+        // again mutates.
+        if enhanced && genome.enhance_gene(kind) {
+            changes.push((kind, GeneState::Enhanced));
+        } else {
+            genome.mutate_gene(kind);
+            changes.push((kind, GeneState::Mutated));
+        }
         load -= 1.0;
     }
-    (load, mutated)
+    MutationOutcome {
+        load,
+        induced,
+        changes,
+    }
 }
 
 /// What one tick of repair does.
@@ -285,12 +342,18 @@ pub fn uv_damage_system(
             &mut DamageTaken,
             &mut GenomeIntegrity,
             &mut MutationLoad,
+            &InShelter,
         ),
         With<Cell>,
     >,
 ) {
     let dt = timing.target_delta();
-    for (env, pools, mut membrane, mut taken, mut genome_integrity, mut load) in &mut cells {
+    for (env, pools, mut membrane, mut taken, mut genome_integrity, mut load, sheltered) in
+        &mut cells
+    {
+        if sheltered.0 {
+            continue;
+        }
         let uv = uv_level(env.get(Channel::Light), fraction.0);
         if uv <= 0.0 {
             continue;
@@ -309,16 +372,23 @@ pub fn uv_damage_system(
 /// Turns full units of mutation load into mutated genes.
 pub fn mutation_system(
     mut rng: ResMut<GeneRng>,
-    mut cells: Query<(&mut Genome, &mut MutationLoad), With<Cell>>,
+    mut cells: Query<(&mut Genome, &mut MutationLoad, &mut InducedMutations), With<Cell>>,
 ) {
-    for (mut genome, mut load) in &mut cells {
+    for (mut genome, mut load, mut induced) in &mut cells {
         if load.0 < 1.0 {
             continue;
         }
-        let (left, mutated) = apply_mutation_load(&mut genome, load.0, &mut rng.0);
-        load.0 = left;
-        for kind in mutated {
-            debug!("UV mutated gene {kind:?}");
+        let outcome = apply_induced_mutation_load(
+            &mut genome,
+            load.0,
+            induced.0,
+            ENHANCE_CHANCE,
+            &mut rng.0,
+        );
+        load.0 = outcome.load;
+        induced.0 = outcome.induced;
+        for (kind, state) in outcome.changes {
+            debug!("Mutation: gene {kind:?} is now {state:?}");
         }
     }
 }

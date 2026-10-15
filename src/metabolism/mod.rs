@@ -32,6 +32,7 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 
 use crate::blocks::genome::{BlockKind, GeneState};
+use crate::actions::Throttle;
 use crate::cell::{Cell, CellBlocks, CellSize, maintenance_atp_per_sec};
 use crate::envgrid::EnvGrid;
 use crate::environment::{Channel, LocalEnvironment, external_saturation};
@@ -261,7 +262,12 @@ pub enum BlockStatus {
     Active,
     Mutated,
     Silent,
+    /// A beneficial mutation: the block runs faster.
+    Enhanced,
 }
+
+/// Throughput factor of an enhanced gene.
+pub const ENHANCED_THROUGHPUT: f32 = 1.25;
 
 impl BlockStatus {
     /// Fraction of full throughput that a block with this status can run at.
@@ -270,6 +276,7 @@ impl BlockStatus {
             BlockStatus::Active => 1.0,
             BlockStatus::Mutated => 0.5,
             BlockStatus::Silent => 0.0,
+            BlockStatus::Enhanced => ENHANCED_THROUGHPUT,
         }
     }
 }
@@ -280,6 +287,7 @@ impl From<GeneState> for BlockStatus {
             GeneState::Expressed => BlockStatus::Active,
             GeneState::Mutated => BlockStatus::Mutated,
             GeneState::Silent => BlockStatus::Silent,
+            GeneState::Enhanced => BlockStatus::Enhanced,
         }
     }
 }
@@ -362,7 +370,13 @@ pub fn solve_cell_flux_system(
         ),
         With<Cell>,
     >,
-    blocks: Query<(&MetabolicNode, &FluxProfile, &Kinetics, &Drive)>,
+    blocks: Query<(
+        &MetabolicNode,
+        &FluxProfile,
+        &Kinetics,
+        &Drive,
+        Option<&Throttle>,
+    )>,
     mut turnovers: Query<&mut BlockTurnover>,
 ) {
     let dt = timing.target_delta();
@@ -372,14 +386,14 @@ pub fn solve_cell_flux_system(
             .0
             .values()
             .filter_map(|&entity| {
-                let (node, profile, kinetics, drive) = blocks.get(entity).ok()?;
+                let (node, profile, kinetics, drive, throttle) = blocks.get(entity).ok()?;
                 Some(OwnedBlock {
                     entity,
                     kind: node.kind,
                     status: node.status,
                     profile,
                     kinetics: *kinetics,
-                    drive: drive.0,
+                    drive: drive.0 * throttle.map_or(1.0, |t| t.0),
                 })
             })
             .collect();

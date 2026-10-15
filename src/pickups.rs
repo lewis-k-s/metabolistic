@@ -27,7 +27,10 @@ pub struct GeneOrb {
 /// True if the orb has something to give: the gene is absent, silent or
 /// mutated. An expressed gene needs nothing.
 pub fn can_take_gene(genome: &Genome, kind: BlockKind) -> bool {
-    genome.get_gene_state(&kind) != Some(&GeneState::Expressed)
+    !matches!(
+        genome.get_gene_state(&kind),
+        Some(GeneState::Expressed | GeneState::Enhanced)
+    )
 }
 
 /// Gives a gene. An absent gene is added and expressed. A silent gene is
@@ -36,7 +39,7 @@ pub fn can_take_gene(genome: &Genome, kind: BlockKind) -> bool {
 /// already expressed.
 pub fn grant_gene(genome: &mut Genome, proteome: &mut Proteome, kind: BlockKind) -> bool {
     match genome.get_gene_state(&kind) {
-        Some(GeneState::Expressed) => return false,
+        Some(GeneState::Expressed | GeneState::Enhanced) => return false,
         Some(GeneState::Mutated) => {
             genome.restore_gene(kind);
         }

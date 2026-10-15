@@ -31,6 +31,7 @@ use crate::membrane::Membrane;
 use crate::metabolism::{BlockTurnover, CurrencyPools, FlowmapTimingConfig};
 use crate::molecules::Currency;
 use crate::movement::{ThrustEffort, move_atp_cost};
+use crate::shelter::InShelter;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 
 /// Minerals that the cell can hold. **Playtest.**
@@ -148,10 +149,16 @@ pub fn constant_supply_system(mut cells: Query<(&LocalEnvironment, &mut Currency
 /// Heat above the threshold damages the membrane.
 pub fn heat_damage_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&LocalEnvironment, &mut Membrane, &mut DamageTaken), With<Cell>>,
+    mut cells: Query<
+        (&LocalEnvironment, &mut Membrane, &mut DamageTaken, &InShelter),
+        With<Cell>,
+    >,
 ) {
     let dt = timing.target_delta();
-    for (env, mut membrane, mut taken) in &mut cells {
+    for (env, mut membrane, mut taken, sheltered) in &mut cells {
+        if sheltered.0 {
+            continue;
+        }
         let damage = heat_damage(env.get(Channel::Heat), dt);
         if damage > 0.0 {
             membrane.damage(damage);

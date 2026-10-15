@@ -30,6 +30,17 @@ pub fn flux_profile() -> FluxProfile {
     profile
 }
 
+/// Protein units per second that the ribosomes can make, if the inputs
+/// suffice. It is the estimate behind the editor's time to finish.
+pub fn potential_rate(
+    ribosomes: u32,
+    status: crate::metabolism::BlockStatus,
+    throttle: f32,
+    genome_integrity: f32,
+) -> f32 {
+    ribosomes as f32 * status.throughput() * throttle.max(0.0) * translation_efficiency(genome_integrity)
+}
+
 /// Drive of the block: on while the queue has orders.
 pub fn synthesis_drive(queue: &SynthesisQueue) -> f32 {
     if queue.is_empty() { 0.0 } else { 1.0 }
@@ -72,5 +83,20 @@ pub fn advance_protein_queue_system(
                 debug!("Protein finished: {target:?}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metabolism::BlockStatus;
+
+    #[test]
+    fn the_potential_rate_follows_ribosomes_status_throttle_and_genome() {
+        assert_eq!(potential_rate(2, BlockStatus::Active, 1.0, 1.0), 2.0);
+        assert_eq!(potential_rate(2, BlockStatus::Mutated, 1.0, 1.0), 1.0);
+        assert_eq!(potential_rate(2, BlockStatus::Active, 0.5, 1.0), 1.0);
+        assert_eq!(potential_rate(2, BlockStatus::Active, 1.0, 0.1), 0.0, "fragmented");
+        assert_eq!(potential_rate(0, BlockStatus::Active, 1.0, 1.0), 0.0);
     }
 }

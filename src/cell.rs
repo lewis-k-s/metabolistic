@@ -30,7 +30,9 @@ use std::f32::consts::PI;
 use crate::blocks::genome::{BlockKind, Genome};
 use crate::environment::LocalEnvironment;
 use crate::exchange::ExchangeStats;
-use crate::genome_damage::{GenomeIntegrity, MutationLoad, RepairProgress};
+use crate::actions::{ActionBar, ActionState, PathwayLevels};
+use crate::shelter::InShelter;
+use crate::genome_damage::{GenomeIntegrity, InducedMutations, MutationLoad, RepairProgress};
 use crate::membrane::Membrane;
 use crate::metabolism::{CurrencyPools, MetabolicGraph};
 use crate::molecules::{Currency, StoredLipids};
@@ -58,7 +60,12 @@ use crate::proteins::{Proteome, SynthesisQueue};
     DamageTaken,
     GenomeIntegrity,
     MutationLoad,
-    RepairProgress
+    InducedMutations,
+    RepairProgress,
+    InShelter,
+    PathwayLevels,
+    ActionBar,
+    ActionState
 )]
 pub struct Cell;
 
