@@ -7,6 +7,12 @@
 //! dies, or the player does not move while W is held. Screenshots go to
 //! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
 //!
+//! M5 steps: the player cell is `Invulnerable` in smoke mode (a predator could
+//! engulf it, and the run must not end by chance). On the first Run step the
+//! test checks that NPCs are in the world. A new Run step moves the player into
+//! the gate chamber with W released, so the screenshot shows the walls, the pore
+//! and the gate cell; the test checks that the level was not won by chance.
+//!
 //! M4 steps (`smoke_actions`): on the first Run step the cell gets one flagellum,
 //! one adhesin and one toxin, so that the overlays show. On the Manage step the
 //! test queues one enzyme. Back on Run, it uses slot 1 and checks that the
@@ -16,7 +22,13 @@ use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
 use std::path::PathBuf;
 
+use avian2d::prelude::{LinearVelocity, Position};
+
 use crate::GameState;
+use crate::engulf::Invulnerable;
+use crate::gate::GateProgress;
+use crate::npc::{Archetype, Npc};
+use crate::run::RunSummary;
 use crate::actions::{Level, PathwayLevels, UseSlot};
 use crate::blocks::genome::BlockKind;
 use crate::cell::Cell;
@@ -40,11 +52,12 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 7] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 8] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Run, None),
     (GameState::Manage, None),
+    (GameState::Run, None),
     (GameState::Run, None),
     (GameState::RunOver, None),
     (GameState::Menu, Some(MenuPage::Main)),
@@ -54,6 +67,8 @@ const SEQUENCE: [(GameState, Option<MenuPage>); 7] = [
 const STEP_RUN: usize = 2;
 const STEP_MANAGE: usize = 3;
 const STEP_RUN_AGAIN: usize = 4;
+/// The gate chamber view.
+const STEP_GATE_VIEW: usize = 5;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -238,7 +253,12 @@ fn smoke_actions(
     mut cells: Query<(&mut Proteome, &SynthesisQueue, &PathwayLevels, &CurrencyPools), With<Cell>>,
     mut queue: MessageWriter<QueueProtein>,
     mut slots: MessageWriter<UseSlot>,
-    mut done: Local<[bool; 3]>,
+    npcs: Query<&Npc>,
+    gates: Query<&GateProgress>,
+    summary: Res<RunSummary>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+    mut done: Local<[bool; 6]>,
 ) {
     let target = SEQUENCE.get(smoke.step).map(|(state, _)| state.clone());
     if target.as_ref() != Some(state.get()) {
@@ -260,7 +280,21 @@ fn smoke_actions(
                 proteome.add(ProteinTarget::Membrane(protein));
             }
             done[0] = true;
-            info!("smoke test: gave the cell a flagellum, an adhesin and a toxin");
+            commands.entity(cell).insert(Invulnerable);
+            info!("smoke test: gave the cell a flagellum, an adhesin and a toxin; it is invulnerable");
+        }
+        STEP_RUN if !done[3] && smoke.frames_in_step >= 10 => {
+            let mut count = std::collections::BTreeMap::new();
+            for npc in &npcs {
+                *count.entry(format!("{:?}", npc.archetype)).or_insert(0) += 1;
+            }
+            info!("smoke test: NPCs in the world: {count:?}");
+            assert!(
+                npcs.iter().filter(|n| n.archetype != Archetype::Gate).count() >= 8,
+                "smoke test: the world has too few NPCs"
+            );
+            assert!(gates.iter().count() == 1, "smoke test: the world has no gate cell");
+            done[3] = true;
         }
         STEP_MANAGE if !done[1] && smoke.frames_in_step >= 10 => {
             queue.write(QueueProtein {
@@ -286,6 +320,33 @@ fn smoke_actions(
                 Level::Off,
                 "smoke test: slot 1 did not switch the pathway off"
             );
+        }
+        STEP_GATE_VIEW if !done[4] && smoke.frames_in_step >= 2 => {
+            // Into the chamber, away from the gate cell, with W released.
+            let position = Vec2::new(880.0, 15.0);
+            commands.entity(cell).insert((
+                Transform::from_translation(position.extend(0.0)),
+                Position(position),
+                LinearVelocity(Vec2::ZERO),
+            ));
+            done[4] = true;
+            info!("smoke test: moved the player into the gate chamber");
+        }
+        STEP_GATE_VIEW if done[4] => {
+            keys.release(KeyCode::KeyW);
+            if smoke.frames_in_step == 100 {
+                let mut count = std::collections::BTreeMap::new();
+                for npc in &npcs {
+                    *count.entry(format!("{:?}", npc.archetype)).or_insert(0) += 1;
+                }
+                info!("smoke test: NPCs at the end of the run: {count:?}");
+                assert!(summary.victory.is_none(), "smoke test: the level was won by chance");
+                assert!(
+                    gates.iter().all(|g| g.held == 0.0),
+                    "smoke test: the player touched the gate cell"
+                );
+                done[5] = true;
+            }
         }
         _ => {}
     }

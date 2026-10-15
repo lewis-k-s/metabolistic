@@ -1,7 +1,7 @@
 //! # Milestone M3: genome damage (headless)
 //!
 //! UV from light shafts, the pigment shield, mutations, translation
-//! efficiency, repair, and the gene orb. Light is set on `LocalEnvironment`
+//! efficiency and repair. Light is set on `LocalEnvironment`
 //! (no grid), except in the tests that use the vent field.
 
 use approx::assert_abs_diff_eq;
@@ -15,7 +15,6 @@ use metabolistic3d::level;
 use metabolistic3d::membrane::Membrane;
 use metabolistic3d::metabolism::{CurrencyPools, FlowmapTimingConfig};
 use metabolistic3d::molecules::Currency;
-use metabolistic3d::pickups::GeneOrb;
 use metabolistic3d::proteins::{ProteinTarget, Proteome, SynthesisQueue};
 use metabolistic3d::shared::spawn_starter_cell;
 
@@ -358,55 +357,6 @@ fn the_pigment_block_makes_pigments_that_decay_slowly() {
     );
 }
 
-// --- The gene orb ---
-
-#[test]
-fn touching_the_gene_orb_gives_the_pigment_gene_with_an_enzyme() {
-    let mut app = MetabolisticApp::new_headless();
-    let cell = {
-        let mut commands = app.world_mut().commands();
-        spawn_starter_cell(&mut commands, level::GENE_ORB_POSITION).1
-    };
-    let far = app
-        .world_mut()
-        .spawn((
-            GeneOrb {
-                gene: BlockKind::Polymerization,
-            },
-            Transform::from_translation(Vec3::new(900.0, 900.0, 0.0)),
-        ))
-        .id();
-    let orb = app
-        .world_mut()
-        .spawn((
-            GeneOrb {
-                gene: level::GENE_ORB_GENE,
-            },
-            Transform::from_translation(level::GENE_ORB_POSITION.extend(0.0)),
-        ))
-        .id();
-    app.world_mut().flush();
-    assert_eq!(level::GENE_ORB_GENE, BlockKind::SecondaryMetabolites);
-    app.update();
-    app.update();
-
-    let genome = app.world().get::<Genome>(cell).unwrap();
-    assert_eq!(
-        genome.get_gene_state(&level::GENE_ORB_GENE),
-        Some(&GeneState::Expressed)
-    );
-    assert_eq!(genome.get_gene_state(&BlockKind::Polymerization), None);
-    assert_eq!(
-        app.world()
-            .get::<Proteome>(cell)
-            .unwrap()
-            .enzymes(level::GENE_ORB_GENE),
-        1
-    );
-    assert!(app.world().get_entity(orb).is_err(), "the orb is used up");
-    assert!(app.world().get_entity(far).is_ok(), "a far orb stays");
-}
-
 // --- The vent field ---
 
 /// A starter cell with plenty of everything, at `position` in the vent field.
@@ -456,8 +406,8 @@ fn the_shafts_are_bright_inside_and_dark_at_the_start() {
     assert!(core > 7.0 && core <= level::SHAFT_LEVEL, "{core}");
     assert!(grid.sample(Channel::Light, level::START_POSITION) < 0.2);
     assert!(grid.sample(Channel::Light, Vec2::ZERO) < 0.2);
-    // The orb sits in the dim edge: some light, far less than the core.
-    let orb_light = grid.sample(Channel::Light, level::GENE_ORB_POSITION);
+    // The pigment prey wait in the dim edge: some light, far less than the core.
+    let orb_light = grid.sample(Channel::Light, level::PIGMENT_PREY_POSITION);
     assert!(orb_light > 0.3 && orb_light < 3.0, "{orb_light}");
 }
 
@@ -492,72 +442,9 @@ fn the_start_is_safe_from_uv() {
 }
 
 #[test]
-fn the_gene_orb_is_reachable_with_little_damage() {
-    let (mut app, cell) = cell_in_field(level::GENE_ORB_POSITION, false);
-    run_ticks(&mut app, 10); // 2 s at the orb
+fn the_pigment_prey_are_reachable_with_little_damage() {
+    let (mut app, cell) = cell_in_field(level::PIGMENT_PREY_POSITION, false);
+    run_ticks(&mut app, 10); // 2 s at the prey
     assert!(uv_damage(&app, cell) < 10.0, "{}", uv_damage(&app, cell));
     assert!(membrane(&app, cell) > 85.0);
-}
-
-#[test]
-fn an_orb_restores_a_silent_or_mutated_gene_and_is_used_up() {
-    for state in [GeneState::Silent, GeneState::Mutated] {
-        let mut app = MetabolisticApp::new_headless();
-        let cell = {
-            let mut commands = app.world_mut().commands();
-            spawn_starter_cell(&mut commands, Vec2::ZERO).1
-        };
-        app.world_mut().flush();
-        app.world_mut()
-            .get_mut::<Genome>(cell)
-            .unwrap()
-            .table
-            .insert(BlockKind::Fermentation, state.clone());
-        let orb = app
-            .world_mut()
-            .spawn((
-                GeneOrb { gene: BlockKind::Fermentation },
-                Transform::default(),
-            ))
-            .id();
-        app.update();
-        app.update();
-        assert_eq!(
-            app.world().get::<Genome>(cell).unwrap().get_gene_state(&BlockKind::Fermentation),
-            Some(&GeneState::Expressed),
-            "from {state:?}"
-        );
-        assert!(app.world().get_entity(orb).is_err(), "the orb is used up ({state:?})");
-    }
-}
-
-#[test]
-fn the_pickup_distance_follows_the_cell_size() {
-    use metabolistic3d::cell::CellSize;
-    use metabolistic3d::movement::world_radius;
-    use metabolistic3d::pickups::ORB_RADIUS;
-    let touches = |radius: f32, distance: f32| {
-        let mut app = MetabolisticApp::new_headless();
-        let cell = {
-            let mut commands = app.world_mut().commands();
-            spawn_starter_cell(&mut commands, Vec2::ZERO).1
-        };
-        app.world_mut().flush();
-        app.world_mut().get_mut::<CellSize>(cell).unwrap().radius = radius;
-        let orb = app
-            .world_mut()
-            .spawn((
-                GeneOrb { gene: BlockKind::Polymerization },
-                Transform::from_translation(Vec3::new(distance, 0.0, 0.0)),
-            ))
-            .id();
-        app.update();
-        app.update();
-        app.world().get_entity(orb).is_err()
-    };
-    let reach = |radius: f32| world_radius(&CellSize { radius }) + ORB_RADIUS;
-    assert!(touches(1.0, reach(1.0) - 1.0));
-    assert!(!touches(1.0, reach(1.0) + 1.0));
-    assert!(touches(2.0, reach(2.0) - 1.0));
-    assert!(!touches(1.0, reach(2.0) - 1.0), "a small cell does not reach as far");
 }

@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 is done. M4 is done (not committed yet). Next: M5.
+merged to `master` (2026-10-15). M3 and M4 are done. M5 is done (not committed yet). Next: tune the vent slice, then M6.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -178,7 +178,7 @@ you must stay near water, the world you left behind.
 
 ## 3. Current code compared with the design
 
-Updated after M2.
+Updated after M5.
 
 | Area | Now | Still to do |
 |---|---|---|
@@ -186,13 +186,14 @@ Updated after M2.
 | Pools | The pools above (with Pigments), plus a `StoredLipids` component | - |
 | Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites | photosynthesis, catalase, respiration (M7, M8) |
 | Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size, editor UI | - |
-| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity` | Mutation from ROS; gene transfer (M5) |
+| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | Mutation from ROS |
 | Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
-| Run screen | The player is a `Cell` with a body; vent field level; HUD; run-over screen with the cause of death | - |
+| Run screen | The player is a `Cell` with a body; vent field level with NPCs, walls and a gate cell; HUD; run-over screen with the cause of death or "Victory" | - |
+| NPCs and world | NPC `Cell`s on a slow tick (every 4th), steering, engulf, symbiont exchange, food, metals, viruses, toxin hits, walls with pores, lysis, gate cell | Fusion protein, immune proteins |
 | Physics | avian2d, 64 Hz, no interpolation | - |
 | Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | A final light colour; a sprite for the shelter disc |
 | Manage screen | Editor: genome, enzymes, membrane slots, queue with time to finish, action slots | - |
-| Run structure | `InRun` state covers Run and Manage; death and restart | Levels, victory, codex (M6) |
+| Run structure | `InRun` state covers Run and Manage; death, victory and restart | Levels, stage sequence, codex (M6) |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
 `flowmap_design.md`. Mitochondria now come from endosymbiosis (the shallow
@@ -359,7 +360,64 @@ Original plan:
 Done when: you can plan a build in a shelter, see it get built in game time,
 and switch pathways during play. **Playtest** the time rules here.
 
-### M5. Living world (vent slice)
+### M5. Living world (vent slice) - done (not committed yet)
+
+Notes:
+- **Slow tick.** `CellTick { every, phase, due }` on every cell. NPCs run every
+  4th metabolic tick with 4 x dt. Every per-cell system reads `due` and the
+  cell's dt. A test shows the same pools after 16 normal ticks and 4 slow ones.
+- **NPCs** (`npc.rs`): prey (radius 11.25, speed 85, sense 160), predator
+  (radius 25 = 1.25 x player, one flagellum, speed 85, sense 230), symbiont
+  (radius 9.5, speed 95, sense 400), gate (radius 25, static). Steering is a pure
+  function (`steer`) at about 7 Hz; prey and predators also leave heat above 25
+  and light above 0.4. Genomes have chemosynthesis plus one signature gene: prey
+  Fermentation (the three prey at shaft A: SecondaryMetabolites), predator
+  VesicleExport, symbiont FatStorage, gate LightCapture.
+- **Engulf** (`engulf.rs`): contact (gap <= 3 px) + radius >= 1.2 x target +
+  intent. The player holds **Space**; predators always intend. 50% of ATP,
+  carbon, amino acids; one gene (seeded) that is absent, silent or mutated in the
+  engulfer, added Expressed with one enzyme **queued** (not free). A predator
+  engulfing the player ends the run: "Engulfed". The gene orb is removed.
+- **Symbiont**: in contact (gap <= 10) carbon goes to the player and ATP to the
+  symbiont, each side at 0.1 per second towards balance (exact, no overshoot).
+  It starts with 60 carbon and 40 ATP.
+- **Particles** (`particles.rs`): food 6 carbon, cap 40, one per 4 s; metals 1,
+  cap 14, one per 6 s near the vents (this is the Metals source); dead NPCs drop 8
+  carbon. Virus: drifts at 18 px/s; 50% gene from {Fermentation, FatStorage,
+  VesicleExport} (queued), 50% +1.0 mutation load. Toxin hit = 25% of max
+  membrane (the brief said "0.25 integrity"; integrity is 0-100 here), so 4 hits
+  kill a prey.
+- **Walls** (`walls.rs`): tiles = grid cells. `EnvGrid` has a wall mask (inert
+  cells: no source, no flow in or out; mass conserved). A pore is solid for a
+  cell without a Transporter (physics layers). Adhesin held on a wall: the cell
+  ghosts through at 25 px/s. New `MembraneProtein::Lytic` and action Lyse (5
+  ATP, cuts the tile in contact; the tile stays gone). Pores also block the grid.
+  Settled light does not change when a wall is cut. **Fusion: out of scope.**
+- **Gate** (`gate.rs`): 3 s of contact wins. If contact breaks for more than
+  0.25 s the progress **resets** to 0. Gene LightCapture (placeholder, no block),
+  victory clip 1.6 s, run-over shows "Victory" and the gene.
+- **Level**: gate chamber (x 800-960, y 0-192) with two pores in its south wall
+  and its own light zone; a wall line at x 576-608 from shaft B up to the top
+  (pores at y 384 and 544); a short line south of the core (y -256). 15 creatures,
+  5 viruses, food and metal zones. Vertical wall pieces are the horizontal sprite
+  turned 90 degrees (art owner: draw vertical pieces).
+- **CPU** (headless, `tests/npc_benchmark.rs`, ignored): per metabolic tick
+  (averaged over the 4-tick cycle, includes the grid step): 20 NPCs 0.25 ms, 50
+  NPCs 0.30-0.41 ms, 100 NPCs 0.43-0.54 ms. One frame of behaviour: 0.14, 0.15,
+  0.15-0.23 ms. Cost per game frame (5 ticks per second): 0.16 / 0.17-0.19 /
+  0.19-0.28 ms. Far below 2 ms, so no simplification was needed.
+- **Respawn** (`npc.rs`): empty level slots refill one at a time every 25 s (never
+  above the starting count, never within 260 px of the player). While the player
+  has no Expressed or Enhanced pigment gene, the 3 pigment prey are topped up
+  every 6 s. This keeps the run winnable.
+- **Shelters are safe from hostile cells**: predators turn away from a shelter
+  (radius + body + 30 px) and ignore prey inside one; `plan_engulfs` skips a
+  sheltered target unless the engulfer is the player.
+- Smoke test: the player is `Invulnerable`, a new step shows the gate chamber.
+- Not done: failed-engulf and contact/hit clips, overlays on NPCs, predator
+  engulf animation (the run just ends), codex of taken genes.
+
+Original plan:
 
 1. NPC cells with the `Cell` model at a slower tick, and simple archetype
    behaviour: prey, predator, symbiont. Measure the CPU cost.

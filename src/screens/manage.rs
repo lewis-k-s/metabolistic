@@ -181,11 +181,12 @@ pub fn gene_state_text(state: &GeneState) -> (&'static str, Color) {
 }
 
 /// Membrane proteins that the editor lists.
-const LISTED_PROTEINS: [MembraneProtein; 5] = [
+const LISTED_PROTEINS: [MembraneProtein; 6] = [
     MembraneProtein::Transporter,
     MembraneProtein::Flagellum,
     MembraneProtein::Adhesin,
     MembraneProtein::Toxin,
+    MembraneProtein::Lytic,
     MembraneProtein::Receptor,
 ];
 

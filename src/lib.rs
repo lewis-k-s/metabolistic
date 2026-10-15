@@ -5,21 +5,25 @@ use bevy::state::app::StatesPlugin;
 pub mod actions;
 pub mod blocks;
 pub mod cell;
+pub mod engulf;
 pub mod envgrid;
 pub mod environment;
 pub mod exchange;
+pub mod gate;
 pub mod genome_damage;
 pub mod level;
 pub mod membrane;
 pub mod metabolism;
 pub mod molecules;
 pub mod movement;
-pub mod pickups;
+pub mod npc;
+pub mod particles;
 pub mod player;
 pub mod proteins;
 pub mod run;
 pub mod shelter;
 pub mod shared;
+pub mod walls;
 #[cfg(feature = "tui")]
 pub mod tui;
 
@@ -105,12 +109,19 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
-            .add_plugins(pickups::PickupPlugin)
+            .add_plugins((
+                engulf::EngulfPlugin,
+                npc::NpcPlugin,
+                particles::ParticlePlugin,
+                walls::WallsPlugin,
+                gate::GatePlugin,
+            ))
             .add_plugins(run::RunPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
             // The game picks mutated genes at random; tests use a fixed seed.
-            .insert_resource(genome_damage::GeneRng::from_entropy());
+            .insert_resource(genome_damage::GeneRng::from_entropy())
+            .insert_resource(npc::NpcRng::from_entropy());
 
         #[cfg(feature = "tui")]
         app.add_plugins(tui::CellTuiPlugin);
@@ -149,7 +160,13 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
-            .add_plugins(pickups::PickupPlugin)
+            .add_plugins((
+                engulf::EngulfPlugin,
+                npc::NpcPlugin,
+                particles::ParticlePlugin,
+                walls::WallsPlugin,
+                gate::GatePlugin,
+            ))
             .add_plugins(run::RunPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)

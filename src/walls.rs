@@ -1,0 +1,327 @@
+//! # World membranes (tissue walls)
+//!
+//! A wall is a set of tiles. One tile is one grid cell of the `EnvGrid`
+//! (`CELL_SIZE` = 32 world units). A tile is a static square in the physics
+//! world (see `world::walls_view`), and a wall cell in the grid, so it blocks
+//! movement, drift and diffusion (see `envgrid`).
+//!
+//! Two kinds of tile:
+//!
+//! - **Wall** (`wall_membrane`): solid.
+//! - **Pore** (`wall_membrane_pore`): a wall with a transporter. A cell passes
+//!   only if it has a `Transporter` protein (`pore_passable`). Other cells
+//!   find it solid. The grid treats a pore as a wall: the transporter feeds the
+//!   cell that touches it, not the grid behind the wall.
+//!
+//! Three more ways through, for a cell that has no transporter:
+//!
+//! - **Adhesin**: while held and touching a wall, the cell crawls through at
+//!   `ADHESIN_CRAWL_SPEED` (see `crawl_force`). Its collider ignores walls.
+//! - **Lytic** protein and the action "Lyse": cuts the tile in contact for
+//!   `LYSE_ATP`. The tile is gone for this run.
+//! - **Fusion**: out of scope for M5.
+//!
+//! `WallMap` is the list of tiles. The pure functions here take it and a
+//! position. The systems fetch data and call them.
+
+use std::collections::HashMap;
+
+use bevy::prelude::*;
+
+use crate::actions::{ActionState, LyseOrder};
+use crate::cell::{Cell, CellSize};
+use crate::envgrid::{CELL_SIZE, EnvGrid};
+use crate::metabolism::CurrencyPools;
+use crate::molecules::Currency;
+use crate::movement::world_radius;
+use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
+
+/// ATP for one lysis.
+pub const LYSE_ATP: f32 = 5.0;
+/// Speed of an adhesin crawl through a wall, in pixels per second.
+pub const ADHESIN_CRAWL_SPEED: f32 = 25.0;
+/// Extra distance (pixels) at which a cell counts as touching a tile.
+pub const CONTACT_MARGIN: f32 = 3.0;
+
+/// The kind of a wall tile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WallKind {
+    Wall,
+    Pore,
+}
+
+/// The wall tiles of the level, by grid cell `(x, y)`.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct WallMap {
+    tiles: HashMap<(usize, usize), WallKind>,
+}
+
+impl WallMap {
+    pub fn insert(&mut self, tile: (usize, usize), kind: WallKind) {
+        self.tiles.insert(tile, kind);
+    }
+
+    pub fn remove(&mut self, tile: (usize, usize)) -> Option<WallKind> {
+        self.tiles.remove(&tile)
+    }
+
+    pub fn get(&self, tile: (usize, usize)) -> Option<WallKind> {
+        self.tiles.get(&tile).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+
+    /// All tiles, sorted, so that the result does not depend on hash order.
+    pub fn tiles(&self) -> Vec<((usize, usize), WallKind)> {
+        let mut out: Vec<_> = self.tiles.iter().map(|(&t, &k)| (t, k)).collect();
+        out.sort_by_key(|&(t, _)| t);
+        out
+    }
+}
+
+/// True if a cell with this proteome passes a pore: it has a transporter.
+pub fn pore_passable(proteome: &Proteome) -> bool {
+    proteome.count(ProteinTarget::Membrane(MembraneProtein::Transporter)) > 0
+}
+
+/// Is a tile of `kind` solid for a cell? A wall is solid unless the cell
+/// ghosts (an adhesin crawl). A pore is solid unless the cell has a transporter
+/// or ghosts.
+pub fn solid_for(kind: WallKind, proteome: &Proteome, ghosting: bool) -> bool {
+    match kind {
+        WallKind::Wall => !ghosting,
+        WallKind::Pore => !ghosting && !pore_passable(proteome),
+    }
+}
+
+/// Centre of tile `(x, y)` in world units, for a grid origin.
+pub fn tile_center(origin: Vec2, tile: (usize, usize)) -> Vec2 {
+    origin + (Vec2::new(tile.0 as f32, tile.1 as f32) + 0.5) * CELL_SIZE
+}
+
+/// Distance from a point to the square tile, 0 inside it.
+pub fn distance_to_tile(origin: Vec2, tile: (usize, usize), point: Vec2) -> f32 {
+    let centre = tile_center(origin, tile);
+    let outside = ((point - centre).abs() - Vec2::splat(CELL_SIZE * 0.5)).max(Vec2::ZERO);
+    outside.length()
+}
+
+/// The tiles within `radius + CONTACT_MARGIN` of a body, nearest first. Ties
+/// go by tile index, so the result is the same on every run.
+pub fn tiles_in_contact(
+    map: &WallMap,
+    origin: Vec2,
+    position: Vec2,
+    radius: f32,
+) -> Vec<((usize, usize), f32)> {
+    let mut out: Vec<_> = map
+        .tiles
+        .keys()
+        .filter_map(|&tile| {
+            let d = distance_to_tile(origin, tile, position);
+            (d <= radius + CONTACT_MARGIN).then_some((tile, d))
+        })
+        .collect();
+    out.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    out
+}
+
+/// True if the body touches any tile.
+pub fn touching_wall(map: &WallMap, origin: Vec2, position: Vec2, radius: f32) -> bool {
+    !map.is_empty() && !tiles_in_contact(map, origin, position, radius).is_empty()
+}
+
+/// The tile that a lysis cuts: the tile in contact that is nearest to the point
+/// ahead of the cell along `aim`. `None` if no tile is in contact.
+pub fn lyse_target(
+    map: &WallMap,
+    origin: Vec2,
+    position: Vec2,
+    radius: f32,
+    aim: Vec2,
+) -> Option<(usize, usize)> {
+    let ahead = position + aim.normalize_or_zero() * radius;
+    tiles_in_contact(map, origin, position, radius)
+        .into_iter()
+        .map(|(tile, _)| (tile, distance_to_tile(origin, tile, ahead)))
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+        .map(|(tile, _)| tile)
+}
+
+/// The thrust force of an adhesin crawl. It balances the damping at
+/// `ADHESIN_CRAWL_SPEED`. A body at rest stays at rest with no input.
+pub fn crawl_force(input: Vec2, mass: f32, damping: f32) -> Vec2 {
+    input.clamp_length_max(1.0) * ADHESIN_CRAWL_SPEED * mass * damping
+}
+
+/// Does a lysis happen, and what does it cost? Returns the tile that goes, or
+/// `None` if there is no wall in contact or the cell has too little ATP.
+pub fn lyse(
+    map: &mut WallMap,
+    pools: &mut CurrencyPools,
+    origin: Vec2,
+    position: Vec2,
+    radius: f32,
+    aim: Vec2,
+) -> Option<(usize, usize)> {
+    let tile = lyse_target(map, origin, position, radius, aim)?;
+    if pools.get(Currency::ATP) < LYSE_ATP {
+        return None;
+    }
+    pools.modify(Currency::ATP, -LYSE_ATP);
+    map.remove(tile);
+    Some(tile)
+}
+
+/// A tile that was cut. The world removes its collider and sprite.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TileLysed(pub (usize, usize));
+
+/// Sets `ActionState::on_wall` for each cell: the cell touches a wall tile.
+pub fn wall_contact_system(
+    map: Res<WallMap>,
+    grid: Option<Res<EnvGrid>>,
+    mut cells: Query<(&Transform, &CellSize, &mut ActionState), With<Cell>>,
+) {
+    let Some(grid) = grid else { return };
+    for (transform, size, mut state) in &mut cells {
+        let now = touching_wall(
+            &map,
+            grid.origin(),
+            transform.translation.truncate(),
+            world_radius(size),
+        );
+        if state.on_wall != now {
+            state.on_wall = now;
+        }
+    }
+}
+
+/// Applies lysis orders: the tile goes from the map and from the grid mask.
+pub fn lyse_system(
+    mut orders: MessageReader<LyseOrder>,
+    mut cut: MessageWriter<TileLysed>,
+    mut map: ResMut<WallMap>,
+    grid: Option<ResMut<EnvGrid>>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+) {
+    let Some(mut grid) = grid else {
+        return;
+    };
+    for order in orders.read() {
+        let Ok((transform, size, mut pools)) = cells.get_mut(order.cell) else {
+            continue;
+        };
+        if let Some(tile) = lyse(
+            &mut map,
+            &mut pools,
+            grid.origin(),
+            transform.translation.truncate(),
+            world_radius(size),
+            order.direction,
+        ) {
+            grid.set_wall(tile.0, tile.1, false);
+            cut.write(TileLysed(tile));
+        }
+    }
+}
+
+pub struct WallsPlugin;
+
+impl Plugin for WallsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WallMap>()
+            .add_message::<TileLysed>()
+            .add_systems(Update, (wall_contact_system, lyse_system).chain());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ORIGIN: Vec2 = Vec2::ZERO;
+
+    fn map_with(tiles: &[((usize, usize), WallKind)]) -> WallMap {
+        let mut map = WallMap::default();
+        for &(tile, kind) in tiles {
+            map.insert(tile, kind);
+        }
+        map
+    }
+
+    #[test]
+    fn a_pore_needs_a_transporter() {
+        let mut proteome = Proteome::default();
+        assert!(!pore_passable(&proteome));
+        proteome.add(ProteinTarget::Membrane(MembraneProtein::Flagellum));
+        assert!(!pore_passable(&proteome), "another protein does not help");
+        proteome.add(ProteinTarget::Membrane(MembraneProtein::Transporter));
+        assert!(pore_passable(&proteome));
+    }
+
+    #[test]
+    fn walls_are_solid_unless_the_cell_crawls_and_pores_also_open_for_transporters() {
+        let bare = Proteome::default();
+        let mut transporter = Proteome::default();
+        transporter.add(ProteinTarget::Membrane(MembraneProtein::Transporter));
+        assert!(solid_for(WallKind::Wall, &bare, false));
+        assert!(solid_for(WallKind::Wall, &transporter, false), "a transporter does not open a wall");
+        assert!(!solid_for(WallKind::Wall, &bare, true), "adhesin crawl");
+        assert!(solid_for(WallKind::Pore, &bare, false));
+        assert!(!solid_for(WallKind::Pore, &transporter, false));
+        assert!(!solid_for(WallKind::Pore, &bare, true));
+    }
+
+    #[test]
+    fn contact_follows_the_distance_to_the_tile() {
+        let map = map_with(&[((2, 2), WallKind::Wall)]);
+        // The tile covers x 64..96, y 64..96. A body of radius 20 at x = 40
+        // has its edge at 60: 4 px short, beyond the margin.
+        assert!(!touching_wall(&map, ORIGIN, Vec2::new(40.0, 80.0), 20.0));
+        assert!(touching_wall(&map, ORIGIN, Vec2::new(42.0, 80.0), 20.0));
+        assert!(touching_wall(&map, ORIGIN, Vec2::new(80.0, 80.0), 20.0), "inside");
+        assert!(!touching_wall(&WallMap::default(), ORIGIN, Vec2::new(80.0, 80.0), 20.0));
+    }
+
+    #[test]
+    fn lysis_cuts_the_tile_in_front_and_costs_atp() {
+        let mut map = map_with(&[((2, 2), WallKind::Wall), ((3, 2), WallKind::Wall)]);
+        let mut pools = CurrencyPools::default();
+        pools.set(Currency::ATP, 12.0);
+        // A body left of the pair, aiming east: the nearer tile (2,2) goes.
+        let tile = lyse(&mut map, &mut pools, ORIGIN, Vec2::new(44.0, 80.0), 20.0, Vec2::X);
+        assert_eq!(tile, Some((2, 2)));
+        assert_eq!(map.get((2, 2)), None);
+        assert_eq!(map.get((3, 2)), Some(WallKind::Wall));
+        assert_eq!(pools.get(Currency::ATP), 12.0 - LYSE_ATP);
+    }
+
+    #[test]
+    fn lysis_needs_contact_and_atp_and_costs_nothing_without_a_tile() {
+        let mut map = map_with(&[((2, 2), WallKind::Pore)]);
+        let mut pools = CurrencyPools::default();
+        pools.set(Currency::ATP, 3.0);
+        assert_eq!(lyse(&mut map, &mut pools, ORIGIN, Vec2::new(44.0, 80.0), 20.0, Vec2::X), None);
+        assert_eq!(map.len(), 1, "too little ATP");
+        pools.set(Currency::ATP, 50.0);
+        assert_eq!(lyse(&mut map, &mut pools, ORIGIN, Vec2::new(300.0, 80.0), 20.0, Vec2::X), None);
+        assert_eq!(pools.get(Currency::ATP), 50.0, "no wall in contact: no cost");
+        assert!(lyse(&mut map, &mut pools, ORIGIN, Vec2::new(44.0, 80.0), 20.0, Vec2::X).is_some());
+        assert!(map.is_empty(), "a pore can be cut too");
+    }
+
+    #[test]
+    fn the_crawl_force_balances_the_damping_at_the_crawl_speed() {
+        let f = crawl_force(Vec2::X, 1.0, 60.0);
+        // Terminal speed = force / (mass x damping).
+        assert!((f.x / (1.0 * 60.0) - ADHESIN_CRAWL_SPEED).abs() < 1e-4);
+        assert_eq!(crawl_force(Vec2::ZERO, 1.0, 60.0), Vec2::ZERO);
+    }
+}

@@ -17,6 +17,7 @@
 //!   adhesin.
 //! - **Toxin**: fires a droplet in the aim direction (`FireToxin`). Costs ATP and
 //!   Metals. Needs a toxin. There are no targets until M5.
+//! - **Lyse**: cuts the wall tile in contact (`walls`). 5 ATP. Needs a lytic protein.
 //! - **Induce mutation**: costs ATP, adds 1.0 to the `MutationLoad`, so a gene
 //!   mutates. It has a chance to give an `Enhanced` gene (see `genome_damage`).
 //!
@@ -32,7 +33,7 @@ use bevy::prelude::*;
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, OwnedBy};
 use crate::genome_damage::{InducedMutations, MutationLoad};
-use crate::metabolism::{CurrencyPools, FlowmapTimingConfig, MetabolicNode, MetabolicSet};
+use crate::metabolism::{CellTick, CurrencyPools, FlowmapTimingConfig, MetabolicNode, MetabolicSet};
 use crate::molecules::Currency;
 use crate::movement::thrust_force;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
@@ -183,6 +184,7 @@ pub enum ActionKind {
     FlagellumBurst,
     Adhesin,
     Toxin,
+    Lyse,
     InduceMutation,
 }
 
@@ -193,6 +195,7 @@ impl ActionKind {
             ActionKind::FlagellumBurst => Some(MembraneProtein::Flagellum),
             ActionKind::Adhesin => Some(MembraneProtein::Adhesin),
             ActionKind::Toxin => Some(MembraneProtein::Toxin),
+            ActionKind::Lyse => Some(MembraneProtein::Lytic),
             _ => None,
         }
     }
@@ -203,6 +206,7 @@ impl ActionKind {
             ActionKind::FlagellumBurst => "Flagellum burst".into(),
             ActionKind::Adhesin => "Adhesin".into(),
             ActionKind::Toxin => "Toxin".into(),
+            ActionKind::Lyse => "Lyse".into(),
             ActionKind::InduceMutation => "Induce mutation".into(),
         }
     }
@@ -241,7 +245,12 @@ pub fn available_actions(genome: &Genome, proteome: &Proteome) -> Vec<ActionKind
         .collect();
     kinds.sort();
     let mut out: Vec<ActionKind> = kinds.into_iter().map(ActionKind::Pathway).collect();
-    for action in [ActionKind::FlagellumBurst, ActionKind::Adhesin, ActionKind::Toxin] {
+    for action in [
+        ActionKind::FlagellumBurst,
+        ActionKind::Adhesin,
+        ActionKind::Toxin,
+        ActionKind::Lyse,
+    ] {
         let protein = action.required_protein().expect("these actions need a protein");
         if proteome.count(ProteinTarget::Membrane(protein)) > 0 {
             out.push(action);
@@ -280,6 +289,8 @@ pub struct ActionState {
     pub toxin_flash: f32,
     /// The last move direction (a unit vector). Bursts and shots use it.
     pub aim: Vec2,
+    /// True while the body touches a wall tile (set by `walls`).
+    pub on_wall: bool,
 }
 
 impl Default for ActionState {
@@ -291,11 +302,18 @@ impl Default for ActionState {
             held_for: 0.0,
             toxin_flash: 0.0,
             aim: Vec2::X,
+            on_wall: false,
         }
     }
 }
 
 impl ActionState {
+    /// The body ignores walls and pores: an adhesin holds while it touches a
+    /// wall, so the cell crawls through it (see `walls`).
+    pub fn ghosting(&self) -> bool {
+        self.adhesin_held && self.on_wall
+    }
+
     pub fn bursting(&self) -> bool {
         self.burst_left > 0.0
     }
@@ -401,6 +419,7 @@ pub fn slot_status(
         ActionKind::Adhesin if state.adhesin_held => "HOLDING".into(),
         ActionKind::Adhesin => "ready".into(),
         ActionKind::Toxin => format!("{TOXIN_ATP} ATP + {TOXIN_METALS} Metals"),
+        ActionKind::Lyse => format!("{} ATP", crate::walls::LYSE_ATP),
         ActionKind::InduceMutation => format!("{INDUCE_ATP} ATP, risky"),
     };
     format!("{}: {detail}", kind.name())
@@ -429,6 +448,9 @@ pub enum UseResult {
     Done,
     /// A toxin shot: spawn a droplet that flies in this direction.
     Fired(Vec2),
+    /// A lysis order: the walls system cuts the tile in contact (and charges
+    /// the ATP) if there is one.
+    Lyse(Vec2),
     Refused(Refused),
 }
 
@@ -508,6 +530,12 @@ pub fn use_action(kind: ActionKind, target: &mut ActionTarget) -> UseResult {
             target.state.toxin_flash = TOXIN_FLASH_SECONDS;
             UseResult::Fired(target.state.aim)
         }
+        ActionKind::Lyse => {
+            if atp < crate::walls::LYSE_ATP {
+                return UseResult::Refused(Refused::NotEnoughAtp);
+            }
+            UseResult::Lyse(target.state.aim)
+        }
         ActionKind::InduceMutation => {
             if target.genome.get_mutable_genes().is_empty() {
                 return UseResult::Refused(Refused::NoGeneToMutate);
@@ -539,11 +567,31 @@ pub struct FireToxin {
     pub direction: Vec2,
 }
 
+/// A lysis order. The walls system cuts the tile in contact.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct LyseOrder {
+    pub cell: Entity,
+    pub direction: Vec2,
+}
+
+/// A toxin droplet in flight. `position` is exact; the transform of its sprite
+/// is the nearest whole pixel (see `world::actions_view`). The `npc` module
+/// checks hits.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ToxinDroplet {
+    /// The cell that fired it. It cannot hit that cell.
+    pub owner: Entity,
+    pub position: Vec2,
+    pub direction: Vec2,
+    pub age: f32,
+}
+
 /// Applies `UseSlot` messages.
 #[allow(clippy::type_complexity)]
 pub fn use_slot_system(
     mut orders: MessageReader<UseSlot>,
     mut fired: MessageWriter<FireToxin>,
+    mut lyse: MessageWriter<LyseOrder>,
     mut cells: Query<
         (
             &ActionBar,
@@ -583,6 +631,12 @@ pub fn use_slot_system(
                     direction,
                 });
             }
+            UseResult::Lyse(direction) => {
+                lyse.write(LyseOrder {
+                    cell: order.cell,
+                    direction,
+                });
+            }
             UseResult::Refused(why) => debug!("Slot {} refused: {why:?}", order.slot + 1),
             UseResult::Done => {}
         }
@@ -599,14 +653,17 @@ pub fn advance_action_state_system(time: Res<Time>, mut cells: Query<&mut Action
 /// Moves each block's throttle towards the level of its slot's pathway.
 pub fn throttle_ramp_system(
     timing: Res<FlowmapTimingConfig>,
-    cells: Query<(&PathwayLevels, &ActionBar), With<Cell>>,
+    cells: Query<(&PathwayLevels, &ActionBar, &CellTick), With<Cell>>,
     mut blocks: Query<(&OwnedBy, &MetabolicNode, &mut Throttle)>,
 ) {
-    let dt = timing.target_delta();
     for (owner, node, mut throttle) in &mut blocks {
-        let Ok((levels, bar)) = cells.get(owner.0) else {
+        let Ok((levels, bar, tick)) = cells.get(owner.0) else {
             continue;
         };
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let level = effective_level(levels, bar, node.kind);
         let next = ramp(throttle.0, level.value(), RAMP_PER_SEC, dt);
         if next != throttle.0 {
@@ -618,11 +675,11 @@ pub fn throttle_ramp_system(
 /// A held adhesin pays ATP each tick. With no ATP left, it lets go.
 pub fn adhesin_upkeep_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut ActionState, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&mut ActionState, &mut CurrencyPools, &CellTick), With<Cell>>,
 ) {
-    let dt = timing.target_delta();
-    for (mut state, mut pools) in &mut cells {
-        if !state.adhesin_held {
+    for (mut state, mut pools, tick) in &mut cells {
+        let dt = tick.dt(timing.target_delta());
+        if !state.adhesin_held || !tick.due {
             continue;
         }
         let cost = adhesin_cost(dt);
@@ -641,6 +698,7 @@ impl Plugin for ActionsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<UseSlot>()
             .add_message::<FireToxin>()
+            .add_message::<LyseOrder>()
             .add_systems(Update, use_slot_system)
             .add_systems(FixedUpdate, advance_action_state_system)
             .add_systems(

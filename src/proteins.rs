@@ -47,6 +47,8 @@ pub enum MembraneProtein {
     Toxin,
     /// Senses the outside.
     Receptor,
+    /// Cuts world membranes (the action Lyse).
+    Lytic,
 }
 
 /// What a protein is for.

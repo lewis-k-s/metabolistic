@@ -21,6 +21,6 @@ fn spawn_run_hint(mut commands: Commands) {
             ..default()
         },
         DespawnOnExit(GameState::Run),
-        children![label("WASD: move    1-4: action slots    Tab: manage    Esc: menu", 18.0)],
+        children![label("WASD: move    Space: engulf    1-4: action slots    Tab: manage    Esc: menu", 18.0)],
     ));
 }

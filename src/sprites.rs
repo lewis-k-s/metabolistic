@@ -36,6 +36,10 @@ pub mod clip {
     pub const USE: &str = "use";
     pub const HOLD: &str = "hold";
     pub const SPAWN: &str = "spawn";
+    pub const DEATH: &str = "death";
+    pub const ENGULF: &str = "engulf";
+    pub const DIGEST_END: &str = "digest_end";
+    pub const VICTORY: &str = "victory";
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -66,12 +70,24 @@ pub struct ClipSpec {
     /// Present on sheets whose rows are the 8 directions.
     #[serde(default)]
     pub directions: Option<Vec<String>>,
+    /// Frame size of this sheet, when it differs from the sprite's (the
+    /// engulf pairs have a size for each clip).
+    #[serde(default)]
+    pub frame_size: Option<[u32; 2]>,
+    /// Anchor of this sheet, when it differs from the sprite's.
+    #[serde(default)]
+    pub anchor_px: Option<[f32; 2]>,
 }
 
 impl ClipSpec {
     /// True if each row is a direction (see `direction_row`).
     pub fn is_directional(&self) -> bool {
         self.directions.is_some()
+    }
+
+    /// The frame size of this sheet.
+    pub fn frame_size_or(&self, default: UVec2) -> UVec2 {
+        self.frame_size.map_or(default, |[x, y]| UVec2::new(x, y))
     }
 }
 
@@ -91,30 +107,55 @@ impl SpriteInfo {
     /// rounded down to a whole pixel (the cell frames are centred on a pixel
     /// centre, 32.5), so a sprite never sits on a half pixel.
     pub fn anchor(&self) -> Anchor {
-        let px = self.anchor_px.floor();
-        let size = self.frame_size.as_vec2();
-        Anchor(Vec2::new(px.x / size.x - 0.5, 0.5 - px.y / size.y))
+        anchor_for(self.anchor_px, self.frame_size)
+    }
+
+    /// The `Anchor` of one sheet of the sprite (its own anchor and size, if it
+    /// has them).
+    pub fn clip_anchor(&self, spec: &ClipSpec) -> Anchor {
+        let anchor = spec.anchor_px.map_or(self.anchor_px, |[x, y]| Vec2::new(x, y));
+        anchor_for(anchor, spec.frame_size_or(self.frame_size))
     }
 }
 
-/// Reads the manifest. Entries without one `frame_size` for the whole sprite
-/// (the engulf pairs have a size for each clip) are left out for now.
+fn anchor_for(anchor_px: Vec2, frame_size: UVec2) -> Anchor {
+    let px = anchor_px.floor();
+    let size = frame_size.as_vec2();
+    Anchor(Vec2::new(px.x / size.x - 0.5, 0.5 - px.y / size.y))
+}
+
+/// Reads the manifest. An entry without one `frame_size` for the whole sprite
+/// (the engulf pairs have a size for each clip) takes the size and anchor of its
+/// first clip as the sprite's, and every clip keeps its own.
 pub fn parse_manifest(json: &str) -> Result<HashMap<String, SpriteInfo>, serde_json::Error> {
     let entries: HashMap<String, Map<String, Value>> = serde_json::from_str(json)?;
     let mut out = HashMap::new();
     for (name, entry) in entries {
-        let Some(frame_size) = entry.get("frame_size").and_then(vec2) else {
-            continue;
-        };
-        let Some(anchor_px) = entry.get("anchor_px").and_then(vec2) else {
-            continue;
-        };
-        let mut clips = HashMap::new();
+        let mut clips: HashMap<String, ClipSpec> = HashMap::new();
         for (key, value) in &entry {
             if value.get("file").is_some() {
                 clips.insert(key.clone(), serde_json::from_value(value.clone())?);
             }
         }
+        let own = entry
+            .get("frame_size")
+            .and_then(vec2)
+            .zip(entry.get("anchor_px").and_then(vec2));
+        let from_clip = || {
+            // Sorted, so that the choice does not depend on hash order.
+            let mut names: Vec<_> = clips.keys().collect();
+            names.sort();
+            names.into_iter().find_map(|name| {
+                let c = &clips[name];
+                Some((
+                    Vec2::new(c.frame_size?[0] as f32, c.frame_size?[1] as f32),
+                    Vec2::from(c.anchor_px?),
+                ))
+            })
+        };
+        let Some((frame_size, anchor_px)) = own.or_else(from_clip) else {
+            continue;
+        };
         out.insert(
             name,
             SpriteInfo {
@@ -240,6 +281,16 @@ impl Sheets {
     /// `Anchor` and the `Animator` that plays it. `None` if the manifest has no
     /// such sheet.
     pub fn bundle(&self, name: &'static str, clip: &'static str) -> Option<impl Bundle + use<>> {
+        self.bundle_row(name, clip, 0)
+    }
+
+    /// Like `bundle`, for a directional sheet that starts on `row`.
+    pub fn bundle_row(
+        &self,
+        name: &'static str,
+        clip: &'static str,
+        row: usize,
+    ) -> Option<impl Bundle + use<>> {
         let sprite = self.sprites.get(name)?;
         let sheet = sprite.sheets.get(clip)?;
         Some((
@@ -250,8 +301,11 @@ impl Sheets {
                     index: 0,
                 },
             ),
-            sprite.info.anchor(),
-            Animator::new(name, clip),
+            sprite.info.clip_anchor(&sheet.spec),
+            Animator {
+                row,
+                ..Animator::new(name, clip)
+            },
         ))
     }
 }
@@ -269,7 +323,7 @@ fn load_sheets(
             .iter()
             .map(|(clip, spec)| {
                 let layout = TextureAtlasLayout::from_grid(
-                    info.frame_size,
+                    spec.frame_size_or(info.frame_size),
                     spec.columns,
                     spec.rows,
                     None,
@@ -443,6 +497,21 @@ mod tests {
         assert!(flagellum.clips.contains_key(clip::USE));
     }
 
+    #[test]
+    fn the_engulf_pairs_and_the_victory_clip_are_in_the_manifest() {
+        let manifest = parse_manifest(MANIFEST).unwrap();
+        for pair in ["engulf_player_prey", "engulf_player_symbiont"] {
+            let info = &manifest[pair];
+            let engulf = &info.clips[clip::ENGULF];
+            assert_eq!(engulf.frame_size_or(info.frame_size), UVec2::new(112, 112));
+            assert!(engulf.is_directional() && !engulf.looped);
+            assert!(info.clips.contains_key(clip::DIGEST_END));
+        }
+        let victory = &manifest["gate_cell_victory"].clips[clip::VICTORY];
+        assert_eq!((victory.columns, victory.rows), (16, 1));
+        assert!(manifest["prey_bacillus"].clips.contains_key(clip::DEATH));
+    }
+
     /// Every sheet in the manifest exists and its PNG has the size that the
     /// manifest says. This catches art and code that drift apart.
     #[test]
@@ -458,7 +527,10 @@ mod tests {
                 let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
                 assert_eq!(
                     (width, height),
-                    (info.frame_size.x * spec.columns, info.frame_size.y * spec.rows),
+                    {
+                        let frame = spec.frame_size_or(info.frame_size);
+                        (frame.x * spec.columns, frame.y * spec.rows)
+                    },
                     "{name}/{clip}: {}",
                     spec.file
                 );

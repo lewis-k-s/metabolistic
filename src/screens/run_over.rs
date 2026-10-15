@@ -5,7 +5,7 @@ use bevy::prelude::*;
 
 use super::{button, label, screen_root};
 use crate::GameState;
-use crate::run::{RunSummary, death_message};
+use crate::run::{RunSummary, run_over_message, run_over_title};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(GameState::RunOver), spawn_run_over_screen)
@@ -34,8 +34,8 @@ fn spawn_run_over_screen(mut commands: Commands, summary: Res<RunSummary>) {
         screen_root(),
         DespawnOnExit(GameState::RunOver),
         children![
-            label("Run over", 80.0),
-            label(&death_message(summary.cause, summary.source), 28.0),
+            label(run_over_title(&summary), 80.0),
+            label(&run_over_message(&summary), 28.0),
             button("Restart", RunOverAction::Restart),
             button("Menu", RunOverAction::Menu),
         ],

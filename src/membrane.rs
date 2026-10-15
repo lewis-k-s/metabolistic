@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 
 use crate::cell::Cell;
-use crate::metabolism::{CurrencyPools, FlowmapTimingConfig};
+use crate::metabolism::{CellTick, CurrencyPools, FlowmapTimingConfig};
 use crate::molecules::Currency;
 
 /// Membrane integrity of a cell.
@@ -53,10 +53,13 @@ pub fn repair_points(membrane: &Membrane, lipids: f32, dt: f32) -> f32 {
 /// Repairs each cell's membrane with lipids.
 pub fn membrane_repair_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut Membrane, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&mut Membrane, &mut CurrencyPools, &CellTick), With<Cell>>,
 ) {
-    let dt = timing.target_delta();
-    for (mut membrane, mut pools) in &mut cells {
+    for (mut membrane, mut pools, tick) in &mut cells {
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let points = repair_points(&membrane, pools.get(Currency::Lipids), dt);
         if points > 0.0 {
             membrane.integrity += points;

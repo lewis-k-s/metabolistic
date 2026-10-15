@@ -35,7 +35,7 @@ use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, DamageSource, DamageTaken};
 use crate::environment::{Channel, LocalEnvironment};
 use crate::membrane::Membrane;
-use crate::metabolism::{CurrencyPools, FlowmapTimingConfig, MetabolicSet, decay_fraction};
+use crate::metabolism::{CellTick, CurrencyPools, FlowmapTimingConfig, MetabolicSet, decay_fraction};
 use crate::molecules::Currency;
 use crate::shelter::InShelter;
 
@@ -343,15 +343,16 @@ pub fn uv_damage_system(
             &mut GenomeIntegrity,
             &mut MutationLoad,
             &InShelter,
+            &CellTick,
         ),
         With<Cell>,
     >,
 ) {
-    let dt = timing.target_delta();
-    for (env, pools, mut membrane, mut taken, mut genome_integrity, mut load, sheltered) in
+    for (env, pools, mut membrane, mut taken, mut genome_integrity, mut load, sheltered, tick) in
         &mut cells
     {
-        if sheltered.0 {
+        let dt = tick.dt(timing.target_delta());
+        if sheltered.0 || !tick.due {
             continue;
         }
         let uv = uv_level(env.get(Channel::Light), fraction.0);
@@ -402,12 +403,16 @@ pub fn genome_repair_system(
             &mut GenomeIntegrity,
             &mut RepairProgress,
             &mut CurrencyPools,
+            &CellTick,
         ),
         With<Cell>,
     >,
 ) {
-    let dt = timing.target_delta();
-    for (mut genome, mut integrity, mut progress, mut pools) in &mut cells {
+    for (mut genome, mut integrity, mut progress, mut pools, tick) in &mut cells {
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         // Most ticks there is nothing to repair: no allocation then.
         let mutated = genome
             .table
@@ -453,10 +458,13 @@ pub fn genome_repair_system(
 /// Pigments decay slowly.
 pub fn pigment_decay_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<&mut CurrencyPools, With<Cell>>,
+    mut cells: Query<(&mut CurrencyPools, &CellTick), With<Cell>>,
 ) {
-    let dt = timing.target_delta();
-    for mut pools in &mut cells {
+    for (mut pools, tick) in &mut cells {
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let pigments = pools.get(Currency::Pigments);
         if pigments > 0.0 {
             pools.set(Currency::Pigments, decayed_pigments(pigments, dt));

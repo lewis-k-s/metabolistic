@@ -15,6 +15,8 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::actions::{ActionState, action_damping, action_thrust};
+use crate::walls::crawl_force;
+use crate::world::cell_layers;
 use crate::cell::{Cell, CellSize};
 use crate::movement::{
     MoveInput, ThrustEffort, body_drag, body_mass, thrust_capacity, wasd_direction, world_radius,
@@ -56,26 +58,44 @@ pub fn plugin(app: &mut App) {
         )
     // Thrust is a force: set it before avian's fixed-step physics.
     .add_systems(FixedUpdate, apply_thrust.run_if(in_state(InRun)))
+    .add_systems(Update, update_cell_layers.run_if(in_state(InRun)))
     .add_systems(OnExit(InRun), reset_camera);
 }
 
 /// Adds the body and the sprite to the player's cell.
 pub fn attach_body(commands: &mut Commands, sheets: &Sheets, cell: Entity) {
-    let size = CellSize::default();
-    let radius = world_radius(&size);
+    attach_body_for(commands, sheets, cell, &CellSize::default(), "player_cell", clip::SPAWN, false);
+}
+
+/// Adds a body and a sprite to a cell of any size. `sprite` is the sheet name
+/// and `first_clip` the clip that it starts with. A `fixed` body does not move
+/// (the gate cell).
+pub fn attach_body_for(
+    commands: &mut Commands,
+    sheets: &Sheets,
+    cell: Entity,
+    size: &CellSize,
+    sprite: &'static str,
+    first_clip: &'static str,
+    fixed: bool,
+) {
+    let radius = world_radius(size);
     commands.entity(cell).insert((
-        RigidBody::Dynamic,
+        if fixed { RigidBody::Static } else { RigidBody::Dynamic },
         Collider::circle(radius),
-        Mass(body_mass(&size)),
-        LinearDamping(body_drag(&size)),
+        Mass(body_mass(size)),
+        LinearDamping(body_drag(size)),
         LockedAxes::ROTATION_LOCKED,
         ConstantForce::default(),
         Visibility::default(),
+        // The real layers follow the proteome (see `update_cell_layers`).
+        cell_layers(&Proteome::default(), false),
         DespawnOnExit(InRun),
     ));
-    let body = sheets
-        .bundle("player_cell", clip::SPAWN)
-        .expect("the manifest has player_cell/spawn");
+    let Some(body) = sheets.bundle(sprite, first_clip) else {
+        warn!("the manifest has no {sprite}/{first_clip}");
+        return;
+    };
     commands
         .entity(cell)
         .with_child((Name::new("Cell Sprite"), BlobSprite, body, Transform::default()));
@@ -126,10 +146,30 @@ fn apply_thrust(
     >,
 ) {
     for (input, proteome, size, actions, mut force, mut damping, mut effort) in &mut cells {
-        let thrust = action_thrust(input.0, thrust_capacity(proteome), actions);
+        let drag = action_damping(body_drag(size), actions);
+        // A held adhesin on a wall crawls through it at a slow speed.
+        let thrust = if actions.ghosting() {
+            crawl_force(input.0, body_mass(size), drag)
+        } else {
+            action_thrust(input.0, thrust_capacity(proteome), actions)
+        };
         force.0 = thrust;
-        damping.0 = action_damping(body_drag(size), actions);
+        damping.0 = drag;
         effort.0 += thrust.length() * time.delta_secs();
+    }
+}
+
+/// Sets which walls each body collides with: a pore opens for a transporter, and
+/// an adhesin crawl ghosts through walls and pores.
+fn update_cell_layers(
+    cells: Query<(Entity, &Proteome, &ActionState, &CollisionLayers), With<Cell>>,
+    mut commands: Commands,
+) {
+    for (entity, proteome, actions, layers) in &cells {
+        let wanted = cell_layers(proteome, actions.ghosting());
+        if *layers != wanted {
+            commands.entity(entity).insert(wanted);
+        }
     }
 }
 

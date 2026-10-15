@@ -28,7 +28,7 @@ use crate::blocks::chemosynthesis::MINERALS_PER_TURNOVER;
 use crate::envgrid::EnvGrid;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::membrane::Membrane;
-use crate::metabolism::{BlockTurnover, CurrencyPools, FlowmapTimingConfig};
+use crate::metabolism::{BlockTurnover, CellTick, CurrencyPools, FlowmapTimingConfig};
 use crate::molecules::Currency;
 use crate::movement::{ThrustEffort, move_atp_cost};
 use crate::shelter::InShelter;
@@ -111,13 +111,17 @@ pub fn mineral_exchange_system(
             &Proteome,
             &mut CurrencyPools,
             &mut ExchangeStats,
+            &CellTick,
         ),
         With<Cell>,
     >,
     turnovers: Query<&BlockTurnover>,
 ) {
-    let dt = timing.target_delta();
-    for (transform, blocks, proteome, mut pools, mut stats) in &mut cells {
+    for (transform, blocks, proteome, mut pools, mut stats, tick) in &mut cells {
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let turnover = blocks
             .get(BlockKind::Chemosynthesis)
             .and_then(|block| turnovers.get(block).ok())
@@ -150,13 +154,13 @@ pub fn constant_supply_system(mut cells: Query<(&LocalEnvironment, &mut Currency
 pub fn heat_damage_system(
     timing: Res<FlowmapTimingConfig>,
     mut cells: Query<
-        (&LocalEnvironment, &mut Membrane, &mut DamageTaken, &InShelter),
+        (&LocalEnvironment, &mut Membrane, &mut DamageTaken, &InShelter, &CellTick),
         With<Cell>,
     >,
 ) {
-    let dt = timing.target_delta();
-    for (env, mut membrane, mut taken, sheltered) in &mut cells {
-        if sheltered.0 {
+    for (env, mut membrane, mut taken, sheltered, tick) in &mut cells {
+        let dt = tick.dt(timing.target_delta());
+        if sheltered.0 || !tick.due {
             continue;
         }
         let damage = heat_damage(env.get(Channel::Heat), dt);
@@ -169,10 +173,10 @@ pub fn heat_damage_system(
 
 /// Moving costs ATP for the thrust used since the last tick.
 pub fn movement_cost_system(
-    mut cells: Query<(&mut ThrustEffort, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&mut ThrustEffort, &mut CurrencyPools, &CellTick), With<Cell>>,
 ) {
-    for (mut effort, mut pools) in &mut cells {
-        if effort.0 > 0.0 {
+    for (mut effort, mut pools, tick) in &mut cells {
+        if tick.due && effort.0 > 0.0 {
             pools.modify(Currency::ATP, -move_atp_cost(effort.0));
             effort.0 = 0.0;
         }

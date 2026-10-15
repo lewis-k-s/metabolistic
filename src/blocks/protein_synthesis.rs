@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellBlocks, OwnedBy};
 use crate::genome_damage::{GenomeIntegrity, translation_efficiency};
-use crate::metabolism::{BlockTurnover, Drive, FluxProfile};
+use crate::metabolism::{BlockTurnover, CellTick, Drive, FluxProfile};
 use crate::molecules::Currency;
 use crate::proteins::{
     AMINO_ACIDS_PER_UNIT, ATP_PER_UNIT, Proteome, SynthesisQueue, advance_synthesis,
@@ -70,10 +70,13 @@ pub fn regulate_protein_synthesis_system(
 
 /// Spends the protein units of the last tick on each cell's queue.
 pub fn advance_protein_queue_system(
-    mut cells: Query<(&CellBlocks, &mut SynthesisQueue, &mut Proteome), With<Cell>>,
+    mut cells: Query<(&CellBlocks, &mut SynthesisQueue, &mut Proteome, &CellTick), With<Cell>>,
     turnovers: Query<&BlockTurnover>,
 ) {
-    for (blocks, mut queue, mut proteome) in &mut cells {
+    for (blocks, mut queue, mut proteome, tick) in &mut cells {
+        if !tick.due {
+            continue; // The turnover is from an earlier tick: do not count it twice.
+        }
         let units = blocks
             .get(BlockKind::ProteinSynthesis)
             .and_then(|block| turnovers.get(block).ok())

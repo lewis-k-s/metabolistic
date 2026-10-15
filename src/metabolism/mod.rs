@@ -299,6 +299,72 @@ pub struct MetabolicNode {
     pub status: BlockStatus,
 }
 
+// --- Per-cell tick rate ---
+
+/// How often a cell takes part in the metabolic tick. A cell with `every = 4`
+/// (an NPC) runs on every 4th tick and uses 4 x the tick length, so the total
+/// time is the same. This is valid because the solver and every per-cell system
+/// are independent of the tick length. `due` is set at the start of each tick by
+/// `advance_cell_ticks_system`; a default `CellTick` is due at every tick.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellTick {
+    /// Run on every `every`-th tick. 1 is every tick.
+    pub every: u32,
+    /// Offset in ticks, so that NPCs do not all run on the same tick.
+    pub phase: u32,
+    /// True if the cell runs in the tick that is running now.
+    pub due: bool,
+}
+
+impl Default for CellTick {
+    fn default() -> Self {
+        Self::every(1)
+    }
+}
+
+impl CellTick {
+    pub fn every(every: u32) -> Self {
+        Self {
+            every: every.max(1),
+            phase: 0,
+            due: true,
+        }
+    }
+
+    pub fn with_phase(mut self, phase: u32) -> Self {
+        self.phase = phase;
+        self
+    }
+
+    /// Seconds that this cell simulates when it runs, for a base tick length.
+    pub fn dt(&self, base: f32) -> f32 {
+        base * self.every as f32
+    }
+}
+
+/// Is the cell with this rate due at tick number `tick`?
+pub fn is_due(every: u32, phase: u32, tick: u64) -> bool {
+    every <= 1 || (tick + phase as u64) % every as u64 == 0
+}
+
+/// The number of the metabolic tick that is running.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TickCounter(pub u64);
+
+/// Counts the tick and sets `CellTick::due` of each cell.
+pub fn advance_cell_ticks_system(
+    mut counter: ResMut<TickCounter>,
+    mut cells: Query<&mut CellTick, With<Cell>>,
+) {
+    counter.0 += 1;
+    for mut tick in &mut cells {
+        let due = is_due(tick.every, tick.phase, counter.0);
+        if tick.due != due {
+            tick.due = due;
+        }
+    }
+}
+
 // --- Schedule ---
 
 #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -367,6 +433,7 @@ pub fn solve_cell_flux_system(
             &LocalEnvironment,
             &mut CurrencyPools,
             &mut MetabolicGraph,
+            &CellTick,
         ),
         With<Cell>,
     >,
@@ -379,8 +446,11 @@ pub fn solve_cell_flux_system(
     )>,
     mut turnovers: Query<&mut BlockTurnover>,
 ) {
-    let dt = timing.target_delta();
-    for (cell_blocks, proteome, size, env, mut pools, mut graph) in &mut cells {
+    for (cell_blocks, proteome, size, env, mut pools, mut graph, tick) in &mut cells {
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         // Sort by kind so that the graph does not depend on HashMap order.
         let mut owned: Vec<OwnedBlock> = cell_blocks
             .0
@@ -465,6 +535,7 @@ pub struct MetabolicFlowPlugin;
 impl Plugin for MetabolicFlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FlowmapTimingConfig>()
+            .init_resource::<TickCounter>()
             .init_schedule(MetabolicSchedule)
             .configure_sets(
                 MetabolicSchedule,
@@ -477,6 +548,10 @@ impl Plugin for MetabolicFlowPlugin {
                     MetabolicSet::Exchange,
                 )
                     .chain(),
+            )
+            .add_systems(
+                MetabolicSchedule,
+                advance_cell_ticks_system.in_set(MetabolicSet::Sense),
             )
             .add_systems(
                 MetabolicSchedule,

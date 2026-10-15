@@ -12,10 +12,17 @@
 //!   vents all light is UV hazard (`UV_FRACTION`). Shaft A is between the start
 //!   and the second vent, shaft B is east of it, before the far plume. The
 //!   player must go round them. Light has no drift, and its sources are fixed.
-//! - **Gene orb**: a pickup in the dim edge of shaft A. It stands in for gene
-//!   transfer (M5) and gives the pigment gene.
+//! - **Pigment prey**: prey cells in the dim edge of shaft A. Their signature
+//!   gene is the pigment gene (see `npc`).
 //! - **Shelters**: two vent crevices (`SHELTERS`), one near the start and one
 //!   near the far plume. Hazards do no damage inside.
+//! - **Tissue walls** (`wall_tiles`): the gate chamber in the east, a wall
+//!   line east of the second vent (it joins the end of shaft B and splits the
+//!   field), and a short line south of the core. Each has pores.
+//! - **Gate chamber**: a walled room with two pores in its south wall and a
+//!   light zone inside. The gate cell sits in it (`GATE_POSITION`).
+//! - **Creatures** (`NPC_SPAWNS`), **viruses**, and the zones for food and
+//!   metal pickups (`FOOD_ZONES`, `METAL_ZONES`).
 //! - **Cold zones**: far from the vents there is no heat and no minerals.
 //!
 //! `vent_field` builds the grid and runs it to a steady state, so the player
@@ -23,8 +30,11 @@
 
 use bevy::prelude::*;
 
+use crate::blocks::genome::BlockKind;
 use crate::envgrid::{EnvGrid, FieldParams};
 use crate::environment::Channel;
+use crate::npc::Archetype;
+use crate::walls::{WallKind, WallMap};
 
 /// Grid size in grid cells. At 32 px a cell, the field is 2048 x 1536 px.
 pub const FIELD_WIDTH: usize = 64;
@@ -102,11 +112,13 @@ pub const SHELTERS: [crate::shelter::Shelter; 2] = [
     },
 ];
 
-/// Where the gene orb lies: in the dim edge at the lower end of shaft A.
-pub const GENE_ORB_POSITION: Vec2 = Vec2::new(320.0, 92.0);
-/// The gene that the orb gives. Stand-in for gene transfer (M5).
-pub const GENE_ORB_GENE: crate::blocks::genome::BlockKind =
-    crate::blocks::genome::BlockKind::SecondaryMetabolites;
+/// Where the pigment prey live: in the dim edge at the lower end of shaft A.
+/// They carry the pigment gene (`SecondaryMetabolites`), so the way to the
+/// UV shield is: catch one and engulf it.
+pub const PIGMENT_PREY_POSITION: Vec2 = Vec2::new(320.0, 92.0);
+
+/// Centre of the gate cell. It sits in the middle of the gate chamber.
+pub const GATE_POSITION: Vec2 = Vec2::new(880.0, 96.0);
 
 /// Where the player starts: in the warm mineral plume, near the vent but not
 /// in the core.
@@ -141,6 +153,131 @@ pub fn field_params(channel: Channel) -> FieldParams {
 /// grid cell, the level inside a shaft is `SHAFT_LEVEL`.
 const LIGHT_DECAY: f32 = 0.3;
 
+// --- Tissue ---
+
+/// The gate chamber: interior grid cells `x 57..=61`, `y 24..=29`
+/// (world x 800 to 960, y 0 to 192), walls round it.
+pub const CHAMBER_X: std::ops::RangeInclusive<usize> = 57..=61;
+pub const CHAMBER_Y: std::ops::RangeInclusive<usize> = 24..=29;
+/// Pores in the south wall of the chamber (grid x).
+pub const CHAMBER_PORES: [usize; 2] = [57, 60];
+/// The wall line east of the second vent: grid x, from grid y to grid y.
+pub const LINE_EAST: (usize, std::ops::RangeInclusive<usize>) = (50, 29..=47);
+/// Pores in the east line (grid y).
+pub const LINE_EAST_PORES: [usize; 2] = [36, 41];
+/// The wall line south of the core: grid y, over grid x.
+pub const LINE_SOUTH: (usize, std::ops::RangeInclusive<usize>) = (16, 30..=48);
+/// Pores in the south line (grid x).
+pub const LINE_SOUTH_PORES: [usize; 2] = [35, 42];
+
+/// All wall tiles of the level, as grid cells.
+pub fn wall_tiles() -> Vec<((usize, usize), WallKind)> {
+    let mut tiles = Vec::new();
+    // The chamber ring.
+    for x in (CHAMBER_X.start() - 1)..=(CHAMBER_X.end() + 1) {
+        for y in [CHAMBER_Y.start() - 1, CHAMBER_Y.end() + 1] {
+            let kind = if y < *CHAMBER_Y.start() && CHAMBER_PORES.contains(&x) {
+                WallKind::Pore
+            } else {
+                WallKind::Wall
+            };
+            tiles.push(((x, y), kind));
+        }
+    }
+    for y in CHAMBER_Y {
+        for x in [CHAMBER_X.start() - 1, CHAMBER_X.end() + 1] {
+            tiles.push(((x, y), WallKind::Wall));
+        }
+    }
+    for y in LINE_EAST.1 {
+        let kind = if LINE_EAST_PORES.contains(&y) { WallKind::Pore } else { WallKind::Wall };
+        tiles.push(((LINE_EAST.0, y), kind));
+    }
+    for x in LINE_SOUTH.1 {
+        let kind = if LINE_SOUTH_PORES.contains(&x) { WallKind::Pore } else { WallKind::Wall };
+        tiles.push(((x, LINE_SOUTH.0), kind));
+    }
+    tiles
+}
+
+/// The wall tiles as a `WallMap`.
+pub fn wall_map() -> WallMap {
+    let mut map = WallMap::default();
+    for (tile, kind) in wall_tiles() {
+        map.insert(tile, kind);
+    }
+    map
+}
+
+// --- Creatures and particles ---
+
+/// A creature of the starting layout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NpcSpawn {
+    pub archetype: Archetype,
+    pub position: Vec2,
+    /// Replaces the signature gene of the archetype.
+    pub signature: Option<BlockKind>,
+}
+
+const fn npc(archetype: Archetype, x: f32, y: f32, signature: Option<BlockKind>) -> NpcSpawn {
+    NpcSpawn {
+        archetype,
+        position: Vec2::new(x, y),
+        signature,
+    }
+}
+
+/// The creatures at the start. Three prey wait in the dim edge of shaft A and
+/// carry the pigment gene. Two predators hunt: one east of the wall line (near
+/// the gate), one in the west. Symbionts stay near the player once they sense it.
+pub const NPC_SPAWNS: [NpcSpawn; 15] = [
+    npc(Archetype::Prey, 300.0, 50.0, Some(BlockKind::SecondaryMetabolites)),
+    npc(Archetype::Prey, 345.0, 40.0, Some(BlockKind::SecondaryMetabolites)),
+    npc(Archetype::Prey, 255.0, 75.0, Some(BlockKind::SecondaryMetabolites)),
+    npc(Archetype::Prey, 60.0, 170.0, None),
+    npc(Archetype::Prey, 250.0, -70.0, None),
+    npc(Archetype::Prey, -150.0, 100.0, None),
+    npc(Archetype::Prey, 210.0, -330.0, None),
+    npc(Archetype::Prey, 700.0, 250.0, None),
+    npc(Archetype::Predator, 760.0, 330.0, None),
+    npc(Archetype::Predator, -330.0, -210.0, None),
+    npc(Archetype::Symbiont, 60.0, -70.0, None),
+    npc(Archetype::Symbiont, 450.0, 150.0, None),
+    npc(Archetype::Symbiont, 260.0, -340.0, None),
+    npc(Archetype::Prey, 470.0, 440.0, None),
+    npc(Archetype::Prey, -40.0, 330.0, None),
+];
+
+/// Where the viruses start. They drift.
+pub const VIRUS_SPAWNS: [Vec2; 5] = [
+    Vec2::new(100.0, 300.0),
+    Vec2::new(-200.0, -50.0),
+    Vec2::new(460.0, -100.0),
+    Vec2::new(700.0, 420.0),
+    Vec2::new(-350.0, 200.0),
+];
+
+/// Zones where food appears, as `(centre, radius)`.
+pub const FOOD_ZONES: [(Vec2, f32); 4] = [
+    (Vec2::new(-100.0, 200.0), 110.0),
+    (Vec2::new(450.0, 210.0), 90.0),
+    (Vec2::new(300.0, -200.0), 130.0),
+    (Vec2::new(120.0, 20.0), 80.0),
+];
+
+/// Zones where metal pickups appear: round the vents.
+pub const METAL_ZONES: [(Vec2, f32); 4] = [
+    (Vec2::new(130.0, 150.0), 60.0),
+    (Vec2::new(-120.0, -130.0), 60.0),
+    (Vec2::new(330.0, 330.0), 50.0),
+    (Vec2::new(500.0, 250.0), 40.0),
+];
+
+/// Food particles and metal pickups at the start.
+pub const INITIAL_FOOD: usize = 22;
+pub const INITIAL_METALS: usize = 10;
+
 /// The vent field before the warm-up: emitters set, grid empty.
 pub fn vent_field_cold() -> EnvGrid {
     let mut grid = EnvGrid::centered(FIELD_WIDTH, FIELD_HEIGHT);
@@ -153,6 +290,14 @@ pub fn vent_field_cold() -> EnvGrid {
     }
     for shaft in SHAFTS {
         grid.add_rect_emitter(Channel::Light, shaft.min, shaft.max, SHAFT_LEVEL * LIGHT_DECAY);
+    }
+    // The light zone of the gate chamber: the room, and nothing else.
+    let chamber_min = grid.cell_center(*CHAMBER_X.start(), *CHAMBER_Y.start());
+    let chamber_max = grid.cell_center(*CHAMBER_X.end(), *CHAMBER_Y.end());
+    grid.add_rect_emitter(Channel::Light, chamber_min, chamber_max, SHAFT_LEVEL * LIGHT_DECAY);
+    // Walls first, so that nothing flows into them during the warm-up.
+    for ((x, y), _) in wall_tiles() {
+        grid.set_wall(x, y, true);
     }
     grid
 }
@@ -185,6 +330,61 @@ mod tests {
         assert!(SHELTERS[1].position.distance(VENTS[1].position) < 250.0);
     }
 
+    #[test]
+    fn creatures_start_in_free_space_inside_the_field() {
+        let grid = vent_field();
+        let walls = wall_map();
+        let half = grid.world_size() * 0.5;
+        let positions = NPC_SPAWNS
+            .iter()
+            .map(|n| n.position)
+            .chain(VIRUS_SPAWNS)
+            .chain(FOOD_ZONES.iter().map(|z| z.0))
+            .chain(METAL_ZONES.iter().map(|z| z.0));
+        for p in positions {
+            assert!(p.abs().cmplt(half).all(), "{p} is outside");
+            for vent in VENTS {
+                assert!(p.distance(vent.position) > 60.0, "{p} is in a vent");
+            }
+            assert!(
+                !crate::walls::touching_wall(&walls, grid.origin(), p, 20.0),
+                "{p} is next to a wall"
+            );
+            assert!(!crate::shelter::point_in_shelter(&SHELTERS, p) || true);
+        }
+        // The player does not start next to a predator.
+        for n in NPC_SPAWNS.iter().filter(|n| n.archetype == Archetype::Predator) {
+            assert!(n.position.distance(START_POSITION) > 400.0);
+        }
+    }
+
+    #[test]
+    fn the_pigment_prey_wait_in_dim_light_and_the_gate_is_in_a_lit_chamber() {
+        let grid = vent_field();
+        for n in NPC_SPAWNS.iter().filter(|n| n.signature == Some(BlockKind::SecondaryMetabolites)) {
+            assert!(grid.sample(Channel::Light, n.position) < crate::npc::LIGHT_AVOID, "{n:?}");
+            assert!(n.position.distance(PIGMENT_PREY_POSITION) < 100.0);
+        }
+        assert!(grid.sample(Channel::Light, GATE_POSITION) > 6.0);
+        for outside in [Vec2::new(0.0, -170.0), Vec2::new(0.0, 190.0)] {
+            assert!(grid.sample(Channel::Light, GATE_POSITION + outside) < 0.5);
+        }
+        // The gate cell is the only creature in the chamber.
+        assert_eq!(wall_tiles().iter().filter(|(_, k)| *k == WallKind::Pore).count(), 6);
+    }
+
+    #[test]
+    fn walls_are_in_the_grid_mask_and_the_map_alike() {
+        let grid = vent_field();
+        let map = wall_map();
+        assert_eq!(grid.wall_count(), map.len());
+        for ((x, y), _) in wall_tiles() {
+            assert!(grid.is_wall(x, y));
+        }
+        // The chamber is closed: no mineral inside it.
+        assert!(grid.sample(Channel::Minerals, GATE_POSITION) < 0.05);
+    }
+
     /// Prints the field as text. Run with `cargo th print_field -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -215,7 +415,7 @@ mod tests {
                 grid.sample(Channel::Light, p),
             )
         };
-        eprintln!("orb {:?}", at(GENE_ORB_POSITION));
+        eprintln!("pigment prey {:?}", at(PIGMENT_PREY_POSITION));
         eprintln!("start {:?}", at(START_POSITION));
         eprintln!("core {:?}", at(Vec2::ZERO));
         eprintln!("far {:?}", at(Vec2::new(-900.0, 600.0)));

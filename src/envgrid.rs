@@ -24,6 +24,14 @@
 //! does not change. Levels never go below 0, because the moved fractions in each
 //! sub-step add up to at most 1.
 //!
+//! ## Walls
+//!
+//! A grid cell can be a wall (the `walls` mask of `EnvGrid`). A wall cell is
+//! inert: it gets no source, nothing flows into it or out of it, so a wall
+//! blocks drift and diffusion. Nothing is created or lost, so the total of a
+//! layer is still conserved. The `_masked` functions take the mask; the others
+//! call them with no mask.
+//!
 //! Ticks of 0.1 s, 0.2 s or 0.8 s all use sub-steps of 0.05 s, so the tick
 //! length does not change the result.
 
@@ -105,6 +113,18 @@ pub fn add_sources(layer: &mut [f32], emission: &[f32], h: f32) {
     }
 }
 
+/// Like `add_sources`, but wall cells get nothing.
+pub fn add_sources_masked(layer: &mut [f32], emission: &[f32], walls: Option<&[bool]>, h: f32) {
+    let Some(walls) = walls else {
+        return add_sources(layer, emission, h);
+    };
+    for ((level, &rate), &wall) in layer.iter_mut().zip(emission).zip(walls) {
+        if !wall {
+            *level += rate * h;
+        }
+    }
+}
+
 /// Moves each grid cell's content downwind. `drift` is in grid cells per
 /// second. With `open_edges` false, content never leaves the grid: a cell at
 /// the edge keeps what would go out. With `open_edges` true, that content is
@@ -117,6 +137,20 @@ pub fn advect(
     open_edges: bool,
     h: f32,
 ) {
+    advect_masked(layer, scratch, dims, drift, open_edges, None, h);
+}
+
+/// `advect` with a wall mask: content does not enter or leave a wall cell.
+pub fn advect_masked(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    drift: Vec2,
+    open_edges: bool,
+    walls: Option<&[bool]>,
+    h: f32,
+) {
+    let is_wall = |x: usize, y: usize| walls.is_some_and(|w| w[dims.index(x, y)]);
     let mut fx = drift.x.abs() * h;
     let mut fy = drift.y.abs() * h;
     let total = fx + fy;
@@ -136,11 +170,16 @@ pub fn advect(
         for x in 0..dims.width {
             let i = dims.index(x, y);
             let content = layer[i];
+            if is_wall(x, y) {
+                scratch[i] += content;
+                continue;
+            }
             let mut stay = content;
             let nx = x as isize + step_x;
             if fx > 0.0 {
                 let inside = nx >= 0 && (nx as usize) < dims.width;
-                if inside || open_edges {
+                let blocked = inside && is_wall(nx as usize, y);
+                if !blocked && (inside || open_edges) {
                     let moved = content * fx;
                     if inside {
                         scratch[dims.index(nx as usize, y)] += moved;
@@ -151,7 +190,8 @@ pub fn advect(
             let ny = y as isize + step_y;
             if fy > 0.0 {
                 let inside = ny >= 0 && (ny as usize) < dims.height;
-                if inside || open_edges {
+                let blocked = inside && is_wall(x, ny as usize);
+                if !blocked && (inside || open_edges) {
                     let moved = content * fy;
                     if inside {
                         scratch[dims.index(x, ny as usize)] += moved;
@@ -169,6 +209,18 @@ pub fn advect(
 /// at most `MAX_DIFFUSION_SHARE`. Edge cells have fewer neighbours, so the
 /// edge is closed.
 pub fn diffuse(layer: &mut [f32], scratch: &mut Vec<f32>, dims: GridDims, share: f32) {
+    diffuse_masked(layer, scratch, dims, share, None);
+}
+
+/// `diffuse` with a wall mask: no flow to or from a wall cell.
+pub fn diffuse_masked(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    share: f32,
+    walls: Option<&[bool]>,
+) {
+    let is_wall = |x: usize, y: usize| walls.is_some_and(|w| w[dims.index(x, y)]);
     let share = share.clamp(0.0, MAX_DIFFUSION_SHARE);
     if share <= 0.0 {
         return;
@@ -179,17 +231,20 @@ pub fn diffuse(layer: &mut [f32], scratch: &mut Vec<f32>, dims: GridDims, share:
         for x in 0..dims.width {
             let i = dims.index(x, y);
             let here = layer[i];
+            if is_wall(x, y) {
+                continue; // scratch already holds the unchanged level
+            }
             let mut flow = 0.0;
-            if x > 0 {
+            if x > 0 && !is_wall(x - 1, y) {
                 flow += layer[dims.index(x - 1, y)] - here;
             }
-            if x + 1 < dims.width {
+            if x + 1 < dims.width && !is_wall(x + 1, y) {
                 flow += layer[dims.index(x + 1, y)] - here;
             }
-            if y > 0 {
+            if y > 0 && !is_wall(x, y - 1) {
                 flow += layer[dims.index(x, y - 1)] - here;
             }
-            if y + 1 < dims.height {
+            if y + 1 < dims.height && !is_wall(x, y + 1) {
                 flow += layer[dims.index(x, y + 1)] - here;
             }
             scratch[i] = here + share * flow;
@@ -218,15 +273,28 @@ pub fn step_layer(
     params: &FieldParams,
     dt: f32,
 ) {
+    step_layer_masked(layer, scratch, dims, emission, params, None, dt);
+}
+
+/// `step_layer` with a wall mask (see the module docs).
+pub fn step_layer_masked(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    emission: &[f32],
+    params: &FieldParams,
+    walls: Option<&[bool]>,
+    dt: f32,
+) {
     if dt <= 0.0 {
         return;
     }
     let n = substep_count(dt);
     let h = dt / n as f32;
     for _ in 0..n {
-        add_sources(layer, emission, h);
-        advect(layer, scratch, dims, params.drift, params.open_drift_edges, h);
-        diffuse(layer, scratch, dims, params.diffusion * h);
+        add_sources_masked(layer, emission, walls, h);
+        advect_masked(layer, scratch, dims, params.drift, params.open_drift_edges, walls, h);
+        diffuse_masked(layer, scratch, dims, params.diffusion * h, walls);
         decay_layer(layer, params.decay, h);
     }
 }
@@ -301,6 +369,9 @@ pub struct EnvGrid {
     /// Channels that are settled: they are static, so `step` skips them.
     settled: [bool; Channel::ALL.len()],
     scratch: Vec<f32>,
+    /// Wall cells: inert, they block drift and diffusion.
+    walls: Vec<bool>,
+    wall_count: usize,
 }
 
 impl EnvGrid {
@@ -317,7 +388,54 @@ impl EnvGrid {
             params: [FieldParams::STILL; Channel::ALL.len()],
             settled: [false; Channel::ALL.len()],
             scratch: Vec::new(),
+            walls: vec![false; dims.len()],
+            wall_count: 0,
         }
+    }
+
+    /// Makes grid cell `(x, y)` a wall or opens it again. The levels in the
+    /// cell are set to 0 and stay 0 while it is a wall (a wall holds no
+    /// content), so the mass that was in it leaves the books: call this
+    /// before the warm-up, or accept the loss. Settled channels (light) stay
+    /// settled, so opening a wall does not change them.
+    pub fn set_wall(&mut self, x: usize, y: usize, wall: bool) {
+        let i = self.dims.index(x, y);
+        if self.walls[i] == wall {
+            return;
+        }
+        self.walls[i] = wall;
+        if wall {
+            self.wall_count += 1;
+            for layer in &mut self.layers {
+                layer[i] = 0.0;
+            }
+        } else {
+            self.wall_count -= 1;
+        }
+    }
+
+    pub fn is_wall(&self, x: usize, y: usize) -> bool {
+        self.walls[self.dims.index(x, y)]
+    }
+
+    /// The grid cell `(x, y)` that holds a world position, or `None` outside
+    /// the grid.
+    pub fn cell_at(&self, pos: Vec2) -> Option<(usize, usize)> {
+        let local = (pos - self.origin) / CELL_SIZE;
+        if local.x < 0.0 || local.y < 0.0 {
+            return None;
+        }
+        let (x, y) = (local.x as usize, local.y as usize);
+        (x < self.dims.width && y < self.dims.height).then_some((x, y))
+    }
+
+    /// The wall mask, row by row.
+    pub fn walls(&self) -> &[bool] {
+        &self.walls
+    }
+
+    pub fn wall_count(&self) -> usize {
+        self.wall_count
     }
 
     /// A grid of `width x height` cells, centred on the world origin.
@@ -469,12 +587,14 @@ impl EnvGrid {
             if self.settled[i] {
                 continue;
             }
-            step_layer(
+            let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
+            step_layer_masked(
                 &mut self.layers[i],
                 &mut self.scratch,
                 self.dims,
                 &self.emission[i],
                 &self.params[i],
+                walls,
                 dt,
             );
         }
@@ -749,5 +869,71 @@ mod tests {
         assert_abs_diff_eq!(grid.sample(Channel::Heat, pos), 9.0, epsilon = 1e-5);
         assert_eq!(grid.sample(Channel::Minerals, pos), 0.0);
         assert_eq!(grid.world_size(), Vec2::new(128.0, 128.0));
+    }
+
+    // --- Walls ---
+
+    /// A wall column at x = 5 splits the test grid.
+    fn wall_mask() -> Vec<bool> {
+        (0..DIMS.len()).map(|i| i % DIMS.width == 5).collect()
+    }
+
+    #[test]
+    fn walls_conserve_mass_and_nothing_crosses() {
+        let mask = wall_mask();
+        // Content on the left side only (columns 0-4), none in the wall.
+        let mut layer: Vec<f32> = (0..DIMS.len())
+            .map(|i| if i % DIMS.width < 5 { 1.0 + (i % 7) as f32 } else { 0.0 })
+            .collect();
+        let before = sum(&layer);
+        let mut scratch = Vec::new();
+        let params = FieldParams {
+            diffusion: 1.0,
+            decay: 0.0,
+            drift: Vec2::new(2.0, 0.5),
+            open_drift_edges: false,
+        };
+        for _ in 0..400 {
+            step_layer_masked(&mut layer, &mut scratch, DIMS, &vec![0.0; DIMS.len()], &params, Some(&mask), 0.2);
+        }
+        assert_abs_diff_eq!(sum(&layer), before, epsilon = 1e-2);
+        for (i, level) in layer.iter().enumerate() {
+            if i % DIMS.width >= 5 {
+                assert_eq!(*level, 0.0, "cell {i} is wall or behind it");
+            }
+        }
+    }
+
+    #[test]
+    fn a_wall_with_a_gap_lets_content_through() {
+        let mut mask = wall_mask();
+        mask[DIMS.index(5, 4)] = false; // a hole
+        let mut layer = vec![0.0; DIMS.len()];
+        layer[DIMS.index(2, 4)] = 100.0;
+        let mut scratch = Vec::new();
+        let params = FieldParams { diffusion: 1.0, ..FieldParams::STILL };
+        for _ in 0..400 {
+            step_layer_masked(&mut layer, &mut scratch, DIMS, &vec![0.0; DIMS.len()], &params, Some(&mask), 0.2);
+        }
+        let right: f32 = (0..DIMS.len()).filter(|i| i % DIMS.width > 5).map(|i| layer[i]).sum();
+        assert!(right > 1.0, "some content passed the hole: {right}");
+        assert_abs_diff_eq!(sum(&layer), 100.0, epsilon = 1e-2);
+    }
+
+    #[test]
+    fn a_wall_cell_gets_no_emission_and_the_grid_tracks_walls() {
+        let mut grid = EnvGrid::centered(6, 6);
+        grid.set_params(Channel::Minerals, FieldParams { diffusion: 0.5, ..FieldParams::STILL });
+        grid.add_emitter(Channel::Minerals, grid.cell_center(2, 2), 10.0, 5.0);
+        grid.set_wall(2, 2, true);
+        assert!(grid.is_wall(2, 2) && grid.wall_count() == 1);
+        for _ in 0..50 {
+            grid.step(1.0);
+        }
+        assert_eq!(grid.level(Channel::Minerals, 2, 2), 0.0);
+        assert_eq!(grid.cell_at(grid.cell_center(2, 2)), Some((2, 2)));
+        assert_eq!(grid.cell_at(Vec2::new(1e6, 0.0)), None);
+        grid.set_wall(2, 2, false);
+        assert_eq!(grid.wall_count(), 0);
     }
 }

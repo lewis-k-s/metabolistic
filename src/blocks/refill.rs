@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, OwnedBy};
-use crate::metabolism::{CurrencyPools, Drive, FlowmapTimingConfig, FluxProfile, MetabolicNode};
+use crate::metabolism::{CellTick, CurrencyPools, Drive, FlowmapTimingConfig, FluxProfile, MetabolicNode};
 use crate::molecules::Currency;
 use crate::proteins::Proteome;
 
@@ -37,14 +37,17 @@ pub fn refill_drive(level: f32, target: f32, capacity: f32, dt: f32) -> f32 {
 /// Sets the drive of each refill block of kind `B` from its cell's pool.
 pub fn regulate_refill_system<B: RefillBlock>(
     timing: Res<FlowmapTimingConfig>,
-    cells: Query<(&CurrencyPools, &Proteome), With<Cell>>,
+    cells: Query<(&CurrencyPools, &Proteome, &CellTick), With<Cell>>,
     mut blocks: Query<(&OwnedBy, &MetabolicNode, &FluxProfile, &mut Drive), With<B>>,
 ) {
-    let dt = timing.target_delta();
     for (owner, node, profile, mut drive) in &mut blocks {
-        let Ok((pools, proteome)) = cells.get(owner.0) else {
+        let Ok((pools, proteome, tick)) = cells.get(owner.0) else {
             continue;
         };
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let capacity = proteome.enzymes(B::KIND) as f32
             * node.status.throughput()
             * profile.get_production(B::POOL);

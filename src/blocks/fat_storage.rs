@@ -17,7 +17,7 @@ use bevy::prelude::*;
 
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, OwnedBy};
-use crate::metabolism::{CurrencyPools, Drive, FlowmapTimingConfig, MetabolicNode};
+use crate::metabolism::{CellTick, CurrencyPools, Drive, FlowmapTimingConfig, MetabolicNode};
 use crate::molecules::{Currency, LipidToxicityThreshold, StoredLipids};
 use crate::proteins::Proteome;
 
@@ -64,15 +64,18 @@ pub fn fat_storage_transfer(
 pub fn regulate_fat_storage_system(
     threshold: Option<Res<LipidToxicityThreshold>>,
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut CurrencyPools, &mut StoredLipids, &Proteome), With<Cell>>,
+    mut cells: Query<(&mut CurrencyPools, &mut StoredLipids, &Proteome, &CellTick), With<Cell>>,
     blocks: Query<(&FatStorageBlock, &MetabolicNode, &Drive, &OwnedBy)>,
 ) {
     let threshold = threshold.map(|t| *t).unwrap_or_default();
-    let dt = timing.target_delta();
     for (block, node, drive, owner) in &blocks {
-        let Ok((mut pools, mut stored, proteome)) = cells.get_mut(owner.0) else {
+        let Ok((mut pools, mut stored, proteome, tick)) = cells.get_mut(owner.0) else {
             continue;
         };
+        if !tick.due {
+            continue;
+        }
+        let dt = tick.dt(timing.target_delta());
         let scale =
             proteome.enzymes(BlockKind::FatStorage) as f32 * node.status.throughput() * drive.0;
         let moved = fat_storage_transfer(

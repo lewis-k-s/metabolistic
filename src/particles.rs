@@ -1,0 +1,532 @@
+//! # Light entities: food, metals, viruses, toxin droplets
+//!
+//! These have no metabolism. The sprites are added by the `world` module (it
+//! watches for the components), so everything here runs without graphics.
+//!
+//! - **Food** (`FoodParticle`, sprite `food_carbon`): gives carbon skeletons on
+//!   contact. It comes from dead cells and from a slow spawn in the food zones.
+//!   The slow spawn stops at `MAX_FOOD`.
+//! - **Metals** (`MetalPickup`, sprite `pickup_metal_fes`): gives Metals on
+//!   contact. It spawns slowly near the vents (`MAX_METALS`). This is the
+//!   source of the cofactor.
+//! - **Virus** (`Virus`, sprite `virus_phage`): drifts. On contact with a cell:
+//!   50% a gene from `VIRAL_GENES` (queued like an engulfed gene, see
+//!   `engulf::take_gene`), 50% `VIRUS_MUTATION_LOAD` of mutation load. The virus
+//!   is gone after. The outcome comes from the seeded `GeneRng`.
+//! - **Toxin droplets** (`actions::ToxinDroplet`): fly in a line, and hit the
+//!   first cell that they touch (not their owner). A hit lowers the membrane by
+//!   `TOXIN_HIT_FRACTION` of its maximum. A droplet stops at a wall tile.
+
+use bevy::prelude::*;
+use rand::prelude::*;
+
+use crate::actions::{FireToxin, TOXIN_LIFETIME, TOXIN_SPEED, ToxinDroplet};
+use crate::blocks::genome::{BlockKind, GeneState, Genome};
+use crate::cell::{Cell, CellSize};
+use crate::engulf::take_gene;
+use crate::envgrid::EnvGrid;
+use crate::genome_damage::{GeneRng, MutationLoad};
+use crate::membrane::Membrane;
+use crate::metabolism::CurrencyPools;
+use crate::molecules::Currency;
+use crate::movement::world_radius;
+use crate::npc::NpcRng;
+use crate::proteins::{Proteome, SynthesisQueue};
+use crate::walls::WallMap;
+
+// --- Tuning. All of these need **playtest**. ---
+
+/// Carbon skeletons from one food particle.
+pub const FOOD_CARBON: f32 = 6.0;
+/// Metals from one metal pickup.
+pub const METAL_AMOUNT: f32 = 1.0;
+/// Contact radius of a food particle or a metal pickup, in pixels.
+pub const PICKUP_RADIUS: f32 = 7.0;
+/// Contact radius of a virus, in pixels (its sprite is 44 x 28).
+pub const VIRUS_RADIUS: f32 = 13.0;
+/// Contact radius of a toxin droplet, in pixels.
+pub const DROPLET_RADIUS: f32 = 5.0;
+/// Most food particles that the slow spawn keeps in the world.
+pub const MAX_FOOD: usize = 40;
+/// Most metal pickups that the slow spawn keeps in the world.
+pub const MAX_METALS: usize = 14;
+/// Most viruses.
+pub const MAX_VIRUSES: usize = 8;
+/// Seconds between two spawns of food.
+pub const FOOD_SPAWN_SECONDS: f32 = 4.0;
+/// Seconds between two spawns of a metal pickup.
+pub const METAL_SPAWN_SECONDS: f32 = 6.0;
+/// Mutation load that a virus adds in the bad outcome.
+pub const VIRUS_MUTATION_LOAD: f32 = 1.0;
+/// Chance of the gene outcome of a virus.
+pub const VIRUS_GENE_CHANCE: f32 = 0.5;
+/// Speed of the virus drift, pixels per second.
+pub const VIRUS_SPEED: f32 = 18.0;
+/// Membrane damage of one toxin hit, as a share of the maximum integrity.
+pub const TOXIN_HIT_FRACTION: f32 = 0.25;
+/// Genes that a virus can carry.
+pub const VIRAL_GENES: [BlockKind; 3] = [
+    BlockKind::Fermentation,
+    BlockKind::FatStorage,
+    BlockKind::VesicleExport,
+];
+
+// --- Components ---
+
+/// A particle that gives carbon skeletons on contact.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct FoodParticle {
+    pub carbon: f32,
+}
+
+/// A particle that gives Metals on contact.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct MetalPickup {
+    pub amount: f32,
+}
+
+/// A virus. It drifts with `velocity` (pixels per second).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct Virus {
+    pub velocity: Vec2,
+}
+
+/// Where the slow spawns put new particles: circles `(centre, radius)`.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct ParticleZones {
+    pub food: Vec<(Vec2, f32)>,
+    pub metals: Vec<(Vec2, f32)>,
+}
+
+/// Timers of the slow spawns.
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct ParticleTimers {
+    pub food: f32,
+    pub metals: f32,
+}
+
+// --- Spawning ---
+
+pub fn spawn_food(commands: &mut Commands, position: Vec2, carbon: f32) -> Entity {
+    commands
+        .spawn((
+            Name::new("Food"),
+            FoodParticle { carbon },
+            Transform::from_translation(position.round().extend(0.0)),
+        ))
+        .id()
+}
+
+pub fn spawn_metal(commands: &mut Commands, position: Vec2) -> Entity {
+    commands
+        .spawn((
+            Name::new("Metal"),
+            MetalPickup {
+                amount: METAL_AMOUNT,
+            },
+            Transform::from_translation(position.round().extend(0.0)),
+        ))
+        .id()
+}
+
+pub fn spawn_virus(commands: &mut Commands, position: Vec2, velocity: Vec2) -> Entity {
+    commands
+        .spawn((
+            Name::new("Virus"),
+            Virus { velocity },
+            Transform::from_translation(position.round().extend(0.0)),
+        ))
+        .id()
+}
+
+/// A random point in a circle, uniform over the area.
+pub fn point_in_circle(centre: Vec2, radius: f32, rng: &mut impl Rng) -> Vec2 {
+    let angle = rng.random_range(0.0..std::f32::consts::TAU);
+    let distance = radius * rng.random::<f32>().sqrt();
+    centre + Vec2::new(angle.cos(), angle.sin()) * distance
+}
+
+/// Time left on a spawn timer after `dt` seconds, and the number of spawns now
+/// due. Does not spawn above `cap`: `existing` counts what is there.
+pub fn timer_step(timer: f32, dt: f32, period: f32, existing: usize, cap: usize) -> (f32, usize) {
+    let mut timer = timer + dt.max(0.0);
+    if existing >= cap {
+        // Wait with a full timer: a spawn comes as soon as there is room.
+        return (timer.min(period), 0);
+    }
+    let mut spawns = 0;
+    while timer >= period && existing + spawns < cap {
+        timer -= period;
+        spawns += 1;
+    }
+    (timer.min(period), spawns)
+}
+
+/// Spawns food and metal pickups slowly, up to the caps.
+pub fn particle_spawn_system(
+    time: Res<Time>,
+    zones: Res<ParticleZones>,
+    mut timers: ResMut<ParticleTimers>,
+    mut rng: ResMut<NpcRng>,
+    food: Query<(), With<FoodParticle>>,
+    metals: Query<(), With<MetalPickup>>,
+    mut commands: Commands,
+) {
+    let dt = time.delta_secs();
+    if !zones.food.is_empty() {
+        let (left, spawns) = timer_step(timers.food, dt, FOOD_SPAWN_SECONDS, food.iter().count(), MAX_FOOD);
+        timers.food = left;
+        for _ in 0..spawns {
+            let (centre, radius) = zones.food[rng.0.random_range(0..zones.food.len())];
+            spawn_food(&mut commands, point_in_circle(centre, radius, &mut rng.0), FOOD_CARBON);
+        }
+    }
+    if !zones.metals.is_empty() {
+        let (left, spawns) =
+            timer_step(timers.metals, dt, METAL_SPAWN_SECONDS, metals.iter().count(), MAX_METALS);
+        timers.metals = left;
+        for _ in 0..spawns {
+            let (centre, radius) = zones.metals[rng.0.random_range(0..zones.metals.len())];
+            spawn_metal(&mut commands, point_in_circle(centre, radius, &mut rng.0));
+        }
+    }
+}
+
+// --- Contact ---
+
+fn touches(cell: Vec2, cell_radius: f32, other: Vec2, other_radius: f32) -> bool {
+    cell.distance_squared(other) <= (cell_radius + other_radius).powi(2)
+}
+
+/// A cell that touches food eats it. Each particle goes to one cell.
+pub fn food_pickup_system(
+    foods: Query<(Entity, &FoodParticle, &Transform)>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+    mut commands: Commands,
+) {
+    if foods.is_empty() {
+        return;
+    }
+    for (food_entity, food, food_transform) in &foods {
+        let position = food_transform.translation.truncate();
+        let eater = cells.iter_mut().find(|(transform, size, _)| {
+            touches(transform.translation.truncate(), world_radius(size), position, PICKUP_RADIUS)
+        });
+        if let Some((_, _, mut pools)) = eater {
+            pools.modify(Currency::CarbonSkeletons, food.carbon);
+            commands.entity(food_entity).despawn();
+        }
+    }
+}
+
+/// A cell that touches a metal pickup takes its Metals.
+pub fn metal_pickup_system(
+    pickups: Query<(Entity, &MetalPickup, &Transform)>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+    mut commands: Commands,
+) {
+    for (entity, pickup, pickup_transform) in &pickups {
+        let position = pickup_transform.translation.truncate();
+        let taker = cells.iter_mut().find(|(transform, size, _)| {
+            touches(transform.translation.truncate(), world_radius(size), position, PICKUP_RADIUS)
+        });
+        if let Some((_, _, mut pools)) = taker {
+            pools.modify(Currency::Metals, pickup.amount);
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+// --- Viruses ---
+
+/// What a virus does to a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirusOutcome {
+    /// A gene from `VIRAL_GENES` that the cell lacks (or has silent or mutated).
+    Gene(BlockKind),
+    /// `VIRUS_MUTATION_LOAD` of mutation load.
+    Mutation,
+}
+
+/// The outcome of a virus for a cell with this genome. With `VIRUS_GENE_CHANCE`
+/// it is a gene; if the cell has all the viral genes, it is a mutation.
+pub fn virus_outcome(genome: &Genome, rng: &mut impl Rng) -> VirusOutcome {
+    if rng.random::<f32>() < VIRUS_GENE_CHANCE {
+        let missing: Vec<BlockKind> = VIRAL_GENES
+            .into_iter()
+            .filter(|kind| {
+                matches!(
+                    genome.get_gene_state(kind),
+                    None | Some(GeneState::Silent | GeneState::Mutated)
+                )
+            })
+            .collect();
+        if !missing.is_empty() {
+            return VirusOutcome::Gene(missing[rng.random_range(0..missing.len())]);
+        }
+    }
+    VirusOutcome::Mutation
+}
+
+/// One drift step of a virus: it moves along its velocity, which turns a little.
+pub fn virus_velocity_step(velocity: Vec2, turn: f32) -> Vec2 {
+    let (sin, cos) = turn.sin_cos();
+    Vec2::new(velocity.x * cos - velocity.y * sin, velocity.x * sin + velocity.y * cos)
+}
+
+/// Viruses drift and bounce at the edge of the grid.
+pub fn virus_drift_system(
+    time: Res<Time>,
+    grid: Option<Res<EnvGrid>>,
+    mut rng: ResMut<NpcRng>,
+    mut viruses: Query<(&mut Virus, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (mut virus, mut transform) in &mut viruses {
+        let turn = rng.0.random_range(-1.0..1.0) * 0.8 * dt;
+        virus.velocity = virus_velocity_step(virus.velocity, turn);
+        let mut position = transform.translation.truncate() + virus.velocity * dt;
+        if let Some(grid) = grid.as_deref() {
+            let min = grid.origin() + Vec2::splat(VIRUS_RADIUS);
+            let max = grid.origin() + grid.world_size() - Vec2::splat(VIRUS_RADIUS);
+            if position.x < min.x || position.x > max.x {
+                virus.velocity.x = -virus.velocity.x;
+            }
+            if position.y < min.y || position.y > max.y {
+                virus.velocity.y = -virus.velocity.y;
+            }
+            position = position.clamp(min, max);
+        }
+        transform.translation = position.extend(transform.translation.z);
+    }
+}
+
+/// A virus that touches a cell infects it and is gone.
+pub fn virus_contact_system(
+    mut rng: ResMut<GeneRng>,
+    viruses: Query<(Entity, &Transform), With<Virus>>,
+    mut cells: Query<
+        (
+            &Transform,
+            &CellSize,
+            &mut Genome,
+            &mut SynthesisQueue,
+            &Proteome,
+            &mut MutationLoad,
+        ),
+        With<Cell>,
+    >,
+    mut commands: Commands,
+) {
+    for (virus_entity, virus_transform) in &viruses {
+        let position = virus_transform.translation.truncate();
+        let host = cells.iter_mut().find(|(transform, size, ..)| {
+            touches(transform.translation.truncate(), world_radius(size), position, VIRUS_RADIUS)
+        });
+        let Some((_, _, mut genome, mut queue, proteome, mut load)) = host else {
+            continue;
+        };
+        match virus_outcome(&genome, &mut rng.0) {
+            VirusOutcome::Gene(kind) => take_gene(&mut genome, proteome, &mut queue, kind),
+            VirusOutcome::Mutation => load.0 += VIRUS_MUTATION_LOAD,
+        }
+        commands.entity(virus_entity).despawn();
+    }
+}
+
+// --- Toxin droplets ---
+
+/// Spawns a droplet for each `FireToxin` message.
+pub fn spawn_toxin_droplets(
+    mut shots: MessageReader<FireToxin>,
+    cells: Query<(&Transform, &CellSize), With<Cell>>,
+    mut commands: Commands,
+) {
+    for shot in shots.read() {
+        let Ok((transform, size)) = cells.get(shot.cell) else {
+            continue;
+        };
+        let direction = shot.direction.normalize_or(Vec2::X);
+        let position = transform.translation.truncate() + direction * (world_radius(size) + 8.0);
+        commands.spawn((
+            Name::new("Toxin Droplet"),
+            ToxinDroplet {
+                owner: shot.cell,
+                position,
+                direction,
+                age: 0.0,
+            },
+            Transform::from_translation(position.round().extend(1.0)),
+        ));
+    }
+}
+
+/// Position of a droplet `age` seconds after the shot.
+pub fn droplet_position(start: Vec2, direction: Vec2, age: f32) -> Vec2 {
+    start + direction * TOXIN_SPEED * age
+}
+
+/// Moves the droplets and removes the old ones.
+pub fn move_toxin_droplets(
+    time: Res<Time>,
+    mut droplets: Query<(Entity, &mut ToxinDroplet, &mut Transform)>,
+    mut commands: Commands,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut droplet, mut transform) in &mut droplets {
+        droplet.age += dt;
+        if droplet.age >= TOXIN_LIFETIME {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let step = droplet.direction * TOXIN_SPEED * dt;
+        droplet.position += step;
+        transform.translation = droplet.position.round().extend(1.0);
+    }
+}
+
+/// Membrane damage of one toxin hit.
+pub fn toxin_damage(membrane: &Membrane) -> f32 {
+    membrane.max * TOXIN_HIT_FRACTION
+}
+
+/// A droplet damages the first cell it touches. A wall tile stops it.
+pub fn toxin_hit_system(
+    droplets: Query<(Entity, &ToxinDroplet)>,
+    walls: Res<WallMap>,
+    grid: Option<Res<EnvGrid>>,
+    mut cells: Query<(Entity, &Transform, &CellSize, &mut Membrane), With<Cell>>,
+    mut commands: Commands,
+) {
+    for (droplet_entity, droplet) in &droplets {
+        if let Some(grid) = grid.as_deref()
+            && let Some(tile) = grid.cell_at(droplet.position)
+            && walls.get(tile).is_some()
+        {
+            commands.entity(droplet_entity).despawn();
+            continue;
+        }
+        let victim = cells.iter_mut().find(|(entity, transform, size, _)| {
+            *entity != droplet.owner
+                && touches(
+                    transform.translation.truncate(),
+                    world_radius(size),
+                    droplet.position,
+                    DROPLET_RADIUS,
+                )
+        });
+        if let Some((_, _, _, mut membrane)) = victim {
+            let damage = toxin_damage(&membrane);
+            membrane.damage(damage);
+            commands.entity(droplet_entity).despawn();
+        }
+    }
+}
+
+pub struct ParticlePlugin;
+
+impl Plugin for ParticlePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ParticleZones>()
+            .init_resource::<ParticleTimers>()
+            .add_systems(
+                Update,
+                (
+                    particle_spawn_system,
+                    food_pickup_system,
+                    metal_pickup_system,
+                    virus_drift_system,
+                    virus_contact_system,
+                    spawn_toxin_droplets,
+                    move_toxin_droplets,
+                    toxin_hit_system,
+                )
+                    .chain(),
+            );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn genome_of(kinds: &[BlockKind]) -> Genome {
+        let mut genome = Genome::default();
+        for &kind in kinds {
+            genome.add_gene(kind);
+            genome.express_gene(kind);
+        }
+        genome
+    }
+
+    #[test]
+    fn virus_outcomes_are_seeded_and_about_half_and_half() {
+        let genome = genome_of(&[BlockKind::Chemosynthesis]);
+        let outcomes = |seed: u64| -> Vec<VirusOutcome> {
+            let mut rng = StdRng::seed_from_u64(seed);
+            (0..400).map(|_| virus_outcome(&genome, &mut rng)).collect()
+        };
+        assert_eq!(outcomes(3), outcomes(3), "the same seed, the same outcomes");
+        assert_ne!(outcomes(3), outcomes(4));
+        let list = outcomes(3);
+        let genes = list.iter().filter(|o| matches!(o, VirusOutcome::Gene(_))).count();
+        assert!((140..260).contains(&genes), "about half: {genes} of 400");
+        for outcome in list {
+            if let VirusOutcome::Gene(kind) = outcome {
+                assert!(VIRAL_GENES.contains(&kind));
+            }
+        }
+    }
+
+    #[test]
+    fn a_virus_gives_only_genes_the_cell_lacks() {
+        let genome = genome_of(&[BlockKind::Fermentation, BlockKind::FatStorage]);
+        let mut rng = StdRng::seed_from_u64(9);
+        for _ in 0..200 {
+            if let VirusOutcome::Gene(kind) = virus_outcome(&genome, &mut rng) {
+                assert_eq!(kind, BlockKind::VesicleExport);
+            }
+        }
+        // A cell with every viral gene can only get the bad outcome.
+        let full = genome_of(&VIRAL_GENES);
+        for _ in 0..200 {
+            assert_eq!(virus_outcome(&full, &mut rng), VirusOutcome::Mutation);
+        }
+    }
+
+    #[test]
+    fn spawn_timers_respect_the_cap() {
+        // 4 s period: 9 s gives 2 spawns and 1 s is left.
+        assert_eq!(timer_step(0.0, 9.0, 4.0, 0, 10), (1.0, 2));
+        // Near the cap, only the room is used.
+        assert_eq!(timer_step(0.0, 9.0, 4.0, 9, 10).1, 1);
+        // At the cap: no spawn, and the timer does not grow without end.
+        let (left, spawns) = timer_step(0.0, 100.0, 4.0, 10, 10);
+        assert_eq!(spawns, 0);
+        assert!(left <= 4.0);
+    }
+
+    #[test]
+    fn points_in_a_circle_stay_inside() {
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..500 {
+            let p = point_in_circle(Vec2::new(10.0, -5.0), 30.0, &mut rng);
+            assert!(p.distance(Vec2::new(10.0, -5.0)) <= 30.0 + 1e-3);
+        }
+    }
+
+    #[test]
+    fn one_toxin_hit_is_a_quarter_of_the_membrane() {
+        let membrane = Membrane::default();
+        assert_eq!(toxin_damage(&membrane), 25.0);
+        assert_eq!(droplet_position(Vec2::ZERO, Vec2::X, 0.5), Vec2::new(TOXIN_SPEED * 0.5, 0.0));
+    }
+
+    #[test]
+    fn the_virus_keeps_its_speed_when_it_turns() {
+        let v = Vec2::new(VIRUS_SPEED, 0.0);
+        for turn in [-0.5, 0.1, 1.2] {
+            assert!((virus_velocity_step(v, turn).length() - VIRUS_SPEED).abs() < 1e-3);
+        }
+    }
+}

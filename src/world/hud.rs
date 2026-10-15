@@ -11,6 +11,7 @@ use crate::actions::{ActionBar, ActionState, PathwayLevels, SLOT_COUNT, slot_sta
 use crate::cell::Cell;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::exchange::{HEAT_DAMAGE_THRESHOLD, MINERAL_STOCK_CAP};
+use crate::gate::{GATE_SECONDS, GateProgress};
 use crate::genome_damage::{GenomeIntegrity, UvFraction, is_fragmented, shield, uv_level};
 use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
@@ -35,6 +36,8 @@ enum HudLine {
     Membrane,
     Genome,
     Minerals,
+    Metals,
+    Gate,
     Lipids,
     AminoAcids,
     Heat,
@@ -46,11 +49,13 @@ enum HudLine {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct HudSlot(usize);
 
-const LINES: [HudLine; 9] = [
+const LINES: [HudLine; 11] = [
     HudLine::Atp,
     HudLine::Membrane,
     HudLine::Genome,
     HudLine::Minerals,
+    HudLine::Metals,
+    HudLine::Gate,
     HudLine::Lipids,
     HudLine::AminoAcids,
     HudLine::Heat,
@@ -136,6 +141,7 @@ fn update_hud(
         With<Cell>,
     >,
     fraction: Res<UvFraction>,
+    gate: Query<&GateProgress>,
     mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
     mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
 ) {
@@ -170,6 +176,16 @@ fn update_hud(
                 let warning = if uv > 1.0 && shield < 0.5 && !shelter.0 { "  UV!" } else { "" };
                 format!("UV {uv:6.1}  shield {:3.0}%{warning}", shield * 100.0)
             }
+            HudLine::Metals => format!("Metals {:6.1}", pools.get(Currency::Metals)),
+            HudLine::Gate => match gate.iter().find(|p| p.held > 0.0) {
+                Some(progress) => format!(
+                    "GATE {} {:3.1}/{} s",
+                    text_bar(progress.held, GATE_SECONDS, BAR_WIDTH),
+                    progress.held,
+                    GATE_SECONDS
+                ),
+                None => String::new(),
+            },
             HudLine::Minerals => bar_line("Minerals", pools.get(Currency::Minerals), MINERAL_STOCK_CAP),
             HudLine::Lipids => bar_line("Lipids", pools.get(Currency::Lipids), POOL_BAR_MAX),
             HudLine::AminoAcids => {

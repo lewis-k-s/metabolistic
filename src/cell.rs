@@ -33,8 +33,9 @@ use crate::exchange::ExchangeStats;
 use crate::actions::{ActionBar, ActionState, PathwayLevels};
 use crate::shelter::InShelter;
 use crate::genome_damage::{GenomeIntegrity, InducedMutations, MutationLoad, RepairProgress};
+use crate::engulf::EngulfIntent;
 use crate::membrane::Membrane;
-use crate::metabolism::{CurrencyPools, MetabolicGraph};
+use crate::metabolism::{CellTick, CurrencyPools, MetabolicGraph};
 use crate::molecules::{Currency, StoredLipids};
 use crate::movement::{MoveInput, ThrustEffort};
 use crate::proteins::{Proteome, SynthesisQueue};
@@ -65,7 +66,9 @@ use crate::proteins::{Proteome, SynthesisQueue};
     InShelter,
     PathwayLevels,
     ActionBar,
-    ActionState
+    ActionState,
+    CellTick,
+    EngulfIntent
 )]
 pub struct Cell;
 
@@ -174,6 +177,8 @@ pub enum DeathCause {
     Starved,
     /// Membrane integrity reached 0 (for example from heat).
     MembraneBroken,
+    /// A bigger cell engulfed the player (see `engulf`).
+    Engulfed,
 }
 
 /// The cause of death, or `None` while the cell is alive. A cell is alive while

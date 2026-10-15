@@ -3,9 +3,6 @@
 //! The parts of the action bar that need graphics:
 //!
 //! - **Hotkeys** 1-4 use the slots on the Run screen.
-//! - **Toxin droplets**: a `FireToxin` message spawns a `toxin_droplet` sprite
-//!   that flies in the aim direction, fades, and despawns. There are no targets
-//!   until M5.
 //! - **Membrane protein overlays** (`docs/art-direction.md`): one 56x56 sprite
 //!   for each protein, up to `MAX_PER_PROTEIN` of a kind and `MAX_OVERLAYS` in
 //!   all, mounted on the rim at 0.95 x the radius and drawn above the cell. The
@@ -45,8 +42,6 @@ pub fn plugin(app: &mut App) {
         Update,
         (
             slot_hotkeys.run_if(in_state(GameState::Run)),
-            spawn_toxin_droplets,
-            move_toxin_droplets,
             (sync_overlays, drive_overlays)
                 .chain()
                 .before(SpriteSystems::Animate),
@@ -81,70 +76,6 @@ fn slot_hotkeys(
     }
 }
 
-// --- Toxin droplets ---
-
-/// A toxin droplet in flight. `position` is exact; the transform is the
-/// nearest whole pixel.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct ToxinDroplet {
-    pub position: Vec2,
-    pub direction: Vec2,
-    pub age: f32,
-}
-
-fn spawn_toxin_droplets(
-    mut shots: MessageReader<FireToxin>,
-    sheets: Res<Sheets>,
-    cells: Query<(&Transform, &CellSize), With<Cell>>,
-    mut commands: Commands,
-) {
-    for shot in shots.read() {
-        let Ok((transform, size)) = cells.get(shot.cell) else {
-            continue;
-        };
-        let Some(sprite) = sheets.bundle("toxin_droplet", "loop") else {
-            continue;
-        };
-        let direction = shot.direction.normalize_or(Vec2::X);
-        let position = transform.translation.truncate() + direction * (world_radius(size) + 8.0);
-        commands.spawn((
-            Name::new("Toxin Droplet"),
-            ToxinDroplet {
-                position,
-                direction,
-                age: 0.0,
-            },
-            sprite,
-            Transform::from_translation(position.round().extend(1.0)),
-            DespawnOnExit(InRun),
-        ));
-    }
-}
-
-/// Position of a droplet `age` seconds after the shot.
-pub fn droplet_position(start: Vec2, direction: Vec2, age: f32) -> Vec2 {
-    start + direction * TOXIN_SPEED * age
-}
-
-fn move_toxin_droplets(
-    time: Res<Time>,
-    mut droplets: Query<(Entity, &mut ToxinDroplet, &mut Transform, &mut Sprite)>,
-    mut commands: Commands,
-) {
-    let dt = time.delta_secs();
-    for (entity, mut droplet, mut transform, mut sprite) in &mut droplets {
-        droplet.age += dt;
-        if droplet.age >= TOXIN_LIFETIME {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let step = droplet.direction * TOXIN_SPEED * dt;
-        droplet.position += step;
-        transform.translation = droplet.position.round().extend(1.0);
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, droplet_alpha(droplet.age));
-    }
-}
-
 // --- Overlays ---
 
 /// The sprite name of the overlay for a protein, if the art has one.
@@ -155,6 +86,7 @@ pub fn overlay_sprite(protein: MembraneProtein) -> Option<&'static str> {
         MembraneProtein::Toxin => Some("overlay_toxin"),
         // The only transporter that exists takes up minerals.
         MembraneProtein::Transporter => Some("overlay_transporter_mineral"),
+        MembraneProtein::Lytic => Some("overlay_lytic"),
         MembraneProtein::Receptor => None,
     }
 }
@@ -167,6 +99,7 @@ pub fn overlay_plan(proteome: &Proteome) -> Vec<MembraneProtein> {
         MembraneProtein::Flagellum,
         MembraneProtein::Adhesin,
         MembraneProtein::Toxin,
+        MembraneProtein::Lytic,
         MembraneProtein::Transporter,
     ] {
         let count = proteome
@@ -418,11 +351,5 @@ mod tests {
         assert_eq!(alpha(0, 0), 0);
         assert_eq!(alpha(48, 48), SHELTER_FILL[3]);
         assert_eq!(alpha(48, 0), SHELTER_RIM[3]);
-    }
-
-    #[test]
-    fn a_droplet_flies_along_its_direction() {
-        let p = droplet_position(Vec2::new(10.0, 0.0), Vec2::Y, 0.5);
-        assert_eq!(p, Vec2::new(10.0, TOXIN_SPEED * 0.5));
     }
 }
