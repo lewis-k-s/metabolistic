@@ -1,8 +1,10 @@
 # Gameplay core: design and roadmap
 
-Status: agreed in a design review on 2026-10-15, branch `core-gameplay-design`.
+Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
+merged to `master` (2026-10-15). Next: M3.
 This document records the decisions and the order of work. Items marked
-**playtest** need numbers from play before we fix them.
+**playtest** need numbers from play before we fix them. The art rules are in
+`docs/art-direction.md`.
 
 ## 1. The game in one paragraph
 
@@ -115,6 +117,7 @@ reaches zero.
 | Carbon hub | Pyruvate, CarbonSkeletons (absorbs AcetylCoA) |
 | Building | AminoAcids (proteins), Nucleotides (genome repair), Lipids (membrane repair and growth; absorbs FreeFattyAcids and StorageBeads as a stored form) |
 | Cofactor | Metals |
+| Taken in | Minerals (filled by transporters from the grid; used by chemosynthesis) |
 | Waste | Waste |
 
 Membrane integrity costs Lipids to repair. This connects defence to
@@ -147,8 +150,10 @@ metabolism.
 - avian2d. Circle colliders with linear drag.
 - Thrust comes from flagella or cilia. Size sets mass and drag, so a bigger
   cell is slower.
-- The blob look is visual only: the sprite squashes and wobbles from velocity
-  and contacts. There is no soft-body physics.
+- The blob look is visual only. The body deform is baked into 8-direction
+  animation frames (see `docs/art-direction.md`). Do not scale or rotate a
+  cell sprite at run time: rotation turns the light. There is no soft-body
+  physics.
 - Land uses the same controls and model, with a different drag value.
 
 ### Meta progression
@@ -173,17 +178,21 @@ you must stay near water, the world you left behind.
 
 ## 3. Current code compared with the design
 
-| Area | Now | Change |
+Updated after M2.
+
+| Area | Now | Still to do |
 |---|---|---|
-| Solver | Greedy, in `BlockKind` order; rate is fixed per gene state | Enzymes, saturation, proportional sharing |
-| Pools | 8 abstract currencies | The 9 pools above |
-| Blocks | Fermentation, FatStorage, VesicleExport | Chemosynthesis, pigments, photosynthesis, catalase, respiration, protein synthesis, repair |
-| Genome | `Silent` / `Expressed` / `Mutated`; random mutation in `MetabolicSet::Genome` | Mutation driven by UV and ROS, repair, translation efficiency, gene transfer |
-| Environment | Global `EnvironmentalCurrencyPools` | Spatial grid with channels |
-| Run screen | `RunPlayer` disc with WASD; not linked to a `Cell` | The player is a `Cell` with a body; movement costs ATP |
-| Physics | None | avian2d |
-| Manage screen | Placeholder | Editor, synthesis queue, action slots |
-| Run structure | Screens only | Levels, death, victory, codex |
+| Solver | Enzymes x saturation, proportional sharing, fixed 0.05 s sub-steps (`metabolism/solver.rs`) | - |
+| Pools | The pools above, plus a `StoredLipids` component | Pigments (M3) |
+| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism | Nucleotides, pigments, repair (M3); photosynthesis, catalase, respiration (M7, M8) |
+| Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size | Editor UI (M4) |
+| Genome | `Silent` / `Expressed` / `Mutated`; random mutation in `MetabolicSet::Genome` | Mutation from UV and ROS, repair, translation efficiency (M3); gene transfer (M5) |
+| Environment | `EnvGrid` with Heat and Minerals: diffusion, drift, sources, decay | Light/UV (M3), OrganicCarbon, O2, Water |
+| Run screen | The player is a `Cell` with a body; vent field level; HUD; run-over screen with the cause of death | Shelters, action bar (M4) |
+| Physics | avian2d, 64 Hz, no interpolation | - |
+| Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | Light/UV visuals; overlays for membrane proteins |
+| Manage screen | Placeholder | Editor, synthesis queue, action slots (M4) |
+| Run structure | `InRun` state covers Run and Manage; death and restart | Levels, victory, codex (M6) |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
 `flowmap_design.md`. Mitochondria now come from endosymbiosis (the shallow
@@ -208,7 +217,11 @@ flowchart LR
   M7 --> M8[M8 Land]
 ```
 
-### M1. Simulation core (headless)
+### M1. Simulation core (headless) - done, 2f79b3f
+
+Notes: chemosynthesis, amino acid and lipid synthesis were all needed for a
+vent cell to live. Cell maintenance costs ATP in proportion to size. Pools
+have no upper limit, so a fed cell builds a big surplus (**playtest**).
 
 1. Change the pool set to the 9 pools. Move Fermentation, FatStorage and
    VesicleExport to it.
@@ -226,7 +239,19 @@ Done when: a headless test cell lives on a constant mineral supply, builds
 enzymes from a queue, and two pathways share an input in proportion to their
 enzymes.
 
-### M2. A cell in a field (first playable)
+### M2. A cell in a field (first playable) - done, 9fcb708 and c6f9789
+
+Notes:
+- Minerals are an internal pool. Transporters fill it from the grid (slow
+  with none), and the solver limits chemosynthesis by it. Heat is a
+  condition, not used up. Heat above a threshold damages the membrane.
+- The run-over screen shows the cause: starved, or membrane failed and the
+  main damage source (`DamageTaken`).
+- World units are sprite pixels; the camera draws them at 3x. Player radius
+  is 20. Grid cell is 32 world units.
+- **Playtest:** the plume has far more minerals than a cell can take, so
+  depletion does not matter yet. A starving cell keeps a tiny ATP trickle, so
+  ATP at or below 0.01 counts as 0.
 
 1. `EnvGrid` resource: channels, diffusion, sources, decay as pure functions.
    Replace `EnvironmentalCurrencyPools`. Transporters exchange with the grid
@@ -244,12 +269,17 @@ Done when: you can play a vent field, find minerals, and starve or burn.
 
 ### M3. Genome damage
 
-1. A Light/UV channel. UV damages the membrane and causes mutations.
-2. Replace random mutation with mutation from fields.
+1. A Light/UV channel: light shafts from above in the vent level. UV damages
+   the membrane and lowers a `GenomeIntegrity` value.
+2. Replace random mutation with a mutation load from UV. Each time the load
+   passes 1, one expressed gene becomes `Mutated` (seeded RNG).
 3. Repair (ATP + Nucleotides). Translation efficiency lowers synthesis rate.
-   Extreme damage fragments the genome.
-4. Pigment block screens UV.
-5. Induced mutation as an action (risky).
+   Extreme damage fragments the genome. A nucleotide synthesis block, because
+   nothing makes Nucleotides yet.
+4. Pigment block screens UV: a `Pigments` pool that decays slowly; shield =
+   P / (K + P).
+5. A `gene_orb` pickup gives the pigment gene. It stands in for gene transfer
+   until M5.
 
 Done when: light zones kill a cell without pigment, and a cell with pigment
 survives.
@@ -261,6 +291,9 @@ survives.
 3. Action bar with 4 slots: pathway Off / Low / High, and membrane protein
    actions, with ramp time and ATP cost.
 4. Hotkeys for the slots.
+5. Induced mutation as an action (risky). Moved from M3, because it needs a
+   slot.
+6. Membrane protein overlays on the player (art exists).
 
 Done when: you can plan a build in a shelter, see it get built in game time,
 and switch pathways during play. **Playtest** the time rules here.
@@ -307,4 +340,8 @@ slice**. Tune it before we build more stages.
 - The second and third cofactors.
 - What the land gate cell gives (multicellularity?), and if there is a
   fourth stage.
-- Grid resolution compared with cell size.
+- Grid resolution compared with cell size (now: grid cell 32, player radius
+  20).
+- Mineral scarcity: should plumes run dry under a cell?
+- The art includes immune proteins (MHC I and II, TCR, antibody, perforin).
+  They are not in this roadmap yet: which stage or mechanic uses them?
