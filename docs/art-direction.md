@@ -72,6 +72,7 @@ uv run --with numpy art/gen_sprites.py
 | `predator_cell` | 48x48 | M5, predator |
 | `symbiont_cell` | 32x32 | M5, symbiont |
 | `gate_cell_phototroph` | 72x72 | M5, gate cell of the vent stage |
+| `gate_cell_proteobacterium` | 72x72 | M7, gate cell of the shallow-water stage (rose, cristae folds) |
 | `virus_phage` | 44x28 | M5, virus (lies flat, points right) |
 | `food_carbon` | 12x12 | M2, OrganicCarbon particle |
 | `pickup_mineral` | 12x18 | M2, Minerals particle |
@@ -338,6 +339,7 @@ pixel (the cell frames are centred on 32.5).
   alarm effects, the complement ring on a target cell, the killed-cell look
   after perforin.
 - Shelter sprites (vent crevice, microbial mat, soil pore).
+- M7 stand-ins: wall pieces for a microbial mat and a tough wall (now `wall_membrane` with a colour tint), an O2 colour on the grid (sea green, dithered), a "stressed" look for a cell with ROS (now a flat colour tint), a victory clip for the proteobacterium gate.
 - Grid channel visuals: heat glow and mineral plume are in. Light and UV are in
   as stand-ins (pale yellow `#fff4b4` with a violet edge `#7c52cc`, dithered).
   The art owner must pick the real light ramp and rays. Also the gene orb in

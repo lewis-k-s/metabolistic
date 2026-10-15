@@ -19,11 +19,13 @@ pub mod metabolism;
 pub mod molecules;
 pub mod movement;
 pub mod npc;
+pub mod oxygen;
 pub mod particles;
 pub mod player;
 pub mod prepare;
 pub mod proteins;
 pub mod run;
+pub mod shallow;
 pub mod shelter;
 pub mod shared;
 pub mod stage;
@@ -117,6 +119,7 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(oxygen::OxygenPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,
@@ -169,6 +172,7 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(oxygen::OxygenPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,

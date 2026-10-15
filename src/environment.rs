@@ -17,7 +17,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// An outside channel. Later stages add OrganicCarbon, O2 and Water.
+/// An outside channel. Later stages add OrganicCarbon and Water.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Channel {
     /// Heat from a vent.
@@ -27,11 +27,14 @@ pub enum Channel {
     /// Light from above, in shafts. UV is the light level times a per-level
     /// fraction (see `genome_damage`).
     Light,
+    /// Dissolved oxygen. Photosynthesis puts it into the water, and cells swap
+    /// it with the grid (see `oxygen`).
+    O2,
 }
 
 impl Channel {
     /// All channels, in a fixed order. `index` is the position in this list.
-    pub const ALL: [Channel; 3] = [Channel::Heat, Channel::Minerals, Channel::Light];
+    pub const ALL: [Channel; 4] = [Channel::Heat, Channel::Minerals, Channel::Light, Channel::O2];
 
     /// Position of the channel in `ALL`. Layers of the grid use it.
     pub const fn index(self) -> usize {
@@ -39,6 +42,7 @@ impl Channel {
             Channel::Heat => 0,
             Channel::Minerals => 1,
             Channel::Light => 2,
+            Channel::O2 => 3,
         }
     }
 }

@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use crate::genome_damage::UvFraction;
 use crate::level::{CurrentLevel, LevelDef};
 use crate::run::RunState;
-use crate::npc::{NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
+use crate::npc::{KeyGeneRule, NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
 use crate::particles::{
     ParticleTimers, ParticleZones, point_in_circle, spawn_food, spawn_metal, spawn_virus,
     VIRUS_SPEED,
@@ -107,7 +107,7 @@ fn spawn_world(
     let world_size = grid.world_size();
     let origin = grid.origin();
 
-    grid_view::spawn_grid_view(&mut commands, &grid);
+    grid_view::spawn_grid_view(&mut commands, &grid, grid_view::GridStyle::for_field(def.field));
     for vent in def.vents.iter().copied() {
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
     }
@@ -135,6 +135,7 @@ fn spawn_world(
     }
     commands.insert_resource(slots);
     commands.insert_resource(RespawnTimers::default());
+    commands.insert_resource(KeyGeneRule(def.key_gene.map(|k| (k.gene, k.count))));
     let gate = spawn_npc(
         &mut commands,
         crate::npc::Archetype::Gate,
@@ -142,7 +143,10 @@ fn spawn_world(
         Some(def.gate_gene),
         def.npcs.len() as u32,
     );
-    commands.entity(gate).insert(crate::gate::GateProgress::default());
+    commands.entity(gate).insert((
+        crate::gate::GateProgress::default(),
+        crate::gate::GateSprite(def.gate_sprite),
+    ));
     for (index, position) in def.viruses.iter().enumerate() {
         let angle = index as f32 * 2.1;
         spawn_virus(&mut commands, *position, Vec2::new(angle.cos(), angle.sin()) * VIRUS_SPEED);
@@ -174,6 +178,7 @@ fn remove_grid(mut commands: Commands) {
     commands.insert_resource(WallMap::default());
     commands.insert_resource(ParticleZones::default());
     commands.insert_resource(NpcSlots::default());
+    commands.insert_resource(KeyGeneRule::default());
 }
 
 /// Four invisible walls keep the player inside the field.

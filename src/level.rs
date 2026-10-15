@@ -1,6 +1,7 @@
 //! # The vent field
 //!
-//! The one hand-built level of M2. All sizes are in world units (pixels). The
+//! The vent field is the one hand-built level of M2. The shallow-water level is in
+//! `shallow`. All sizes are in world units (pixels). The
 //! grid is centred on the world origin.
 //!
 //! - **Vent core**: the main vent at the origin. Its heat is high enough to
@@ -146,12 +147,19 @@ pub fn field_params(channel: Channel) -> FieldParams {
             drift: Vec2::ZERO,
             open_drift_edges: false,
         },
+        // The cyanobacteria are not here yet: O2 only comes from the gate cell.
+        Channel::O2 => FieldParams {
+            diffusion: 0.5,
+            decay: 0.2,
+            drift: Vec2::ZERO,
+            open_drift_edges: false,
+        },
     }
 }
 
 /// Light decay per second. With a source of `SHAFT_LEVEL x LIGHT_DECAY` in each
 /// grid cell, the level inside a shaft is `SHAFT_LEVEL`.
-const LIGHT_DECAY: f32 = 0.3;
+pub const LIGHT_DECAY: f32 = 0.3;
 
 // --- Tissue ---
 
@@ -254,6 +262,9 @@ pub const INITIAL_METALS: usize = 10;
 /// A wall line: a row or a column of tissue tiles with pores.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WallLine {
+    /// The kind of the tiles that are not pores: `Wall`, `Tough`, or `Mat` (a
+    /// band of microbial mat, which has no pores).
+    pub kind: WallKind,
     /// A column (`at` is grid x, `span` is grid y) or a row (`at` is grid y,
     /// `span` is grid x).
     pub vertical: bool,
@@ -271,6 +282,40 @@ pub struct Chamber {
     pub y: std::ops::RangeInclusive<usize>,
     /// Grid x of the pores in the south wall.
     pub pores: Vec<usize>,
+    /// The kind of the ring tiles that are not pores.
+    pub wall: WallKind,
+    /// True if the room has a light zone of its own (the vent gate chamber).
+    pub lit: bool,
+}
+
+/// The key gene of a level: the gene that the player needs, and the prey that
+/// carry it. While the player does not have the gene, the world keeps `count`
+/// carriers alive (see `npc::npc_respawn_system`). The carriers are the prey
+/// slots whose signature is `gene`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyGene {
+    pub gene: BlockKind,
+    /// The centre of the carrier zone.
+    pub centre: Vec2,
+    pub count: usize,
+    /// True if the carriers wait in the dim edge below a light shaft (the
+    /// vents). Else they wait within `layout::KEY_ZONE_RADIUS` of `centre`.
+    pub dim_edge: bool,
+}
+
+/// Light from the surface: the top of the field is the water surface, and the
+/// light falls off with depth like `level x exp(-depth / depth_scale)`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SurfaceLight {
+    pub level: f32,
+    pub depth_scale: f32,
+}
+
+impl SurfaceLight {
+    /// The light level at a depth below the surface, in world units.
+    pub fn at_depth(&self, depth: f32) -> f32 {
+        self.level * (-depth.max(0.0) / self.depth_scale).exp()
+    }
 }
 
 /// Everything that makes one level: the grid build, the hazards and shelters,
@@ -290,6 +335,8 @@ pub struct LevelDef {
     pub vents: Vec<Vent>,
     pub shafts: Vec<Shaft>,
     pub shaft_level: f32,
+    /// Light from the surface (shallow water). The vents have none.
+    pub surface_light: Option<SurfaceLight>,
     /// Share of the light that is UV.
     pub uv_fraction: f32,
     pub shelters: Vec<crate::shelter::Shelter>,
@@ -304,8 +351,13 @@ pub struct LevelDef {
     pub gate_position: Vec2,
     /// The gene that the gate cell gives.
     pub gate_gene: BlockKind,
-    /// The centre of the dim edge where the pigment prey wait.
-    pub pigment_prey: Vec2,
+    /// The sprite of the gate cell.
+    pub gate_sprite: &'static str,
+    /// The key gene and its carriers (pigment prey in the vents).
+    pub key_gene: Option<KeyGene>,
+    /// True if the creatures live in light (shallow water). Else they leave it,
+    /// because it is UV (the vents).
+    pub npcs_like_light: bool,
     pub start: Vec2,
 }
 
@@ -313,12 +365,15 @@ pub struct LevelDef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     Vents,
+    /// Shallow water: light from the surface, calm water, O2.
+    Shallow,
 }
 
 impl FieldKind {
     pub fn params(self, channel: Channel) -> FieldParams {
         match self {
             FieldKind::Vents => field_params(channel),
+            FieldKind::Shallow => crate::shallow::field_params(channel),
         }
     }
 }
@@ -339,21 +394,26 @@ impl LevelDef {
             vents: VENTS.to_vec(),
             shafts: SHAFTS.to_vec(),
             shaft_level: SHAFT_LEVEL,
+            surface_light: None,
             uv_fraction: UV_FRACTION,
             shelters: SHELTERS.to_vec(),
             chamber: Chamber {
                 x: CHAMBER_X,
                 y: CHAMBER_Y,
                 pores: CHAMBER_PORES.to_vec(),
+                wall: WallKind::Wall,
+                lit: true,
             },
             lines: vec![
                 WallLine {
+                    kind: WallKind::Wall,
                     vertical: true,
                     at: LINE_EAST.0,
                     span: LINE_EAST.1,
                     pores: LINE_EAST_PORES.to_vec(),
                 },
                 WallLine {
+                    kind: WallKind::Wall,
                     vertical: false,
                     at: LINE_SOUTH.0,
                     span: LINE_SOUTH.1,
@@ -368,7 +428,14 @@ impl LevelDef {
             initial_metals: INITIAL_METALS,
             gate_position: GATE_POSITION,
             gate_gene: crate::gate::GATE_GENE,
-            pigment_prey: PIGMENT_PREY_POSITION,
+            gate_sprite: "gate_cell_phototroph",
+            key_gene: Some(KeyGene {
+                gene: BlockKind::SecondaryMetabolites,
+                centre: PIGMENT_PREY_POSITION,
+                count: crate::npc::PIGMENT_PREY_TARGET,
+                dim_edge: true,
+            }),
+            npcs_like_light: false,
             start: START_POSITION,
         }
     }
@@ -383,19 +450,19 @@ impl LevelDef {
                 let kind = if y < *cy.start() && self.chamber.pores.contains(&x) {
                     WallKind::Pore
                 } else {
-                    WallKind::Wall
+                    self.chamber.wall
                 };
                 tiles.push(((x, y), kind));
             }
         }
         for y in cy.clone() {
             for x in [cx.start() - 1, cx.end() + 1] {
-                tiles.push(((x, y), WallKind::Wall));
+                tiles.push(((x, y), self.chamber.wall));
             }
         }
         for line in &self.lines {
             for along in line.span.clone() {
-                let kind = if line.pores.contains(&along) { WallKind::Pore } else { WallKind::Wall };
+                let kind = if line.pores.contains(&along) { WallKind::Pore } else { line.kind };
                 let tile = if line.vertical { (line.at, along) } else { (along, line.at) };
                 tiles.push((tile, kind));
             }
@@ -427,12 +494,34 @@ impl LevelDef {
             grid.add_rect_emitter(Channel::Light, shaft.min, shaft.max, source);
         }
         // The light zone of the gate chamber: the room, and nothing else.
-        let chamber_min = grid.cell_center(*self.chamber.x.start(), *self.chamber.y.start());
-        let chamber_max = grid.cell_center(*self.chamber.x.end(), *self.chamber.y.end());
-        grid.add_rect_emitter(Channel::Light, chamber_min, chamber_max, source);
-        // Walls first, so that nothing flows into them during the warm-up.
-        for ((x, y), _) in self.wall_tiles() {
-            grid.set_wall(x, y, true);
+        if self.chamber.lit {
+            let chamber_min = grid.cell_center(*self.chamber.x.start(), *self.chamber.y.start());
+            let chamber_max = grid.cell_center(*self.chamber.x.end(), *self.chamber.y.end());
+            grid.add_rect_emitter(Channel::Light, chamber_min, chamber_max, source);
+        }
+        // Light from the surface: one row at a time, falling with depth.
+        if let Some(surface) = self.surface_light {
+            let top = grid.origin().y + grid.world_size().y;
+            let (left, right) = (grid.origin().x, grid.origin().x + grid.world_size().x);
+            for row in 0..self.height {
+                let y = grid.cell_center(0, row).y;
+                let level = surface.at_depth(top - y);
+                grid.add_rect_emitter(
+                    Channel::Light,
+                    Vec2::new(left, y),
+                    Vec2::new(right, y),
+                    level * LIGHT_DECAY,
+                );
+            }
+        }
+        // Walls first, so that nothing flows into them during the warm-up. A
+        // mat is not a wall: it only slows diffusion.
+        for ((x, y), kind) in self.wall_tiles() {
+            if kind.blocks_grid() {
+                grid.set_wall(x, y, true);
+            } else {
+                grid.set_leak(x, y, crate::walls::MAT_DIFFUSION_FACTOR);
+            }
         }
         grid
     }

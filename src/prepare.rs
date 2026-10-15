@@ -2,7 +2,7 @@
 //!
 //! Before a run the player picks starting genes from the codex. The starter
 //! genome is free. Each codex gene costs `gene_cost` points; the budget is
-//! `START_BUDGET`. A gene with no block yet (`LightCapture`, M7) cannot do
+//! `START_BUDGET`. A gene with no block yet (`Respiration`, M8) cannot do
 //! anything, so it costs 0 and cannot be chosen. A chosen gene starts
 //! `Expressed` with one enzyme (`apply_loadout`).
 //!
@@ -102,14 +102,17 @@ mod tests {
     fn genes_with_a_block_cost_one_and_others_nothing() {
         assert_eq!(gene_cost(BlockKind::Fermentation), 1);
         assert_eq!(gene_cost(BlockKind::SecondaryMetabolites), 1);
-        assert_eq!(gene_cost(BlockKind::LightCapture), 0);
+        assert_eq!(gene_cost(BlockKind::Respiration), 0, "no block until M8");
+        // M7: photosynthesis and catalase have blocks now.
+        assert_eq!(gene_cost(BlockKind::LightCapture), 1);
+        assert_eq!(gene_cost(BlockKind::Catalase), 1);
     }
 
     #[test]
     fn only_codex_genes_with_a_block_can_be_chosen() {
-        let codex = codex_of(&[BlockKind::Fermentation, BlockKind::LightCapture]);
+        let codex = codex_of(&[BlockKind::Fermentation, BlockKind::Respiration]);
         assert!(is_selectable(BlockKind::Fermentation, &codex));
-        assert!(!is_selectable(BlockKind::LightCapture, &codex), "no block");
+        assert!(!is_selectable(BlockKind::Respiration, &codex), "no block");
         assert!(!is_selectable(BlockKind::FatStorage, &codex), "not in the codex");
         // A starter gene is free already.
         let codex = codex_of(&[BlockKind::Chemosynthesis]);
@@ -130,8 +133,8 @@ mod tests {
         assert!(toggle(&mut chosen, BlockKind::VesicleExport, &codex, START_BUDGET));
         assert!(!chosen.contains(&BlockKind::Fermentation));
         // A gene with no block is refused and costs nothing.
-        let codex = codex_of(&[BlockKind::LightCapture]);
-        assert!(!toggle(&mut chosen, BlockKind::LightCapture, &codex, START_BUDGET));
+        let codex = codex_of(&[BlockKind::Respiration]);
+        assert!(!toggle(&mut chosen, BlockKind::Respiration, &codex, START_BUDGET));
     }
 
     #[test]
@@ -160,10 +163,10 @@ mod tests {
 
     #[test]
     fn the_list_puts_selectable_genes_first() {
-        let codex = codex_of(&[BlockKind::LightCapture, BlockKind::Fermentation]);
+        let codex = codex_of(&[BlockKind::Respiration, BlockKind::Fermentation]);
         assert_eq!(
             codex_list(&codex),
-            vec![(BlockKind::Fermentation, true), (BlockKind::LightCapture, false)]
+            vec![(BlockKind::Fermentation, true), (BlockKind::Respiration, false)]
         );
     }
 }

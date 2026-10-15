@@ -21,7 +21,7 @@ use metabolistic3d::npc::{Archetype, spawn_npc};
 use metabolistic3d::player::ControlledCell;
 use metabolistic3d::proteins::{ProteinTarget, Proteome};
 use metabolistic3d::run::{
-    RunState, RunSummary, StageOutcome, carry_over, starter_carry,
+    RunState, RunSummary, StageOutcome, carry_over, grant_gate_enzyme, starter_carry,
 };
 use metabolistic3d::shared::{spawn_cell_from_carry, spawn_starter_cell};
 use metabolistic3d::gate::GateProgress;
@@ -132,21 +132,92 @@ fn a_stage_transition_keeps_genome_and_proteome_and_resets_the_rest() {
 }
 
 #[test]
-fn the_run_is_complete_when_no_next_stage_has_a_level() {
+fn the_vents_lead_to_shallow_water_and_the_run_is_complete_when_no_next_stage_has_a_level() {
     let mut run = RunState::begin(9, BTreeSet::new());
     assert_eq!(run.stage(), Stage::Vents);
     assert!(run.level_def().is_some());
-    let outcome = run.complete_stage(starter_carry(&BTreeSet::new()), Stage::is_playable);
+    // No stage is playable: the run ends at once.
+    let outcome = run.complete_stage(starter_carry(&BTreeSet::new()), |_| false);
     assert_eq!(outcome, StageOutcome::RunComplete);
     assert_eq!(run.stage_index, 0, "the run stays on its last stage");
     assert!(run.carry.is_none());
+    // With the real stages, the vents lead to shallow water (M7) ...
+    assert_eq!(run.complete_stage(starter_carry(&BTreeSet::new()), Stage::is_playable), StageOutcome::NextStage);
+    assert_eq!(run.stage(), Stage::ShallowWater);
+    assert!(run.level_def().is_some());
+    assert!(run.carry.is_some());
+    // ... and land has no level yet, so shallow water ends the run.
+    let outcome = run.complete_stage(starter_carry(&BTreeSet::new()), Stage::is_playable);
+    assert_eq!(outcome, StageOutcome::RunComplete);
+    assert_eq!(run.stage(), Stage::ShallowWater);
+}
+
+#[test]
+fn the_gate_gene_comes_with_one_free_enzyme_if_it_has_a_block() {
+    let mut carry = starter_carry(&BTreeSet::new());
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 0);
+    grant_gate_enzyme(&mut carry, BlockKind::LightCapture);
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1);
+    // The pathway is in the first empty action slot.
+    let action = ActionKind::Pathway(BlockKind::LightCapture);
+    assert_eq!(carry.action_bar.slots.iter().filter(|s| **s == Some(action)).count(), 1);
+    assert_eq!(carry.action_bar.slots[2], Some(action), "starter bar: slots 1 and 2 are taken");
+    // A second grant adds an enzyme but no second slot.
+    grant_gate_enzyme(&mut carry, BlockKind::LightCapture);
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 2);
+    assert_eq!(carry.action_bar.slots.iter().filter(|s| **s == Some(action)).count(), 1);
+    // A full bar stays as it is.
+    let mut full = starter_carry(&BTreeSet::new());
+    for slot in full.action_bar.slots.iter_mut() {
+        *slot = Some(ActionKind::InduceMutation);
+    }
+    grant_gate_enzyme(&mut full, BlockKind::LightCapture);
+    assert!(!full.action_bar.slots.contains(&Some(action)));
+    assert_eq!(full.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1);
+    // A gene with no block (Respiration, until M8) gets nothing.
+    grant_gate_enzyme(&mut carry, BlockKind::Respiration);
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::Respiration)), 0);
+}
+
+#[test]
+fn winning_the_vents_goes_to_shallow_water_with_the_gate_gene_and_a_free_enzyme() {
+    let dir = TempDir::new("vents-win");
+    let mut app = app(&dir);
+    *app.world_mut().resource_mut::<RunState>() = RunState::begin(4, BTreeSet::new());
+    go(&mut app, GameState::Run);
+    let player = spawn_player(&mut app, starter_carry(&BTreeSet::new()), Vec2::ZERO);
+    app.world_mut().commands().spawn((metabolistic3d::player::Player { client_id: 0 }, metabolistic3d::player::LocalPlayer, ControlledCell(player)));
+    app.world_mut().flush();
+    let gate = {
+        let mut commands = app.world_mut().commands();
+        spawn_npc(&mut commands, Archetype::Gate, Vec2::new(47.0, 0.0), None, 0)
+    };
+    app.world_mut().flush();
+    app.world_mut().entity_mut(gate).insert(GateProgress::default());
+    frames(&mut app, 60);
+    assert_eq!(state(&app), GameState::StageComplete);
+    let run = app.world().resource::<RunState>();
+    assert_eq!(run.stage(), Stage::ShallowWater);
+    let carry = run.cell_carry();
+    assert_eq!(carry.genome.get_gene_state(&BlockKind::LightCapture), Some(&GeneState::Expressed));
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1, "the free enzyme");
+    // The next cell can photosynthesise at once.
+    let next = spawn_player(&mut app, carry, Vec2::new(5.0, 5.0));
+    app.update();
+    let blocks = app.world().get::<metabolistic3d::cell::CellBlocks>(next).unwrap();
+    assert!(blocks.contains(BlockKind::LightCapture));
 }
 
 #[test]
 fn winning_the_last_built_stage_ends_the_run_and_banks_the_gate_gene() {
     let dir = TempDir::new("win");
     let mut app = app(&dir);
-    *app.world_mut().resource_mut::<RunState>() = RunState::begin(4, BTreeSet::new());
+    // The run is in shallow water, the last built stage (M7), and its level
+    // says that the gate gives Respiration.
+    let mut run = RunState::begin(4, BTreeSet::new());
+    run.stage_index = 1;
+    *app.world_mut().resource_mut::<RunState>() = run;
+    app.insert_resource(metabolistic3d::level::CurrentLevel(metabolistic3d::level::LevelDef::shallow_base()));
     go(&mut app, GameState::Run);
     let player = spawn_player(&mut app, starter_carry(&BTreeSet::new()), Vec2::ZERO);
     app.world_mut().commands().spawn((metabolistic3d::player::Player { client_id: 0 }, metabolistic3d::player::LocalPlayer, ControlledCell(player)));
@@ -161,12 +232,12 @@ fn winning_the_last_built_stage_ends_the_run_and_banks_the_gate_gene() {
     assert_eq!(state(&app), GameState::RunOver);
     let summary = *app.world().resource::<RunSummary>();
     assert!(summary.run_complete);
-    assert_eq!(summary.victory, Some(BlockKind::LightCapture));
+    assert_eq!(summary.victory, Some(BlockKind::Respiration));
     let run = app.world().resource::<RunState>();
     assert!(!run.active, "the run is finished");
-    assert_eq!(run.new_genes, vec![BlockKind::LightCapture]);
-    assert!(app.world().resource::<Codex>().genes.contains(&BlockKind::LightCapture));
-    assert!(load(&codex_path(&dir.0)).genes.contains(&BlockKind::LightCapture), "saved in the temp dir");
+    assert_eq!(run.new_genes, vec![BlockKind::Respiration]);
+    assert!(app.world().resource::<Codex>().genes.contains(&BlockKind::Respiration));
+    assert!(load(&codex_path(&dir.0)).genes.contains(&BlockKind::Respiration), "saved in the temp dir");
 }
 
 #[test]

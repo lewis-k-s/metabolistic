@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done (not committed yet). Next: tune the vent slice, then M7.
+merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done. M7 is done (not committed yet). Next: tune the vent slice and shallow water, then M8.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -119,6 +119,8 @@ reaches zero.
 | Cofactor | Metals |
 | Taken in | Minerals (filled by transporters from the grid; used by chemosynthesis) |
 | Waste | Waste |
+| Screen | Pigments (block UV; decay slowly) |
+| Oxygen | O2 (made by photosynthesis; leaves to the grid), ROS (reactive oxygen species: damage; catalase turns them back into O2) |
 
 Membrane integrity costs Lipids to repair. This connects defence to
 metabolism.
@@ -178,22 +180,22 @@ you must stay near water, the world you left behind.
 
 ## 3. Current code compared with the design
 
-Updated after M6.
+Updated after M7.
 
 | Area | Now | Still to do |
 |---|---|---|
 | Solver | Enzymes x saturation, proportional sharing, fixed 0.05 s sub-steps (`metabolism/solver.rs`) | - |
-| Pools | The pools above (with Pigments), plus a `StoredLipids` component | - |
-| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites | photosynthesis, catalase, respiration (M7, M8) |
+| Pools | The pools above (with Pigments, O2 and ROS), plus a `StoredLipids` component | - |
+| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites, LightCapture (photosynthesis), Catalase | respiration (M8) |
 | Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size, editor UI | - |
-| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | Mutation from ROS |
-| Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
+| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | - |
+| Environment | `EnvGrid` with Heat, Minerals, Light and O2: diffusion, drift, sources, decay, leaky (mat) cells | OrganicCarbon, Water |
 | Run screen | The player is a `Cell` with a body; the level comes from the stage's `LevelDef`; HUD with stage name and seed; run-over screen with the cause of death or "Run complete", and the new codex genes | - |
 | NPCs and world | NPC `Cell`s on a slow tick (every 4th), steering, engulf, symbiont exchange, food, metals, viruses, toxin hits, walls with pores, lysis, gate cell | Fusion protein, immune proteins |
 | Physics | avian2d, 64 Hz, no interpolation | - |
 | Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | A final light colour; a sprite for the shelter disc |
 | Manage screen | Editor: genome, enzymes, membrane slots, queue with time to finish, action slots | - |
-| Run structure | `RunState` (seed, stage, genes taken, carry), `Stage` + `LevelDef`, Prepare screen with a codex budget, Stage complete screen, `Codex` saved as JSON, seeded vent layout with a validator | Levels for shallow water and land (M7, M8) |
+| Run structure | `RunState` (seed, stage, genes taken, carry), `Stage` + `LevelDef`, Prepare screen with a codex budget, Stage complete screen, `Codex` saved as JSON, seeded vent and shallow-water layouts with a validator | A level for land (M8) |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
 `flowmap_design.md`. Mitochondria now come from endosymbiosis (the shallow
@@ -491,7 +493,65 @@ Original plan:
 2. Codex: save obtained genes. Choose a starting genome with a budget.
 3. Some level variation (procedural layout of fixed parts).
 
-### M7. Shallow water
+### M7. Shallow water - done (not committed yet)
+
+Notes:
+- **Photosynthesis** (`blocks/photosynthesis.rs`, gene `LightCapture`): Light
+  (outside, K 3) -> per turnover ATP 3, ReducingPower 1.5, CarbonSkeletons 1,
+  O2 1.5, ROS 0.2. No input pool; light is a condition. Tests check the
+  stoichiometry and the saturation.
+- **Oxygen and ROS** (`oxygen.rs`, new pools `O2`, `ROS`, new `Channel::O2`):
+  O2 and the grid level under the cell move towards each other by
+  `1 - exp(-0.15 dt)` of the difference (no overshoot; the grid gains what the
+  cell loses; a wall tap gets nothing). 2% of the internal O2 per second turns
+  into ROS (exact, tick-length independent). ROS decays 3% per second. ROS damage
+  per unit per second: membrane 0.3 (`DamageSource::Ros`), genome integrity
+  0.0012, mutation load 0.006. A shelter does not help. Death message names it.
+  Sprite tint from white to a green-grey as ROS goes to 25 (`ros_tint_color`, a
+  flat colour: no scaling or rotation). HUD lines "O2" and "ROS" (with a warning).
+- **Catalase** (`blocks/catalase.rs`, `BlockKind::Catalase`): 2 ROS + 0.5 ATP ->
+  1 O2, K 4. Measured with the starter cell, no UV, light 10, 5 ticks a second:
+  3 photosynthesis enzymes and no catalase die in about 57 s (ROS about 22); with
+  1 catalase enzyme ROS stays near 3, with 2 near 1.2, and the cell lives; 1
+  photosynthesis enzyme and no catalase dies after about 2 minutes (the lipids run
+  out first). Tests: `tests/shallow_water_test.rs`.
+- **Gate reward**: `run::grant_gate_enzyme`: a gate gene with a block gives the
+  carry one free enzyme, and its pathway goes into the first empty action slot (if any), so the player can turn photosynthesis Off or Low at once. `LightCapture` now costs 1 point in Prepare. NPCs with
+  `LightCapture` also get `Catalase` (like cyanobacteria), so they live with their
+  own O2 and engulfing one can give either gene.
+- **Level** (`shallow.rs`, `FieldKind::Shallow`, `LevelDef::shallow_base`): light
+  from the surface: 10 at the top, `exp(-depth / 560)` below (about 3 at the
+  start, 0.2 at the bottom); UV fraction 0.3. One weak vent on the sea floor. Three
+  shelters (microbial mats). 16 creatures: 3 catalase prey (key gene), 6
+  cyanobacteria, 2 deep prey, 2 grazers (predators), 3 symbionts. NPCs do not run
+  from light here (`npcs_like_light`). New `LevelDef` fields: `surface_light`,
+  `key_gene` (gene, centre, count, `dim_edge`: replaces `pigment_prey`),
+  `gate_sprite`, `npcs_like_light`; `WallLine.kind`, `Chamber.wall` and
+  `Chamber.lit`. The `KeyGeneRule` resource (from the level) generalises the
+  pigment top-up; the vents still use the default pigment rule.
+- **Gate**: alpha-proteobacterium in a tough-walled chamber on the sea floor, gives
+  `Respiration` (no block until M8: costs 0 in Prepare). New sprite
+  `gate_cell_proteobacterium` (72x72, rose `proteo` ramp) in `art/gen_sprites.py`;
+  the victory clip is the phototroph gate's.
+- **Tissue**: `WallKind::Mat`: no body; any cell crawls through at 30 px/s (the
+  thrust becomes a crawl force); the grid diffuses through at 0.3 (`EnvGrid::set_leak`,
+  mass conserved); a lysis ignores it. `WallKind::Tough`: solid; lysis costs 1
+  Metals more, and the attacker loses 4 membrane integrity. Without Metals the
+  lysis is silently refused.
+- **Layout**: `layout::generate_shallow(seed)` jitters the start, vent, shelters,
+  tissue rows, pores, prey and zones. `validate` is now level-generic and has new
+  rules: start not in strong UV, key carriers in their zone, key zone and chamber
+  entrance reachable on foot (`reachable`: mats are crossed, walls and pores are
+  not). Over seeds 0-199 no shallow layout needed a retry or the base layout.
+- Smoke test: after StageComplete it enters shallow water (three Run steps: the
+  start, the catalase prey with ROS 18 for the tint, the chamber).
+- **Art owner** (stand-ins, not final): mat and tough wall reuse `wall_membrane`
+  with a colour tint; O2 on the grid is a sea-green dither; the surface light draws
+  only the strong top zone; cells have a ROS tint, not a "stressed" clip; creatures
+  reuse the vent sheets (the art doc has no shallow palette yet).
+- Not done: Respiration block (M8), immune proteins, fusion, a typed seed on Prepare.
+
+Original plan:
 
 1. Photosynthesis block. It produces O2 into the cell and the grid.
 2. Reactive oxygen species: damage from your own O2. Catalase block.

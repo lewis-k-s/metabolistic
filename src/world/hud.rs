@@ -45,14 +45,30 @@ enum HudLine {
     AminoAcids,
     Heat,
     Uv,
+    O2,
+    Ros,
     Shelter,
+}
+
+/// The ROS bar is full at this amount: the tint is full here too.
+const ROS_BAR_MAX: f32 = crate::oxygen::ROS_TINT_FULL;
+
+/// A warning after the ROS bar when the level is high.
+pub fn ros_warning(ros: f32) -> &'static str {
+    if ros >= ROS_BAR_MAX * 0.5 {
+        "  OXIDATIVE DAMAGE!"
+    } else if ros >= ROS_BAR_MAX * 0.2 {
+        "  ROS rising"
+    } else {
+        ""
+    }
 }
 
 /// One slot of the action bar (0-based).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct HudSlot(usize);
 
-const LINES: [HudLine; 12] = [
+const LINES: [HudLine; 14] = [
     HudLine::Stage,
     HudLine::Atp,
     HudLine::Membrane,
@@ -64,6 +80,8 @@ const LINES: [HudLine; 12] = [
     HudLine::AminoAcids,
     HudLine::Heat,
     HudLine::Uv,
+    HudLine::O2,
+    HudLine::Ros,
     HudLine::Shelter,
 ];
 
@@ -193,6 +211,24 @@ fn update_hud(
                 let warning = if uv > 1.0 && shield < 0.5 && !shelter.0 { "  UV!" } else { "" };
                 format!("UV {uv:6.1}  shield {:3.0}%{warning}", shield * 100.0)
             }
+            HudLine::O2 => {
+                // Only a cell that has oxygen shows it, so the vents stay plain.
+                let o2 = pools.get(Currency::O2);
+                let grid = env.get(Channel::O2);
+                if o2 > 0.05 || grid > 0.5 {
+                    format!("O2 {o2:6.1}  water {grid:4.1}")
+                } else {
+                    String::new()
+                }
+            }
+            HudLine::Ros => {
+                let ros = pools.get(Currency::ROS);
+                if ros > 0.05 {
+                    format!("{}{}", bar_line("ROS", ros, ROS_BAR_MAX), ros_warning(ros))
+                } else {
+                    String::new()
+                }
+            }
             HudLine::Metals => format!("Metals {:6.1}", pools.get(Currency::Metals)),
             HudLine::Gate => match gate.iter().find(|p| p.held > 0.0) {
                 Some(progress) => format!(
@@ -230,6 +266,13 @@ mod tests {
         let run = RunState::begin(1234, Default::default());
         let line = stage_line(&run);
         assert!(line.contains("Deep-sea vents") && line.contains("1234") && line.contains("1/3"), "{line}");
+    }
+
+    #[test]
+    fn the_ros_warning_grows_with_the_level() {
+        assert_eq!(ros_warning(0.0), "");
+        assert!(ros_warning(ROS_BAR_MAX * 0.3).contains("rising"));
+        assert!(ros_warning(ROS_BAR_MAX).contains("DAMAGE"));
     }
 
     #[test]

@@ -361,6 +361,24 @@
       "loop": true
     }
   },
+  "gate_cell_proteobacterium": {
+    "frame_size": [
+      72,
+      72
+    ],
+    "anchor_px": [
+      36,
+      36
+    ],
+    "radius": 25,
+    "idle": {
+      "file": "gate_cell_proteobacterium_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    }
+  },
   "virus_phage": {
     "frame_size": [
       52,

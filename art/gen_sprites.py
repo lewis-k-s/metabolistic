@@ -56,6 +56,7 @@ RAMPS = {
     "predator": ramp("#3a0f1c", "#8a1f33", "#d1394a", "#f2715f", "#ffc2a0"),  # crimson
     "symbiont": ramp("#4a2e0c", "#b0701c", "#f0b030", "#ffd866", "#fff6c0"),  # gold
     "gate": ramp("#0f3a3e", "#1f7a73", "#34b8a0", "#7ae6c0", "#d0fff0"),  # teal
+    "proteo": ramp("#3a1030", "#8a2a6e", "#c8509c", "#f08cc8", "#ffe0f2"),  # rose: the future mitochondrion
     "pigment": ramp("#7a2a0a", "#d0541a", "#f08a28", "#ffc060", "#ffe8a0"),  # carotenoid
     "virus": ramp("#2b1a4a", "#5b3d9a", "#8f6fd8", "#bda2f5", "#efe6ff"),  # lilac
     # Inside a cell.
@@ -526,6 +527,40 @@ def gate_cell(pose: Pose = REST, anim: bool = False) -> Canvas:
     return c
 
 
+def gate_cell_proteobacterium(pose: Pose = REST, anim: bool = False) -> Canvas:
+    """Gate cell of the shallow-water stage: an alpha-proteobacterium.
+
+    The gene you win is respiration: this cell is the future mitochondrion. It is
+    rose, so it does not look like the teal phototroph gate. The folds inside are
+    cristae (the respiratory membrane). It does not move. Its idle shows the
+    folds drifting and the halo pulsing, like the other gate cell.
+    """
+    c = Canvas(72, 72)
+    ph = 2 * np.pi * pose.t
+    sdf = blob_sdf(
+        c, 36, 36, 25 * (1 + 0.008 * np.sin(ph)),
+        [(2, 0.05, 0.5 + ph), (3, 0.025, 2.0 - ph), (4, 0.012, 0.3)],
+    )
+    mask = c.lit_body(sdf, RAMPS["proteo"], band=3.0, band_tones=RAMPS["proteo"], width=20)
+    # Cristae: wavy folds across the inner body. They drift by one period.
+    inside = mask & (sdf < -6)
+    wave = 2.2 * np.sin(c.Y / 3.2 + ph)
+    folds = inside & (((c.X + wave + 6.0 * pose.t) % 6.0) < 1.3) & (c.X < 46)
+    c.paint(folds, RAMPS["proteo"][1])
+    c.paint(np.roll(folds, 1, axis=1) & inside & ~folds, RAMPS["proteo"][3])
+    # Nucleoid and a bead.
+    c.disc(47 + 0.8 * np.sin(ph), 40 + 0.6 * np.cos(ph), 5.0, RAMPS["nucleoid"])
+    c.disc(42 + 0.5 * np.sin(ph + 2), 26 + 0.5 * np.cos(ph + 2), 2.0, RAMPS["bead"])
+    c.spark([(20, 20), (21, 19), (22, 18), (23, 18), (19, 21)], RAMPS["proteo"][4])
+    c.outline(RAMPS["proteo"][0])
+    pulse = 0.5 + 0.5 * np.sin(ph)
+    c.halo(
+        36, 36, 27, 33.5 + 2.0 * pulse,
+        [RAMPS["proteo"][1], RAMPS["proteo"][2], RAMPS["proteo"][3]], 0.5 + 0.18 * pulse,
+    )
+    return c
+
+
 def virus_phage(pose: Pose = REST, anim: bool = False) -> Canvas:
     """Virus, seen from above: a hexagon head and a tail with splayed legs.
 
@@ -805,6 +840,7 @@ SPRITES = {
     "predator_cell": predator_cell,
     "symbiont_cell": symbiont_cell,
     "gate_cell_phototroph": gate_cell,
+    "gate_cell_proteobacterium": gate_cell_proteobacterium,
     "virus_phage": virus_phage,
     "food_carbon": food_carbon,
     "pickup_mineral": pickup_mineral,
@@ -1067,6 +1103,8 @@ ANIMS = {
         kinds=("idle", "move", "contact", "hit", "spawn", "death")),
     "gate_cell_phototroph": dict(
         make=gate_cell, centre=(36, 36), radius=25, ramp="gate", kinds=("idle",)),
+    "gate_cell_proteobacterium": dict(
+        make=gate_cell_proteobacterium, centre=(36, 36), radius=25, ramp="proteo", kinds=("idle",)),
     "virus_phage": dict(
         make=virus_phage, centre=(22, 14), radius=20, ramp="virus",
         kinds=("idle", "spawn", "death")),

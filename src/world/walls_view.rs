@@ -9,6 +9,12 @@
 //!
 //! The collision layers say who passes (see `world::cell_layers`): a wall
 //! blocks every cell, a pore blocks a cell without a transporter.
+//!
+//! M7 tiles: a microbial mat (`WallKind::Mat`) has no body: any cell crawls
+//! through it (see `player_body::apply_thrust`). A tough wall (`WallKind::Tough`)
+//! is a wall. The art has no sheets for them yet, so both reuse `wall_membrane`
+//! with a colour tint (a green-brown mat, a dark red tough wall): **art owner**
+//! should draw them. The tint is flat and the sprite is not scaled.
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -22,6 +28,15 @@ use crate::InRun;
 const WALL_Z: f32 = -4.0;
 /// Width of a `wall_membrane` piece along the wall.
 const PIECE_WIDTH: f32 = 16.0;
+
+/// The tint of a wall kind (the sprite is the plain wall piece).
+pub fn tile_tint(kind: WallKind) -> Color {
+    match kind {
+        WallKind::Mat => Color::srgba(0.55, 0.75, 0.35, 0.8),
+        WallKind::Tough => Color::srgb(0.75, 0.35, 0.35),
+        WallKind::Wall | WallKind::Pore => Color::WHITE,
+    }
+}
 
 /// A wall tile body.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,8 +69,10 @@ pub fn spawn_walls(
     for (tile, kind) in map.tiles() {
         let centre = tile_center(grid.origin(), tile).round();
         let layer = match kind {
-            WallKind::Wall => Layer::Wall,
+            WallKind::Wall | WallKind::Tough => Layer::Wall,
             WallKind::Pore => Layer::Pore,
+            // A mat has no body: the layer is only a label.
+            WallKind::Mat => Layer::Default,
         };
         let vertical = is_vertical(map, tile);
         let rotation = if vertical {
@@ -66,13 +83,17 @@ pub fn spawn_walls(
         let mut entity = commands.spawn((
             Name::new(format!("{kind:?} tile")),
             WallTile(tile),
-            RigidBody::Static,
-            Collider::rectangle(CELL_SIZE, CELL_SIZE),
-            CollisionLayers::new(layer, [Layer::Cell]),
             Transform::from_translation(centre.extend(0.0)),
             Visibility::default(),
             DespawnOnExit(InRun),
         ));
+        if kind != WallKind::Mat {
+            entity.insert((
+                RigidBody::Static,
+                Collider::rectangle(CELL_SIZE, CELL_SIZE),
+                CollisionLayers::new(layer, [Layer::Cell]),
+            ));
+        }
         match kind {
             WallKind::Pore => {
                 entity.with_child((
@@ -80,13 +101,16 @@ pub fn spawn_walls(
                     Transform::from_translation(Vec3::new(0.0, 0.0, WALL_Z)).with_rotation(rotation),
                 ));
             }
-            WallKind::Wall => {
+            WallKind::Wall | WallKind::Tough | WallKind::Mat => {
                 for side in [-0.5, 0.5] {
                     // Along the wall: x for a horizontal tile, y for a vertical one.
                     let offset = side * PIECE_WIDTH;
                     let position = if vertical { Vec3::new(0.0, offset, WALL_Z) } else { Vec3::new(offset, 0.0, WALL_Z) };
                     entity.with_child((
-                        Sprite::from_image(wall.clone()),
+                        Sprite {
+                            color: tile_tint(kind),
+                            ..Sprite::from_image(wall.clone())
+                        },
                         Transform::from_translation(position).with_rotation(rotation),
                     ));
                 }
@@ -149,15 +173,20 @@ mod tests {
             Duration::from_secs_f64(1.0 / 64.0),
         ));
         let layer = match kind {
-            WallKind::Wall => Layer::Wall,
+            WallKind::Wall | WallKind::Tough => Layer::Wall,
             WallKind::Pore => Layer::Pore,
+            // A mat has no body: the layer is only a label.
+            WallKind::Mat => Layer::Default,
         };
-        app.world_mut().spawn((
-            RigidBody::Static,
-            Collider::rectangle(CELL_SIZE, CELL_SIZE),
-            CollisionLayers::new(layer, [Layer::Cell]),
-            Transform::from_xyz(100.0, 0.0, 0.0),
-        ));
+        // A mat has no body (see `spawn_walls`).
+        if kind != WallKind::Mat {
+            app.world_mut().spawn((
+                RigidBody::Static,
+                Collider::rectangle(CELL_SIZE, CELL_SIZE),
+                CollisionLayers::new(layer, [Layer::Cell]),
+                Transform::from_xyz(100.0, 0.0, 0.0),
+            ));
+        }
         let body = app
             .world_mut()
             .spawn((
@@ -192,5 +221,9 @@ mod tests {
         assert!(pore < 66.0, "a pore is solid without a transporter: {pore}");
         assert!(push_through(WallKind::Pore, &transporter, false) > 130.0, "a transporter passes a pore");
         assert!(push_through(WallKind::Wall, &bare, true) > 130.0, "an adhesin crawl passes a wall");
+        // M7: a tough wall is solid, a microbial mat is not.
+        assert!(push_through(WallKind::Tough, &bare, false) < 66.0, "a tough wall blocks");
+        assert!(push_through(WallKind::Tough, &transporter, false) < 66.0);
+        assert!(push_through(WallKind::Mat, &bare, false) > 130.0, "any cell passes a mat");
     }
 }

@@ -5,13 +5,19 @@
 //! world (see `world::walls_view`), and a wall cell in the grid, so it blocks
 //! movement, drift and diffusion (see `envgrid`).
 //!
-//! Two kinds of tile:
+//! Four kinds of tile:
 //!
 //! - **Wall** (`wall_membrane`): solid.
 //! - **Pore** (`wall_membrane_pore`): a wall with a transporter. A cell passes
 //!   only if it has a `Transporter` protein (`pore_passable`). Other cells
 //!   find it solid. The grid treats a pore as a wall: the transporter feeds the
 //!   cell that touches it, not the grid behind the wall.
+//! - **Mat** (M7, a microbial mat): not solid. Any cell crawls through it, slowly
+//!   (`MAT_CRAWL_SPEED`), with no adhesin. The grid is not blocked either: it
+//!   diffuses through at a reduced rate (`MAT_DIFFUSION_FACTOR`, see `envgrid`).
+//!   A mat is not cut: it has no body, so a lysis ignores it.
+//! - **Tough** (M7): a solid wall that fights back. A lysis costs `TOUGH_LYSE_METALS`
+//!   Metals more, and the attacker's membrane takes `TOUGH_RECOIL` damage.
 //!
 //! Three more ways through, for a cell that has no transporter:
 //!
@@ -31,6 +37,7 @@ use bevy::prelude::*;
 use crate::actions::{ActionState, LyseOrder};
 use crate::cell::{Cell, CellSize};
 use crate::envgrid::{CELL_SIZE, EnvGrid};
+use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
 use crate::movement::world_radius;
@@ -42,12 +49,42 @@ pub const LYSE_ATP: f32 = 5.0;
 pub const ADHESIN_CRAWL_SPEED: f32 = 25.0;
 /// Extra distance (pixels) at which a cell counts as touching a tile.
 pub const CONTACT_MARGIN: f32 = 3.0;
+/// Speed of a crawl through a microbial mat, in pixels per second. **Playtest.**
+pub const MAT_CRAWL_SPEED: f32 = 30.0;
+/// Diffusion across a mat cell, as a share of open water. **Playtest.**
+pub const MAT_DIFFUSION_FACTOR: f32 = 0.3;
+/// Metals that lysis of a tough wall costs, besides the ATP. **Playtest.**
+pub const TOUGH_LYSE_METALS: f32 = 1.0;
+/// Membrane integrity that the attacker loses when it cuts a tough wall.
+/// **Playtest.**
+pub const TOUGH_RECOIL: f32 = 4.0;
 
 /// The kind of a wall tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WallKind {
     Wall,
     Pore,
+    /// A microbial mat: any cell crawls through it slowly.
+    Mat,
+    /// A solid wall that costs more to cut and hurts the attacker.
+    Tough,
+}
+
+impl WallKind {
+    /// True if the tile blocks the grid (diffusion and drift): every kind except
+    /// the mat, which only slows diffusion.
+    pub fn blocks_grid(self) -> bool {
+        !matches!(self, WallKind::Mat)
+    }
+
+    /// The Metals and the membrane integrity that a lysis of this kind costs
+    /// besides the ATP: `(metals, recoil)`.
+    pub fn lyse_extra(self) -> (f32, f32) {
+        match self {
+            WallKind::Tough => (TOUGH_LYSE_METALS, TOUGH_RECOIL),
+            _ => (0.0, 0.0),
+        }
+    }
 }
 
 /// The wall tiles of the level, by grid cell `(x, y)`.
@@ -95,9 +132,21 @@ pub fn pore_passable(proteome: &Proteome) -> bool {
 /// or ghosts.
 pub fn solid_for(kind: WallKind, proteome: &Proteome, ghosting: bool) -> bool {
     match kind {
-        WallKind::Wall => !ghosting,
+        WallKind::Wall | WallKind::Tough => !ghosting,
         WallKind::Pore => !ghosting && !pore_passable(proteome),
+        WallKind::Mat => false,
     }
+}
+
+/// The tile that holds a world position, or `None` outside the field.
+pub fn tile_at(origin: Vec2, position: Vec2) -> Option<(usize, usize)> {
+    let local = (position - origin) / CELL_SIZE;
+    (local.x >= 0.0 && local.y >= 0.0).then(|| (local.x as usize, local.y as usize))
+}
+
+/// True if the centre of a body is on a microbial mat.
+pub fn in_mat(map: &WallMap, origin: Vec2, position: Vec2) -> bool {
+    tile_at(origin, position).is_some_and(|tile| map.get(tile) == Some(WallKind::Mat))
 }
 
 /// Centre of tile `(x, y)` in world units, for a grid origin.
@@ -138,7 +187,8 @@ pub fn touching_wall(map: &WallMap, origin: Vec2, position: Vec2, radius: f32) -
 }
 
 /// The tile that a lysis cuts: the tile in contact that is nearest to the point
-/// ahead of the cell along `aim`. `None` if no tile is in contact.
+/// ahead of the cell along `aim`. A mat is not cut (it has no body to cut).
+/// `None` if no tile is in contact.
 pub fn lyse_target(
     map: &WallMap,
     origin: Vec2,
@@ -149,6 +199,7 @@ pub fn lyse_target(
     let ahead = position + aim.normalize_or_zero() * radius;
     tiles_in_contact(map, origin, position, radius)
         .into_iter()
+        .filter(|(tile, _)| map.get(*tile) != Some(WallKind::Mat))
         .map(|(tile, _)| (tile, distance_to_tile(origin, tile, ahead)))
         .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
         .map(|(tile, _)| tile)
@@ -157,11 +208,27 @@ pub fn lyse_target(
 /// The thrust force of an adhesin crawl. It balances the damping at
 /// `ADHESIN_CRAWL_SPEED`. A body at rest stays at rest with no input.
 pub fn crawl_force(input: Vec2, mass: f32, damping: f32) -> Vec2 {
-    input.clamp_length_max(1.0) * ADHESIN_CRAWL_SPEED * mass * damping
+    crawl_force_at(input, mass, damping, ADHESIN_CRAWL_SPEED)
 }
 
-/// Does a lysis happen, and what does it cost? Returns the tile that goes, or
-/// `None` if there is no wall in contact or the cell has too little ATP.
+/// The thrust force that balances the damping at a crawl `speed`. A cell in a
+/// microbial mat uses it with `MAT_CRAWL_SPEED`.
+pub fn crawl_force_at(input: Vec2, mass: f32, damping: f32, speed: f32) -> Vec2 {
+    input.clamp_length_max(1.0) * speed * mass * damping
+}
+
+/// A lysis that happened.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Lysis {
+    /// The tile that went.
+    pub tile: (usize, usize),
+    /// Membrane integrity that the attacker loses (a tough wall fights back).
+    pub recoil: f32,
+}
+
+/// Does a lysis happen, and what does it cost? Returns the lysis, or `None` if
+/// there is no wall in contact or the cell cannot pay: `LYSE_ATP` ATP, and for a
+/// tough wall `TOUGH_LYSE_METALS` Metals more. The caller applies the recoil.
 pub fn lyse(
     map: &mut WallMap,
     pools: &mut CurrencyPools,
@@ -169,14 +236,16 @@ pub fn lyse(
     position: Vec2,
     radius: f32,
     aim: Vec2,
-) -> Option<(usize, usize)> {
+) -> Option<Lysis> {
     let tile = lyse_target(map, origin, position, radius, aim)?;
-    if pools.get(Currency::ATP) < LYSE_ATP {
+    let (metals, recoil) = map.get(tile)?.lyse_extra();
+    if pools.get(Currency::ATP) < LYSE_ATP || pools.get(Currency::Metals) < metals {
         return None;
     }
     pools.modify(Currency::ATP, -LYSE_ATP);
+    pools.modify(Currency::Metals, -metals);
     map.remove(tile);
-    Some(tile)
+    Some(Lysis { tile, recoil })
 }
 
 /// A tile that was cut. The world removes its collider and sprite.
@@ -209,16 +278,16 @@ pub fn lyse_system(
     mut cut: MessageWriter<TileLysed>,
     mut map: ResMut<WallMap>,
     grid: Option<ResMut<EnvGrid>>,
-    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools, &mut Membrane), With<Cell>>,
 ) {
     let Some(mut grid) = grid else {
         return;
     };
     for order in orders.read() {
-        let Ok((transform, size, mut pools)) = cells.get_mut(order.cell) else {
+        let Ok((transform, size, mut pools, mut membrane)) = cells.get_mut(order.cell) else {
             continue;
         };
-        if let Some(tile) = lyse(
+        if let Some(Lysis { tile, recoil }) = lyse(
             &mut map,
             &mut pools,
             grid.origin(),
@@ -227,6 +296,9 @@ pub fn lyse_system(
             order.direction,
         ) {
             grid.set_wall(tile.0, tile.1, false);
+            if recoil > 0.0 {
+                membrane.damage(recoil);
+            }
             cut.write(TileLysed(tile));
         }
     }
@@ -296,8 +368,8 @@ mod tests {
         let mut pools = CurrencyPools::default();
         pools.set(Currency::ATP, 12.0);
         // A body left of the pair, aiming east: the nearer tile (2,2) goes.
-        let tile = lyse(&mut map, &mut pools, ORIGIN, Vec2::new(44.0, 80.0), 20.0, Vec2::X);
-        assert_eq!(tile, Some((2, 2)));
+        let lysis = lyse(&mut map, &mut pools, ORIGIN, Vec2::new(44.0, 80.0), 20.0, Vec2::X);
+        assert_eq!(lysis, Some(Lysis { tile: (2, 2), recoil: 0.0 }));
         assert_eq!(map.get((2, 2)), None);
         assert_eq!(map.get((3, 2)), Some(WallKind::Wall));
         assert_eq!(pools.get(Currency::ATP), 12.0 - LYSE_ATP);

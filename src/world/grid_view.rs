@@ -5,7 +5,7 @@
 //! few world pixels. The image is rewritten after each metabolic tick.
 //!
 //! Colours follow `docs/art-direction.md`: heat is orange and red, minerals are
-//! cyan. Light (UV) is pale yellow with a violet edge: the art doc has no light
+//! cyan, O2 is a sea green. Light (UV) is pale yellow with a violet edge: the art doc has no light
 //! colour yet, so these are stand-ins (see its "Not done yet" list). A glow is dithered with an ordered 4x4 pattern: a texel is either
 //! fully set or fully clear, never blended. `render_grid` is a pure function
 //! of the grid, so the colours and the dither can be tested without a window.
@@ -35,6 +35,7 @@ const BAYER4: [[f32; 4]; 4] = [
 
 /// One glow band: it fades in from `lo` to `hi`, in channel units, and is drawn
 /// in `color`.
+#[derive(Debug, PartialEq)]
 struct Band {
     lo: f32,
     hi: f32,
@@ -64,6 +65,37 @@ const LIGHT_BANDS: [Band; 2] = [
     Band { lo: 0.2, hi: 2.5, color: [0x7c, 0x52, 0xcc] },
     Band { lo: 2.0, hi: 7.0, color: [0xff, 0xf4, 0xb4] },
 ];
+
+/// O2 bands (M7): a pale sea green. The art doc has no O2 colour yet: a
+/// stand-in for the **art owner**.
+const O2_BANDS: [Band; 2] = [
+    Band { lo: 0.4, hi: 3.0, color: [0x2a, 0x8c, 0x6a] },
+    Band { lo: 2.5, hi: 8.0, color: [0x9a, 0xf0, 0xcc] },
+];
+
+/// Light bands of shallow water. Light covers the whole upper water, so the
+/// bands draw only the strong light near the surface, where UV hurts: a warm
+/// pale yellow, and a violet edge. Below that the water is plain.
+const SURFACE_LIGHT_BANDS: [Band; 2] = [
+    Band { lo: 3.0, hi: 6.0, color: [0x7c, 0x52, 0xcc] },
+    Band { lo: 5.5, hi: 9.5, color: [0xff, 0xf4, 0xb4] },
+];
+
+/// How a level draws its grid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridStyle {
+    light_bands: &'static [Band],
+}
+
+impl GridStyle {
+    /// The style of a field.
+    pub fn for_field(field: crate::level::FieldKind) -> Self {
+        match field {
+            crate::level::FieldKind::Vents => Self { light_bands: &LIGHT_BANDS },
+            crate::level::FieldKind::Shallow => Self { light_bands: &SURFACE_LIGHT_BANDS },
+        }
+    }
+}
 
 /// Heat level from which heat is drawn over light.
 const HEAT_OVER_LIGHT: f32 = 25.0;
@@ -104,6 +136,11 @@ pub fn texture_size(grid: &EnvGrid) -> (usize, usize) {
 /// RGBA8 pixels of the grid, row 0 at the top. A texel is clear (alpha 0) or
 /// fully set (alpha 255). Strong heat is drawn over light, light over weak heat, and heat over minerals.
 pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
+    render_grid_styled(grid, GridStyle::for_field(crate::level::FieldKind::Vents))
+}
+
+/// `render_grid` with the style of a level.
+pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
     let (width, height) = texture_size(grid);
     let texel = CELL_SIZE / TEXELS_PER_CELL as f32;
     let origin = grid.origin();
@@ -120,7 +157,8 @@ pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
             // cannot draw anything here, so it is not interpolated.
             let taps = bilinear_taps(dims, origin, pos);
             let heat = level_at(&taps, grid.layer(Channel::Heat), HEAT_BANDS[0].lo);
-            let light = level_at(&taps, grid.layer(Channel::Light), LIGHT_BANDS[0].lo);
+            let light = level_at(&taps, grid.layer(Channel::Light), style.light_bands[0].lo);
+            let o2 = level_at(&taps, grid.layer(Channel::O2), O2_BANDS[0].lo);
             let minerals = level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo);
             // Strong heat is drawn over light. Weak heat is not, so the faint
             // halo of a vent does not hide a shaft.
@@ -129,8 +167,9 @@ pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
             } else {
                 None
             }
-            .or_else(|| band_color(&LIGHT_BANDS, light, threshold))
+            .or_else(|| band_color(style.light_bands, light, threshold))
             .or_else(|| band_color(&HEAT_BANDS, heat, threshold))
+            .or_else(|| band_color(&O2_BANDS, o2, threshold))
             .or_else(|| band_color(&MINERAL_BANDS, minerals, threshold));
             if let Some([r, g, b]) = color {
                 let i = (ty * width + tx) * 4;
@@ -143,7 +182,7 @@ pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
 
 /// The handle of the grid image.
 #[derive(Resource)]
-pub struct GridImage(pub Handle<Image>);
+pub struct GridImage(pub Handle<Image>, pub GridStyle);
 
 /// A mineral particle: a sprite that shows where minerals are. It is visible
 /// when the minerals under it are above `threshold`. Visual only.
@@ -161,10 +200,10 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Spawns the sprite that shows the grid image.
-pub fn spawn_grid_view(commands: &mut Commands, grid: &EnvGrid) {
+pub fn spawn_grid_view(commands: &mut Commands, grid: &EnvGrid, style: GridStyle) {
     commands.queue({
         let (width, height) = texture_size(grid);
-        let data = render_grid(grid);
+        let data = render_grid_styled(grid, style);
         let world_size = grid.world_size();
         let center = grid.origin() + world_size * 0.5;
         move |world: &mut World| {
@@ -181,7 +220,7 @@ pub fn spawn_grid_view(commands: &mut Commands, grid: &EnvGrid) {
             );
             image.sampler = ImageSampler::nearest();
             let handle = world.resource_mut::<Assets<Image>>().add(image);
-            world.insert_resource(GridImage(handle.clone()));
+            world.insert_resource(GridImage(handle.clone(), style));
             world.spawn((
                 Name::new("Environment Grid"),
                 Sprite {
@@ -268,7 +307,7 @@ fn update_grid_image(
 ) {
     let Some(handle) = image_handle else { return };
     if let Some(mut image) = images.get_mut(&handle.0) {
-        image.data = Some(render_grid(&grid));
+        image.data = Some(render_grid_styled(&grid, handle.1));
     }
 }
 

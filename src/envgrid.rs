@@ -1,7 +1,7 @@
 //! # Environment grid
 //!
-//! `EnvGrid` is a coarse grid with one `f32` layer for each `Channel`: heat and
-//! minerals and light (UV). Each channel has sources (emitters),
+//! `EnvGrid` is a coarse grid with one `f32` layer for each `Channel`: heat,
+//! minerals, light (UV) and O2. Each channel has sources (emitters),
 //! diffusion, a drift and a decay. Cells sample the grid at their position and
 //! take minerals from it (see `exchange`).
 //!
@@ -31,6 +31,13 @@
 //! blocks drift and diffusion. Nothing is created or lost, so the total of a
 //! layer is still conserved. The `_masked` functions take the mask; the others
 //! call them with no mask.
+//!
+//! ## Leaky cells
+//!
+//! A grid cell can also be *leaky* (a microbial mat): it is not a wall, but
+//! diffusion across its edges is multiplied by a factor below 1 (the lower of
+//! the two cells at an edge). The flow between two cells stays equal and
+//! opposite, so the total is still conserved.
 //!
 //! Ticks of 0.1 s, 0.2 s or 0.8 s all use sub-steps of 0.05 s, so the tick
 //! length does not change the result.
@@ -220,7 +227,22 @@ pub fn diffuse_masked(
     share: f32,
     walls: Option<&[bool]>,
 ) {
+    diffuse_weighted(layer, scratch, dims, share, walls, None);
+}
+
+/// `diffuse_masked` with a leak factor for each grid cell (0 to 1; 1 is open).
+/// The flow across the edge of two cells is multiplied by the lower factor of
+/// the two, so it is the same in both directions and mass is conserved.
+pub fn diffuse_weighted(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    share: f32,
+    walls: Option<&[bool]>,
+    leak: Option<&[f32]>,
+) {
     let is_wall = |x: usize, y: usize| walls.is_some_and(|w| w[dims.index(x, y)]);
+    let factor = |a: usize, b: usize| leak.map_or(1.0, |l| l[a].min(l[b]));
     let share = share.clamp(0.0, MAX_DIFFUSION_SHARE);
     if share <= 0.0 {
         return;
@@ -236,16 +258,20 @@ pub fn diffuse_masked(
             }
             let mut flow = 0.0;
             if x > 0 && !is_wall(x - 1, y) {
-                flow += layer[dims.index(x - 1, y)] - here;
+                let j = dims.index(x - 1, y);
+                flow += (layer[j] - here) * factor(i, j);
             }
             if x + 1 < dims.width && !is_wall(x + 1, y) {
-                flow += layer[dims.index(x + 1, y)] - here;
+                let j = dims.index(x + 1, y);
+                flow += (layer[j] - here) * factor(i, j);
             }
             if y > 0 && !is_wall(x, y - 1) {
-                flow += layer[dims.index(x, y - 1)] - here;
+                let j = dims.index(x, y - 1);
+                flow += (layer[j] - here) * factor(i, j);
             }
             if y + 1 < dims.height && !is_wall(x, y + 1) {
-                flow += layer[dims.index(x, y + 1)] - here;
+                let j = dims.index(x, y + 1);
+                flow += (layer[j] - here) * factor(i, j);
             }
             scratch[i] = here + share * flow;
         }
@@ -286,6 +312,21 @@ pub fn step_layer_masked(
     walls: Option<&[bool]>,
     dt: f32,
 ) {
+    step_layer_leaky(layer, scratch, dims, emission, params, walls, None, dt);
+}
+
+/// `step_layer_masked` with leak factors (see the module docs).
+#[allow(clippy::too_many_arguments)]
+pub fn step_layer_leaky(
+    layer: &mut [f32],
+    scratch: &mut Vec<f32>,
+    dims: GridDims,
+    emission: &[f32],
+    params: &FieldParams,
+    walls: Option<&[bool]>,
+    leak: Option<&[f32]>,
+    dt: f32,
+) {
     if dt <= 0.0 {
         return;
     }
@@ -294,7 +335,7 @@ pub fn step_layer_masked(
     for _ in 0..n {
         add_sources_masked(layer, emission, walls, h);
         advect_masked(layer, scratch, dims, params.drift, params.open_drift_edges, walls, h);
-        diffuse_masked(layer, scratch, dims, params.diffusion * h, walls);
+        diffuse_weighted(layer, scratch, dims, params.diffusion * h, walls, leak);
         decay_layer(layer, params.decay, h);
     }
 }
@@ -354,6 +395,35 @@ pub fn take_from_layer(
     taken
 }
 
+/// Adds up to `amount` to the grid cells around a world position, in proportion
+/// to the bilinear weights. Wall cells get nothing: their share goes to the
+/// other cells. Returns what was added (0 if all four cells are walls), so a
+/// caller can take exactly that from a cell.
+pub fn add_to_layer(
+    layer: &mut [f32],
+    dims: GridDims,
+    origin: Vec2,
+    pos: Vec2,
+    walls: Option<&[bool]>,
+    amount: f32,
+) -> f32 {
+    if amount <= 0.0 {
+        return 0.0;
+    }
+    let taps = bilinear_taps(dims, origin, pos);
+    let open = |i: usize| !walls.is_some_and(|w| w[i]);
+    let weight: f32 = taps.iter().filter(|&&(i, _)| open(i)).map(|&(_, w)| w).sum();
+    if weight <= 0.0 {
+        return 0.0;
+    }
+    for (i, w) in taps {
+        if open(i) {
+            layer[i] += amount * w / weight;
+        }
+    }
+    amount
+}
+
 // --- The resource ---
 
 /// The environment grid. One layer for each `Channel`.
@@ -372,6 +442,9 @@ pub struct EnvGrid {
     /// Wall cells: inert, they block drift and diffusion.
     walls: Vec<bool>,
     wall_count: usize,
+    /// Diffusion factor of each grid cell (1 is open). See "Leaky cells".
+    leak: Vec<f32>,
+    leak_count: usize,
 }
 
 impl EnvGrid {
@@ -390,6 +463,8 @@ impl EnvGrid {
             scratch: Vec::new(),
             walls: vec![false; dims.len()],
             wall_count: 0,
+            leak: vec![1.0; dims.len()],
+            leak_count: 0,
         }
     }
 
@@ -412,6 +487,25 @@ impl EnvGrid {
         } else {
             self.wall_count -= 1;
         }
+    }
+
+    /// Sets the diffusion factor of grid cell `(x, y)`, from 0 to 1. A cell
+    /// with a factor below 1 is leaky: a microbial mat.
+    pub fn set_leak(&mut self, x: usize, y: usize, factor: f32) {
+        let i = self.dims.index(x, y);
+        let factor = factor.clamp(0.0, 1.0);
+        let was = self.leak[i] < 1.0;
+        self.leak[i] = factor;
+        match (was, factor < 1.0) {
+            (false, true) => self.leak_count += 1,
+            (true, false) => self.leak_count -= 1,
+            _ => {}
+        }
+    }
+
+    /// The diffusion factor of grid cell `(x, y)`.
+    pub fn leak(&self, x: usize, y: usize) -> f32 {
+        self.leak[self.dims.index(x, y)]
     }
 
     pub fn is_wall(&self, x: usize, y: usize) -> bool {
@@ -580,6 +674,21 @@ impl EnvGrid {
         )
     }
 
+    /// Adds `amount` of a channel around a world position (wall cells get
+    /// nothing). Returns what was added, which is all of `amount` unless the
+    /// four cells round the position are walls.
+    pub fn deposit(&mut self, channel: Channel, pos: Vec2, amount: f32) -> f32 {
+        let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
+        add_to_layer(
+            &mut self.layers[channel.index()],
+            self.dims,
+            self.origin,
+            pos,
+            walls,
+            amount,
+        )
+    }
+
     /// Runs all channels for `dt` seconds.
     pub fn step(&mut self, dt: f32) {
         for channel in Channel::ALL {
@@ -588,13 +697,15 @@ impl EnvGrid {
                 continue;
             }
             let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
-            step_layer_masked(
+            let leak = (self.leak_count > 0).then_some(self.leak.as_slice());
+            step_layer_leaky(
                 &mut self.layers[i],
                 &mut self.scratch,
                 self.dims,
                 &self.emission[i],
                 &self.params[i],
                 walls,
+                leak,
                 dt,
             );
         }
