@@ -31,6 +31,8 @@ pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
 #[cfg(feature = "full")]
+pub mod sprites;
+#[cfg(feature = "full")]
 pub mod world;
 
 /// The top-level screens. See `screens` for each one.
@@ -108,6 +110,7 @@ impl MetabolisticApp {
             app.add_plugins(dev_tools::plugin)
                 .add_plugins(debug::plugin)
                 .add_plugins(inspector::plugin)
+                .add_plugins(sprites::plugin)
                 .add_plugins(screens::plugin)
                 .add_plugins(world::plugin);
             if smoke_test::requested() {

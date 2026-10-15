@@ -21,8 +21,9 @@ use crate::cell::CellSize;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 
 /// World units (pixels) in one unit of `CellSize::radius`. The player radius
-/// is 30 pixels. **Playtest.**
-pub const PIXELS_PER_SIZE_UNIT: f32 = 30.0;
+/// is 20 pixels, the radius of the `player_cell` sprite (one world unit is
+/// one sprite pixel). **Playtest.**
+pub const PIXELS_PER_SIZE_UNIT: f32 = 20.0;
 /// Mass for each unit of cell area (`radius²`).
 pub const MASS_PER_AREA: f32 = 1.0;
 /// Linear damping per second for each unit of radius.
@@ -117,8 +118,8 @@ mod tests {
     }
 
     #[test]
-    fn player_body_is_30_pixels_across_the_radius() {
-        assert_eq!(world_radius(&CellSize { radius: 1.0 }), 30.0);
+    fn player_body_is_20_pixels_across_the_radius() {
+        assert_eq!(world_radius(&CellSize { radius: 1.0 }), 20.0);
     }
 
     #[test]

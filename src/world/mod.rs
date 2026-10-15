@@ -9,7 +9,7 @@
 //! - `grid_view`: draws the grid as one texture, plus the vents and the
 //!   mineral particles.
 //! - `player_body`: the physics body, thrust, camera and blob look of the
-//!   player's cell.
+//!   player's cell. The cell plays baked sprite sheets.
 //! - `hud`: ATP, membrane and pool bars.
 
 use avian2d::prelude::*;
@@ -17,6 +17,7 @@ use bevy::prelude::*;
 
 use crate::level::{self, VENTS};
 use crate::shared::spawn_starter_cell_at_start;
+use crate::sprites::Sheets;
 use crate::InRun;
 
 pub mod grid_view;
@@ -30,7 +31,7 @@ const WATER_COLOR: Color = Color::srgb(0.039, 0.071, 0.149);
 const WALL_THICKNESS: f32 = 200.0;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins(PhysicsPlugins::default().with_length_unit(30.0))
+    app.add_plugins(PhysicsPlugins::default().with_length_unit(20.0))
         .insert_resource(Gravity(Vec2::ZERO))
         .insert_resource(ClearColor(WATER_COLOR))
         .add_plugins((grid_view::plugin, player_body::plugin, hud::plugin))
@@ -38,7 +39,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnExit(InRun), remove_grid);
 }
 
-fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>, sheets: Res<Sheets>) {
     let grid = level::vent_field();
     let world_size = grid.world_size();
     let origin = grid.origin();
@@ -53,7 +54,7 @@ fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     let (player, cell) = spawn_starter_cell_at_start(&mut commands);
     commands.entity(player).insert(DespawnOnExit(InRun));
-    player_body::attach_body(&mut commands, &asset_server, cell);
+    player_body::attach_body(&mut commands, &sheets, cell);
 }
 
 fn remove_grid(mut commands: Commands) {

@@ -1,0 +1,1960 @@
+{
+  "player_cell": {
+    "frame_size": [
+      64,
+      64
+    ],
+    "anchor_px": [
+      32,
+      32.5
+    ],
+    "radius": 20,
+    "idle": {
+      "file": "player_cell_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    },
+    "move": {
+      "file": "player_cell_move.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 10,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction of travel"
+    },
+    "contact": {
+      "file": "player_cell_contact.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the cell to the wall"
+    },
+    "hit": {
+      "file": "player_cell_hit.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the blow travels"
+    },
+    "spawn": {
+      "file": "player_cell_spawn.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 12,
+      "loop": false
+    },
+    "death": {
+      "file": "player_cell_death.png",
+      "columns": 10,
+      "rows": 1,
+      "fps": 10,
+      "loop": false
+    }
+  },
+  "prey_bacillus": {
+    "frame_size": [
+      48,
+      48
+    ],
+    "anchor_px": [
+      24.0,
+      24.0
+    ],
+    "radius": 11.25,
+    "idle": {
+      "file": "prey_bacillus_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    },
+    "move": {
+      "file": "prey_bacillus_move.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 10,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction of travel"
+    },
+    "contact": {
+      "file": "prey_bacillus_contact.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the cell to the wall"
+    },
+    "hit": {
+      "file": "prey_bacillus_hit.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the blow travels"
+    },
+    "spawn": {
+      "file": "prey_bacillus_spawn.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 12,
+      "loop": false
+    },
+    "death": {
+      "file": "prey_bacillus_death.png",
+      "columns": 10,
+      "rows": 1,
+      "fps": 10,
+      "loop": false
+    }
+  },
+  "predator_cell": {
+    "frame_size": [
+      64,
+      64
+    ],
+    "anchor_px": [
+      32,
+      32
+    ],
+    "radius": 19,
+    "idle": {
+      "file": "predator_cell_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    },
+    "move": {
+      "file": "predator_cell_move.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 10,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction of travel"
+    },
+    "contact": {
+      "file": "predator_cell_contact.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the cell to the wall"
+    },
+    "hit": {
+      "file": "predator_cell_hit.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the blow travels"
+    },
+    "spawn": {
+      "file": "predator_cell_spawn.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 12,
+      "loop": false
+    },
+    "death": {
+      "file": "predator_cell_death.png",
+      "columns": 10,
+      "rows": 1,
+      "fps": 10,
+      "loop": false
+    }
+  },
+  "symbiont_cell": {
+    "frame_size": [
+      48,
+      48
+    ],
+    "anchor_px": [
+      24,
+      24
+    ],
+    "radius": 9.5,
+    "idle": {
+      "file": "symbiont_cell_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    },
+    "move": {
+      "file": "symbiont_cell_move.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 10,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction of travel"
+    },
+    "contact": {
+      "file": "symbiont_cell_contact.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the cell to the wall"
+    },
+    "hit": {
+      "file": "symbiont_cell_hit.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the blow travels"
+    },
+    "spawn": {
+      "file": "symbiont_cell_spawn.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 12,
+      "loop": false
+    },
+    "death": {
+      "file": "symbiont_cell_death.png",
+      "columns": 10,
+      "rows": 1,
+      "fps": 10,
+      "loop": false
+    }
+  },
+  "gate_cell_phototroph": {
+    "frame_size": [
+      72,
+      72
+    ],
+    "anchor_px": [
+      36,
+      36
+    ],
+    "radius": 25,
+    "idle": {
+      "file": "gate_cell_phototroph_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    }
+  },
+  "virus_phage": {
+    "frame_size": [
+      52,
+      36
+    ],
+    "anchor_px": [
+      26,
+      18
+    ],
+    "radius": 20,
+    "idle": {
+      "file": "virus_phage_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 6,
+      "loop": true
+    },
+    "spawn": {
+      "file": "virus_phage_spawn.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 12,
+      "loop": false
+    },
+    "death": {
+      "file": "virus_phage_death.png",
+      "columns": 10,
+      "rows": 1,
+      "fps": 10,
+      "loop": false
+    }
+  },
+  "overlay_flagellum": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Point it away from the way you want to go. use = a burst of thrust, loops while it lasts.",
+    "idle": {
+      "file": "overlay_flagellum_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_flagellum_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_adhesin": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the grab (plays once). hold = stuck to something (loops until released).",
+    "idle": {
+      "file": "overlay_adhesin_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_adhesin_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_adhesin_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_toxin": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = fire (plays once). Spawn a toxin_droplet projectile at the needle tip.",
+    "idle": {
+      "file": "overlay_toxin_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_toxin_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_transporter_carbon": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Takes carbon. Match it to a wall pore of the same substrate. use loops while it takes up.",
+    "idle": {
+      "file": "overlay_transporter_carbon_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_transporter_carbon_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_transporter_mineral": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Takes mineral. Match it to a wall pore of the same substrate. use loops while it takes up.",
+    "idle": {
+      "file": "overlay_transporter_mineral_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_transporter_mineral_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_transporter_metal": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Takes metal. Match it to a wall pore of the same substrate. use loops while it takes up.",
+    "idle": {
+      "file": "overlay_transporter_metal_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_transporter_metal_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_lytic": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Cuts a wall. use loops while it cuts (it costs a cofactor for each use).",
+    "idle": {
+      "file": "overlay_lytic_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_lytic_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_fusion": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the harpoon and the fold (plays once). hold = membranes merging (loops until done).",
+    "idle": {
+      "file": "overlay_fusion_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_fusion_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_fusion_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_receptor": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = a molecule binds and the signal runs into the cell (plays once).",
+    "idle": {
+      "file": "overlay_receptor_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_receptor_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc1_self": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = a peptide from inside loads into the groove (plays once). hold = on show, until it is withdrawn. Antigen: self.",
+    "idle": {
+      "file": "overlay_mhc1_self_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc1_self_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc1_self_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc1_viral": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = a peptide from inside loads into the groove (plays once). hold = on show, until it is withdrawn. Antigen: viral.",
+    "idle": {
+      "file": "overlay_mhc1_viral_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc1_viral_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc1_viral_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc1_prey": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = a peptide from inside loads into the groove (plays once). hold = on show, until it is withdrawn. Antigen: prey.",
+    "idle": {
+      "file": "overlay_mhc1_prey_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc1_prey_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc1_prey_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc2_self": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the placeholder is thrown out and a peptide from an eaten cell slides in (plays once). hold = on show. Antigen: self.",
+    "idle": {
+      "file": "overlay_mhc2_self_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc2_self_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc2_self_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc2_viral": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the placeholder is thrown out and a peptide from an eaten cell slides in (plays once). hold = on show. Antigen: viral.",
+    "idle": {
+      "file": "overlay_mhc2_viral_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc2_viral_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc2_viral_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_mhc2_prey": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the placeholder is thrown out and a peptide from an eaten cell slides in (plays once). hold = on show. Antigen: prey.",
+    "idle": {
+      "file": "overlay_mhc2_prey_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_mhc2_prey_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_mhc2_prey_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_tcr_self": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The cup rim shows the antigen it matches. use = clamps on an MHC with that antigen (plays once). hold = signalling. Antigen: self.",
+    "idle": {
+      "file": "overlay_tcr_self_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_tcr_self_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_tcr_self_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_tcr_viral": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The cup rim shows the antigen it matches. use = clamps on an MHC with that antigen (plays once). hold = signalling. Antigen: viral.",
+    "idle": {
+      "file": "overlay_tcr_viral_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_tcr_viral_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_tcr_viral_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_tcr_prey": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The cup rim shows the antigen it matches. use = clamps on an MHC with that antigen (plays once). hold = signalling. Antigen: prey.",
+    "idle": {
+      "file": "overlay_tcr_prey_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_tcr_prey_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_tcr_prey_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_antibody_self": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The arm tips show the antigen it fits. use = catches and tags the antigen (plays once). hold = tagged, in the grip. Antigen: self.",
+    "idle": {
+      "file": "overlay_antibody_self_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_antibody_self_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_antibody_self_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_antibody_viral": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The arm tips show the antigen it fits. use = catches and tags the antigen (plays once). hold = tagged, in the grip. Antigen: viral.",
+    "idle": {
+      "file": "overlay_antibody_viral_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_antibody_viral_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_antibody_viral_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_antibody_prey": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "The arm tips show the antigen it fits. use = catches and tags the antigen (plays once). hold = tagged, in the grip. Antigen: prey.",
+    "idle": {
+      "file": "overlay_antibody_prey_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_antibody_prey_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_antibody_prey_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_perforin": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "use = the ring closes and a pore opens (plays once). hold = the closed ring, active.",
+    "idle": {
+      "file": "overlay_perforin_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_perforin_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_perforin_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 8,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "toxin_droplet": {
+    "frame_size": [
+      12,
+      12
+    ],
+    "anchor_px": [
+      6,
+      6
+    ],
+    "loop": {
+      "file": "toxin_droplet.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "engulf_player_prey": {
+    "engulfer": "player_cell",
+    "target": "prey_bacillus",
+    "engulf": {
+      "file": "engulf_player_prey_engulf.png",
+      "frame_size": [
+        112,
+        112
+      ],
+      "anchor_px": [
+        56.0,
+        56.0
+      ],
+      "columns": 12,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    },
+    "digest": {
+      "file": "engulf_player_prey_digest.png",
+      "frame_size": [
+        64,
+        64
+      ],
+      "anchor_px": [
+        32,
+        32.5
+      ],
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    },
+    "digest_end": {
+      "file": "engulf_player_prey_digest_end.png",
+      "frame_size": [
+        64,
+        64
+      ],
+      "anchor_px": [
+        32,
+        32.5
+      ],
+      "columns": 10,
+      "rows": 8,
+      "fps": 10,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    }
+  },
+  "engulf_player_symbiont": {
+    "engulfer": "player_cell",
+    "target": "symbiont_cell",
+    "engulf": {
+      "file": "engulf_player_symbiont_engulf.png",
+      "frame_size": [
+        112,
+        112
+      ],
+      "anchor_px": [
+        56.0,
+        56.0
+      ],
+      "columns": 12,
+      "rows": 8,
+      "fps": 12,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    },
+    "digest": {
+      "file": "engulf_player_symbiont_digest.png",
+      "frame_size": [
+        64,
+        64
+      ],
+      "anchor_px": [
+        32,
+        32.5
+      ],
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    },
+    "digest_end": {
+      "file": "engulf_player_symbiont_digest_end.png",
+      "frame_size": [
+        64,
+        64
+      ],
+      "anchor_px": [
+        32,
+        32.5
+      ],
+      "columns": 10,
+      "rows": 8,
+      "fps": 10,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction from the engulfer to the target"
+    }
+  },
+  "gate_cell_victory": {
+    "frame_size": [
+      96,
+      96
+    ],
+    "anchor_px": [
+      48,
+      48
+    ],
+    "victory": {
+      "file": "gate_cell_victory.png",
+      "columns": 16,
+      "rows": 1,
+      "fps": 10,
+      "loop": false,
+      "note": "Centred on the gate cell. It ends on the gene orb: continue with gene_orb."
+    }
+  },
+  "gene_orb": {
+    "frame_size": [
+      24,
+      24
+    ],
+    "anchor_px": [
+      12,
+      12
+    ],
+    "loop": {
+      "file": "gene_orb.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  }
+}

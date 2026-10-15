@@ -21,7 +21,7 @@ use crate::InRun;
 
 /// Texels along one side of a grid cell. A texel is `CELL_SIZE / TEXELS_PER_CELL`
 /// world pixels.
-pub const TEXELS_PER_CELL: usize = 4;
+pub const TEXELS_PER_CELL: usize = 8;
 
 /// Ordered 4x4 dither matrix, thresholds in (0, 1). Same as `BAYER4` in
 /// `art/gen_sprites.py`.
@@ -162,14 +162,21 @@ pub fn spawn_grid_view(commands: &mut Commands, grid: &EnvGrid) {
     });
 }
 
-/// Spawns a vent chimney: a sprite and a round rock body.
+/// Z of the vent chimney (below the creatures).
+const VENT_Z: f32 = -5.0;
+/// Z of the vent plume. It is drawn above creatures (art doc, sprite list).
+const PLUME_Z: f32 = 5.0;
+
+/// Spawns a vent: the chimney, its round rock body, and the smoke plume above
+/// the creatures. Sprites are drawn at scale 1: one sprite pixel is one world
+/// unit, and the camera scale makes it a whole number of screen pixels.
 pub fn spawn_vent(commands: &mut Commands, asset_server: &AssetServer, vent: Vent) {
     use avian2d::prelude::*;
-    let scale = vent.radius / 50.0;
+    let position = vent.position.round();
     commands.spawn((
         Name::new("Vent"),
         Sprite::from_image(asset_server.load("sprites/vent_chimney_top.png")),
-        Transform::from_translation(vent.position.extend(-5.0)).with_scale(Vec3::splat(scale)),
+        Transform::from_translation(position.extend(VENT_Z)),
         DespawnOnExit(InRun),
         children![(
             // The rock is smaller than the sprite: the rest of it is glow.
@@ -177,6 +184,12 @@ pub fn spawn_vent(commands: &mut Commands, asset_server: &AssetServer, vent: Ven
             Collider::circle(36.0),
             Transform::default(),
         )],
+    ));
+    commands.spawn((
+        Name::new("Vent Plume"),
+        Sprite::from_image(asset_server.load("sprites/vent_plume_top.png")),
+        Transform::from_translation(position.extend(PLUME_Z)),
+        DespawnOnExit(InRun),
     ));
 }
 
@@ -199,7 +212,7 @@ pub fn spawn_mineral_particles(
             x ^= x >> 12;
             (x & 0xFFFF) as f32 / 65535.0
         };
-        let position = origin + Vec2::new(h(1) * size.x, h(2) * size.y);
+        let position = (origin + Vec2::new(h(1) * size.x, h(2) * size.y)).round();
         commands.spawn((
             Name::new("Mineral Particle"),
             MineralParticle {
@@ -300,7 +313,7 @@ mod tests {
         assert!(count(2.0) < count(3.0));
         assert!(count(3.0) < count(5.0));
         // Above the top band, every texel is set.
-        let full = 32 * 32;
+        let full = 8 * TEXELS_PER_CELL * 8 * TEXELS_PER_CELL;
         assert_eq!(count(100.0), full);
     }
 

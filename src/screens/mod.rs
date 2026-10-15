@@ -27,7 +27,16 @@ pub(crate) fn plugin(app: &mut App) {
 
 /// One 2D camera for every screen.
 fn spawn_camera(mut commands: Commands) {
-    commands.spawn((Name::new("Camera"), Camera2d));
+    // World units are sprite pixels. The scale makes each one a whole number
+    // of screen pixels (art doc, "In the game").
+    commands.spawn((
+        Name::new("Camera"),
+        Camera2d,
+        Projection::Orthographic(OrthographicProjection {
+            scale: 1.0 / crate::sprites::PIXEL_SCALE,
+            ..OrthographicProjection::default_2d()
+        }),
+    ));
 }
 
 /// Escape goes back to the menu. Tab switches between Run and Manage.

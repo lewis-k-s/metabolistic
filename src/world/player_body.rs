@@ -2,8 +2,11 @@
 //!
 //! The local player's `Cell` gets the physics body: a circle collider, mass and
 //! drag from `CellSize`, and a thrust force from `MoveInput` and its flagella.
-//! The sprite is a child of the cell, so the blob look (squash and wobble from
-//! velocity) changes only the sprite's scale and rotation, never the collider.
+//! The sprite is a child of the cell. It plays the baked sheets of
+//! `sprites` (spawn, idle, move in 8 directions). The body deform is in the
+//! frames (art rule 9), so the game never scales or rotates the sprite. World
+//! units are sprite pixels; the camera scale makes each one `PIXEL_SCALE`
+//! screen pixels.
 //!
 //! The formulas are in `movement`. The systems here fetch data and hand it to
 //! avian2d.
@@ -18,33 +21,46 @@ use crate::movement::{
 };
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::Proteome;
+use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row};
 use crate::{GameState, InRun};
 
 /// How fast the camera catches up with the player, per second.
 const CAMERA_FOLLOW_RATE: f32 = 6.0;
-/// Speed at which the blob is fully stretched, in pixels per second.
-const BLOB_REFERENCE_SPEED: f32 = 200.0;
-/// Size of `player_cell.png` in pixels.
-const PLAYER_SPRITE_PIXELS: f32 = 48.0;
+/// Speed above which the cell plays `move` and takes the row of its heading,
+/// in pixels per second.
+const MOVE_SPEED_THRESHOLD: f32 = 8.0;
 
-/// The child sprite of a cell that squashes and wobbles.
+/// The child sprite of a cell that plays the sprite sheets.
 #[derive(Component)]
 pub struct BlobSprite;
 
+/// The smoothed camera position, before it is rounded to a whole pixel.
+#[derive(Resource, Default)]
+struct CameraTrack(Option<Vec2>);
+
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        (read_move_input, animate_blob, camera_follow)
-            .chain()
-            .run_if(in_state(InRun)),
-    )
+    app.init_resource::<CameraTrack>()
+        .add_systems(
+            Update,
+            (read_move_input, drive_body_sprite)
+                .chain()
+                .before(SpriteSystems::Animate)
+                .run_if(in_state(InRun)),
+        )
+        .add_systems(
+            PostUpdate,
+            (snap_body_sprite, camera_follow)
+                .chain()
+                .before(TransformSystems::Propagate)
+                .run_if(in_state(InRun)),
+        )
     // Thrust is a force: set it before avian's fixed-step physics.
     .add_systems(FixedUpdate, apply_thrust.run_if(in_state(InRun)))
     .add_systems(OnExit(InRun), reset_camera);
 }
 
 /// Adds the body and the sprite to the player's cell.
-pub fn attach_body(commands: &mut Commands, asset_server: &AssetServer, cell: Entity) {
+pub fn attach_body(commands: &mut Commands, sheets: &Sheets, cell: Entity) {
     let size = CellSize::default();
     let radius = world_radius(&size);
     commands.entity(cell).insert((
@@ -57,13 +73,12 @@ pub fn attach_body(commands: &mut Commands, asset_server: &AssetServer, cell: En
         Visibility::default(),
         DespawnOnExit(InRun),
     ));
-    let sprite_scale = 2.0 * radius / PLAYER_SPRITE_PIXELS;
-    commands.entity(cell).with_child((
-        Name::new("Cell Sprite"),
-        BlobSprite,
-        Sprite::from_image(asset_server.load("sprites/player_cell.png")),
-        Transform::from_scale(Vec3::splat(sprite_scale)),
-    ));
+    let body = sheets
+        .bundle("player_cell", clip::SPAWN)
+        .expect("the manifest has player_cell/spawn");
+    commands
+        .entity(cell)
+        .with_child((Name::new("Cell Sprite"), BlobSprite, body, Transform::default()));
 }
 
 /// WASD sets the wanted direction on the Run screen. In Manage, time runs but
@@ -112,42 +127,53 @@ fn apply_thrust(
     }
 }
 
-/// Visual only: squash and wobble the sprite from the velocity of its cell.
-fn animate_blob(
-    time: Res<Time>,
-    cells: Query<&LinearVelocity, With<Cell>>,
-    mut sprites: Query<(&ChildOf, &mut Transform), With<BlobSprite>>,
-) {
-    let rest_scale = 2.0 * world_radius(&CellSize::default()) / PLAYER_SPRITE_PIXELS;
-    for (parent, mut transform) in &mut sprites {
-        let Ok(velocity) = cells.get(parent.parent()) else {
-            continue;
-        };
-        let (scale, angle) = blob_shape(velocity.0, time.elapsed_secs());
-        transform.scale = (scale * rest_scale).extend(1.0);
-        transform.rotation = Quat::from_rotation_z(angle);
+/// The sprite row for a velocity: the row of the heading when the cell moves,
+/// and the current row when it is (nearly) still.
+pub fn heading_row(velocity: Vec2, current: usize) -> usize {
+    if velocity.length() > MOVE_SPEED_THRESHOLD {
+        direction_row(velocity)
+    } else {
+        current
     }
 }
 
-/// The squash scale and the tilt (radians) of a blob for a velocity and a time.
-/// It stretches along the dominant axis of motion and keeps its area, and it
-/// wobbles a little, more when it moves fast. Everything is bounded.
-pub fn blob_shape(velocity: Vec2, time: f32) -> (Vec2, f32) {
-    let speed = velocity.length();
-    let motion = (speed / BLOB_REFERENCE_SPEED).clamp(0.0, 1.0);
-    let direction = velocity.normalize_or_zero();
+/// Picks the clip and the row of the body sprite. It plays the one-shot `spawn`,
+/// then `move` while the cell moves and `idle` when it is still.
+fn drive_body_sprite(
+    sheets: Res<Sheets>,
+    cells: Query<&LinearVelocity, With<Cell>>,
+    mut sprites: Query<(&ChildOf, &mut Animator), With<BlobSprite>>,
+) {
+    for (parent, mut animator) in &mut sprites {
+        let Ok(velocity) = cells.get(parent.parent()) else {
+            continue;
+        };
+        animator.row = heading_row(velocity.0, animator.row);
+        if animator.clip != clip::SPAWN || animator.finished() {
+            let moving = velocity.0.length() > MOVE_SPEED_THRESHOLD;
+            animator.play(if moving { clip::MOVE } else { clip::IDLE }, &sheets);
+        }
+    }
+}
 
-    // Stretch along x when moving sideways, along y when moving up or down.
-    let axis_bias = direction.x.abs() - direction.y.abs();
-    let stretch = 1.0 + 0.18 * motion * axis_bias;
-    // A slow breathing wobble, faster and larger when moving.
-    let wobble = (0.02 + 0.04 * motion) * (time * (3.0 + 5.0 * motion)).sin();
-    let sx = (stretch + wobble).max(0.5);
-    let sy = (1.0 / stretch - wobble).max(0.5);
+/// Puts the body sprite on a whole world pixel, so its pixels stay on the
+/// screen pixel grid while the physics body moves smoothly.
+fn snap_body_sprite(
+    cells: Query<&Transform, (With<Cell>, Without<BlobSprite>)>,
+    mut sprites: Query<(&ChildOf, &mut Transform), With<BlobSprite>>,
+) {
+    for (parent, mut transform) in &mut sprites {
+        let Ok(cell) = cells.get(parent.parent()) else {
+            continue;
+        };
+        let position = cell.translation.truncate();
+        transform.translation = (snap_offset(position)).extend(0.0);
+    }
+}
 
-    // Lean into sideways motion, with a small wobble.
-    let tilt = -0.12 * motion * direction.x + 0.05 * motion * (time * 7.0).sin();
-    (Vec2::new(sx, sy), tilt)
+/// The offset that moves `position` to the nearest whole pixel.
+pub fn snap_offset(position: Vec2) -> Vec2 {
+    position.round() - position
 }
 
 /// One smoothing step of the camera towards a target. Exact for any `dt`.
@@ -157,6 +183,7 @@ pub fn follow_step(current: Vec2, target: Vec2, dt: f32, rate: f32) -> Vec2 {
 
 fn camera_follow(
     time: Res<Time>,
+    mut track: ResMut<CameraTrack>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<&Transform, (With<Cell>, Without<Camera2d>)>,
     mut cameras: Query<&mut Transform, With<Camera2d>>,
@@ -169,18 +196,20 @@ fn camera_follow(
         return;
     };
     for mut camera in &mut cameras {
-        let next = follow_step(
-            camera.translation.truncate(),
-            target,
-            time.delta_secs(),
-            CAMERA_FOLLOW_RATE,
-        );
-        camera.translation = next.extend(camera.translation.z);
+        let current = track.0.unwrap_or(camera.translation.truncate());
+        let next = follow_step(current, target, time.delta_secs(), CAMERA_FOLLOW_RATE);
+        track.0 = Some(next);
+        // A whole pixel keeps the sprite pixels on the screen pixel grid.
+        camera.translation = next.round().extend(camera.translation.z);
     }
 }
 
 /// Puts the camera back at the origin for the menu screens.
-fn reset_camera(mut cameras: Query<&mut Transform, With<Camera2d>>) {
+fn reset_camera(
+    mut track: ResMut<CameraTrack>,
+    mut cameras: Query<&mut Transform, With<Camera2d>>,
+) {
+    track.0 = None;
     for mut camera in &mut cameras {
         camera.translation.x = 0.0;
         camera.translation.y = 0.0;
@@ -192,35 +221,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_blob_at_rest_is_nearly_round() {
-        for t in [0.0, 0.7, 1.9, 5.0] {
-            let (scale, angle) = blob_shape(Vec2::ZERO, t);
-            assert!((scale.x - 1.0).abs() < 0.03 && (scale.y - 1.0).abs() < 0.03);
-            assert!(angle.abs() < 0.01);
-        }
+    fn the_heading_row_follows_fast_motion_and_holds_when_still() {
+        assert_eq!(heading_row(Vec2::new(100.0, 0.0), 3), 0);
+        assert_eq!(heading_row(Vec2::new(0.0, 100.0), 3), 6);
+        assert_eq!(heading_row(Vec2::new(1.0, 1.0), 3), 3);
+        assert_eq!(heading_row(Vec2::ZERO, 5), 5);
     }
 
     #[test]
-    fn a_fast_blob_stretches_along_its_motion_and_keeps_its_area() {
-        let (side, _) = blob_shape(Vec2::new(400.0, 0.0), 0.0);
-        assert!(side.x > 1.1 && side.y < 0.95, "sideways: {side}");
-        let (up, _) = blob_shape(Vec2::new(0.0, 400.0), 0.0);
-        assert!(up.y > up.x, "upwards: {up}");
-        assert!((side.x * side.y - 1.0).abs() < 0.05, "area {}", side.x * side.y);
-    }
-
-    #[test]
-    fn the_blob_shape_is_bounded() {
-        for speed in [0.0, 50.0, 1e3, 1e6] {
-            for angle in 0..8 {
-                let v = Vec2::from_angle(angle as f32) * speed;
-                for t in 0..20 {
-                    let (scale, tilt) = blob_shape(v, t as f32 * 0.37);
-                    assert!(scale.x > 0.5 && scale.x < 1.4, "{scale}");
-                    assert!(scale.y > 0.5 && scale.y < 1.4, "{scale}");
-                    assert!(tilt.abs() < 0.25);
-                }
-            }
+    fn the_snap_offset_lands_on_a_whole_pixel() {
+        for p in [Vec2::new(10.3, -4.7), Vec2::new(-0.5, 99.99), Vec2::ZERO] {
+            let snapped = p + snap_offset(p);
+            assert_eq!(snapped, snapped.round());
+            assert!(snap_offset(p).abs().max_element() <= 0.5);
         }
     }
 
