@@ -1,9 +1,9 @@
-use metabolistic3d::molecules::{Currency, CurrencyPools, LipidToxicityThreshold};
-use metabolistic3d::blocks::MetabolicBlocksPlugin;
-use metabolistic3d::metabolism::{MetabolicFlowPlugin, FlowDirty};
-use metabolistic3d::blocks::genome::{Genome, GenomePlugin, MetabolicUpdateEvent, BlockKind};
-use metabolistic3d::player::spawn_local_player_cell;
 use bevy::prelude::*;
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MetabolicUpdateEvent};
+use metabolistic3d::blocks::MetabolicBlocksPlugin;
+use metabolistic3d::metabolism::{FlowDirty, MetabolicFlowPlugin};
+use metabolistic3d::molecules::{Currency, CurrencyPools, LipidToxicityThreshold};
+use metabolistic3d::player::spawn_local_player_cell;
 
 /// Tests that fermentation converts Pyruvate and ReducingPower into ATP and OrganicWaste.
 #[test]
@@ -26,17 +26,17 @@ fn test_fermentation_basic_flow() {
         cell_genome.express_gene(BlockKind::Fermentation);
         spawn_local_player_cell(&mut commands, cell_genome)
     };
-    
+
     // Apply commands to actually create the entities
     app.world_mut().flush();
-    
+
     // Force initial metabolic update since poll_genome_diff won't detect per-cell genomes
     app.world_mut().send_event(MetabolicUpdateEvent);
     app.update();
-    
-    // Run another update to ensure block spawning completes  
+
+    // Run another update to ensure block spawning completes
     app.update();
-    
+
     // Initialize currencies for fermentation
     {
         let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
@@ -51,26 +51,37 @@ fn test_fermentation_basic_flow() {
     // Trigger metabolic flow calculation
     app.world_mut().resource_mut::<FlowDirty>().0 = true;
     app.update();
-    
+
     // Run one more update to ensure all systems execute
     app.update();
 
     // --- Verification ---
     // Check that currencies have changed after metabolic flow calculation
     {
-        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
+        let currency_pools = app
+            .world()
+            .get_entity(cell_entity)
+            .unwrap()
+            .get::<CurrencyPools>()
+            .unwrap();
         let pyruvate = currency_pools.get(Currency::Pyruvate);
         let reducing_power = currency_pools.get(Currency::ReducingPower);
         let atp = currency_pools.get(Currency::ATP);
         let organic_waste = currency_pools.get(Currency::OrganicWaste);
-        
+
         // Should have consumed some inputs
-        assert!(pyruvate < 10.0, "Pyruvate should be consumed: {}", pyruvate);
-        assert!(reducing_power < 10.0, "ReducingPower should be consumed: {}", reducing_power);
-        
+        assert!(pyruvate < 10.0, "Pyruvate should be consumed: {pyruvate}");
+        assert!(
+            reducing_power < 10.0,
+            "ReducingPower should be consumed: {reducing_power}"
+        );
+
         // Should have produced some outputs
-        assert!(atp > 0.0, "ATP should be produced: {}", atp);
-        assert!(organic_waste > 0.0, "OrganicWaste should be produced: {}", organic_waste);
+        assert!(atp > 0.0, "ATP should be produced: {atp}");
+        assert!(
+            organic_waste > 0.0,
+            "OrganicWaste should be produced: {organic_waste}"
+        );
     }
 }
 
@@ -94,14 +105,14 @@ fn test_fermentation_requires_inputs() {
         cell_genome.express_gene(BlockKind::Fermentation);
         spawn_local_player_cell(&mut commands, cell_genome)
     };
-    
+
     // Apply commands to actually create the entities
     app.world_mut().flush();
-    
+
     // Trigger genome update to spawn fermentation block
     app.world_mut().send_event(MetabolicUpdateEvent);
     app.update();
-    
+
     // Initialize with no inputs
     {
         let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
@@ -119,9 +130,22 @@ fn test_fermentation_requires_inputs() {
     // --- Verification ---
     // Check that no currencies changed without inputs
     {
-        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
-        assert_eq!(currency_pools.get(Currency::ATP), 0.0, "ATP should remain at 0");
-        assert_eq!(currency_pools.get(Currency::OrganicWaste), 0.0, "OrganicWaste should remain at 0");
+        let currency_pools = app
+            .world()
+            .get_entity(cell_entity)
+            .unwrap()
+            .get::<CurrencyPools>()
+            .unwrap();
+        assert_eq!(
+            currency_pools.get(Currency::ATP),
+            0.0,
+            "ATP should remain at 0"
+        );
+        assert_eq!(
+            currency_pools.get(Currency::OrganicWaste),
+            0.0,
+            "OrganicWaste should remain at 0"
+        );
     }
 }
 
@@ -145,14 +169,14 @@ fn test_fermentation_stoichiometry() {
         cell_genome.express_gene(BlockKind::Fermentation);
         spawn_local_player_cell(&mut commands, cell_genome)
     };
-    
+
     // Apply commands to actually create the entities
     app.world_mut().flush();
-    
+
     // Trigger genome update to spawn fermentation block
     app.world_mut().send_event(MetabolicUpdateEvent);
     app.update();
-    
+
     // Initialize with specific amounts
     let initial_pyruvate = 5.0;
     let initial_reducing = 8.0;
@@ -171,25 +195,35 @@ fn test_fermentation_stoichiometry() {
 
     // --- Verification ---
     {
-        let currency_pools = app.world().get_entity(cell_entity).unwrap().get::<CurrencyPools>().unwrap();
+        let currency_pools = app
+            .world()
+            .get_entity(cell_entity)
+            .unwrap()
+            .get::<CurrencyPools>()
+            .unwrap();
         let pyruvate_consumed = initial_pyruvate - currency_pools.get(Currency::Pyruvate);
         let reducing_consumed = initial_reducing - currency_pools.get(Currency::ReducingPower);
         let atp_produced = currency_pools.get(Currency::ATP);
         let waste_produced = currency_pools.get(Currency::OrganicWaste);
-        
+
         // All should be equal due to 1:1:1:1 stoichiometry
-        assert!((pyruvate_consumed - reducing_consumed).abs() < 0.01, 
-            "Pyruvate and ReducingPower consumption should be equal: {} vs {}", 
-            pyruvate_consumed, reducing_consumed);
-        assert!((pyruvate_consumed - atp_produced).abs() < 0.01, 
-            "Input consumption should equal ATP production: {} vs {}", 
-            pyruvate_consumed, atp_produced);
-        assert!((pyruvate_consumed - waste_produced).abs() < 0.01, 
-            "Input consumption should equal waste production: {} vs {}", 
-            pyruvate_consumed, waste_produced);
-        
+        assert!(
+            (pyruvate_consumed - reducing_consumed).abs() < 0.01,
+            "Pyruvate and ReducingPower consumption should be equal: {pyruvate_consumed} vs {reducing_consumed}"
+        );
+        assert!(
+            (pyruvate_consumed - atp_produced).abs() < 0.01,
+            "Input consumption should equal ATP production: {pyruvate_consumed} vs {atp_produced}"
+        );
+        assert!(
+            (pyruvate_consumed - waste_produced).abs() < 0.01,
+            "Input consumption should equal waste production: {pyruvate_consumed} vs {waste_produced}"
+        );
+
         // Should be limited by the smaller input (pyruvate = 5.0)
-        assert!((pyruvate_consumed - initial_pyruvate).abs() < 0.01, 
-            "Should consume all available pyruvate: {}", pyruvate_consumed);
+        assert!(
+            (pyruvate_consumed - initial_pyruvate).abs() < 0.01,
+            "Should consume all available pyruvate: {pyruvate_consumed}"
+        );
     }
 }

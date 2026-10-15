@@ -69,25 +69,33 @@ pub fn spawn_player(
 
 /// Spawn a cell entity with all required components
 pub fn spawn_cell(commands: &mut Commands, genome: Genome) -> Entity {
-    commands.spawn(Cell {
-        genome,
-        currency_pools: CurrencyPools::default(),
-        metabolic_graph: MetabolicGraph::default(),
-        metabolic_blocks: HashMap::new(),
-    }).id()
+    commands
+        .spawn(Cell {
+            genome,
+            currency_pools: CurrencyPools::default(),
+            metabolic_graph: MetabolicGraph::default(),
+            metabolic_blocks: HashMap::new(),
+        })
+        .id()
 }
 
 /// Spawn a player-cell pair with ownership link
 /// Returns (player_entity, cell_entity)
-pub fn spawn_player_cell(commands: &mut Commands, client_id: u32, genome: Genome) -> (Entity, Entity) {
+pub fn spawn_player_cell(
+    commands: &mut Commands,
+    client_id: u32,
+    genome: Genome,
+) -> (Entity, Entity) {
     let cell_entity = spawn_cell(commands, genome);
-    
-    let player_entity = commands.spawn((
-        Player { client_id },
-        ControlledCell(cell_entity),
-        Name::new("Player"),
-    )).id();
-    
+
+    let player_entity = commands
+        .spawn((
+            Player { client_id },
+            ControlledCell(cell_entity),
+            Name::new("Player"),
+        ))
+        .id();
+
     (player_entity, cell_entity)
 }
 
@@ -95,17 +103,18 @@ pub fn spawn_player_cell(commands: &mut Commands, client_id: u32, genome: Genome
 /// Returns (player_entity, cell_entity)
 pub fn spawn_local_player_cell(commands: &mut Commands, genome: Genome) -> (Entity, Entity) {
     let cell_entity = spawn_cell(commands, genome);
-    
-    let player_entity = commands.spawn((
-        Player { client_id: 0 },
-        LocalPlayer,
-        ControlledCell(cell_entity),
-        Name::new("Local Player"),
-    )).id();
-    
+
+    let player_entity = commands
+        .spawn((
+            Player { client_id: 0 },
+            LocalPlayer,
+            ControlledCell(cell_entity),
+            Name::new("Local Player"),
+        ))
+        .id();
+
     (player_entity, cell_entity)
 }
-
 
 /// Query helper to find the cell controlled by the local player
 /// Returns None if no local player exists or they don't control a cell

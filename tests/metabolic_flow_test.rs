@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use metabolistic3d::metabolism::*;
 use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomeDiffEvent};
+use metabolistic3d::metabolism::*;
 
 #[test]
 fn metabolic_flow_plugin_adds_resources() {
@@ -21,7 +21,10 @@ fn metabolic_flow_plugin_adds_schedule() {
     app.add_event::<GenomeDiffEvent>();
 
     // Check if the schedule is added
-    assert!(app.world().resource::<Schedules>().contains(MetabolicSchedule));
+    assert!(app
+        .world()
+        .resource::<Schedules>()
+        .contains(MetabolicSchedule));
     // Check if FixedUpdate is configured
     assert!(app.world().contains_resource::<Time<Fixed>>());
 }
@@ -37,8 +40,6 @@ fn flow_dirty_resource_defaults_to_false() {
     assert!(!flow_dirty.0);
 }
 
-
-
 #[test]
 fn test_on_genome_diff_system() {
     let mut app = App::new();
@@ -49,9 +50,23 @@ fn test_on_genome_diff_system() {
 
     // Initialize Genome resource and express the gene
     app.world_mut().insert_resource(Genome::default());
-    let node_entity = app.world_mut().spawn((MetabolicNode { kind: BlockKind::Fermentation, status: BlockStatus::Silent }, MetabolicBlock, FluxProfile::default())).id();
-    app.world_mut().resource_mut::<Genome>().add_gene(BlockKind::Fermentation);
-    app.world_mut().resource_mut::<Genome>().express_gene(BlockKind::Fermentation);
+    let node_entity = app
+        .world_mut()
+        .spawn((
+            MetabolicNode {
+                kind: BlockKind::Fermentation,
+                status: BlockStatus::Silent,
+            },
+            MetabolicBlock,
+            FluxProfile::default(),
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<Genome>()
+        .add_gene(BlockKind::Fermentation);
+    app.world_mut()
+        .resource_mut::<Genome>()
+        .express_gene(BlockKind::Fermentation);
 
     // Run the app to allow GenomePlugin to update and emit events
     app.update();
@@ -60,7 +75,11 @@ fn test_on_genome_diff_system() {
     app.world_mut().run_schedule(MetabolicSchedule);
 
     // Verify node status is updated
-    let node = app.world().entity(node_entity).get::<MetabolicNode>().unwrap();
+    let node = app
+        .world()
+        .entity(node_entity)
+        .get::<MetabolicNode>()
+        .unwrap();
     assert_eq!(node.status, BlockStatus::Active);
 
     // Verify FlowDirty is set to true
@@ -68,7 +87,9 @@ fn test_on_genome_diff_system() {
     assert!(flow_dirty.0);
 
     // Silence the gene
-    app.world_mut().resource_mut::<Genome>().silence_gene(BlockKind::Fermentation);
+    app.world_mut()
+        .resource_mut::<Genome>()
+        .silence_gene(BlockKind::Fermentation);
 
     // Run the app again to allow GenomePlugin to update and emit events
     app.update();
@@ -77,13 +98,14 @@ fn test_on_genome_diff_system() {
     app.world_mut().run_schedule(MetabolicSchedule);
 
     // Verify node status is updated again
-    let node = app.world().entity(node_entity).get::<MetabolicNode>().unwrap();
+    let node = app
+        .world()
+        .entity(node_entity)
+        .get::<MetabolicNode>()
+        .unwrap();
     assert_eq!(node.status, BlockStatus::Silent);
 
     // Verify FlowDirty is set to true by the silencing operation
     let flow_dirty = app.world().resource::<FlowDirty>();
     assert!(flow_dirty.0);
 }
-
-
-

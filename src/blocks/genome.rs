@@ -79,20 +79,15 @@ impl BlockKind {
 }
 
 /// The state of a gene tile in the genome
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum GeneState {
     /// Gene is present but not expressed (no enzyme production)
+    #[default]
     Silent,
     /// Gene is actively expressed (enzyme is being produced)
     Expressed,
     /// Gene is mutated and temporarily non-functional
     Mutated,
-}
-
-impl Default for GeneState {
-    fn default() -> Self {
-        GeneState::Silent
-    }
 }
 
 /// Resource/Component containing the entire chromosome of gene tiles
@@ -268,12 +263,12 @@ impl Genome {
         }
         GenomeDiff { enabled, disabled }
     }
-    
+
     /// Check if any gene state has changed (used for metabolic system updates)
     pub fn has_any_changes(&self) -> bool {
         for (block_kind, current_state) in &self.table {
             let previous_state = self.previous_table.get(block_kind);
-            if previous_state.map_or(true, |prev| prev != current_state) {
+            if previous_state != Some(current_state) {
                 return true;
             }
         }
@@ -306,14 +301,8 @@ pub struct MetabolicBlock {
 }
 
 /// Component to enable/disable metabolic blocks
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Enabled(pub bool);
-
-impl Default for Enabled {
-    fn default() -> Self {
-        Enabled(false)
-    }
-}
 
 /// Currency costs for genome operations
 #[derive(Resource)]
@@ -333,7 +322,7 @@ pub struct GenomeOperationCosts {
 pub trait MutationStrategy: Send + Sync {
     /// Determines if a gene should mutate based on the strategy's logic
     fn should_mutate(&mut self, block_kind: BlockKind, delta_time: f32) -> bool;
-    
+
     /// Determines what the mutated gene state should be
     fn get_mutation_target(&mut self, block_kind: BlockKind) -> GeneState;
 }
@@ -369,7 +358,7 @@ impl MutationStrategy for RandomMutationStrategy {
     fn should_mutate(&mut self, _block_kind: BlockKind, delta_time: f32) -> bool {
         thread_rng().gen::<f32>() < self.mutation_rate * delta_time
     }
-    
+
     fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
         GeneState::Mutated
     }
@@ -383,7 +372,7 @@ impl MutationStrategy for DeterministicMutationStrategy {
     fn should_mutate(&mut self, _block_kind: BlockKind, _delta_time: f32) -> bool {
         false // Never mutate in deterministic mode
     }
-    
+
     fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
         GeneState::Mutated // This shouldn't be called since should_mutate returns false
     }
@@ -402,7 +391,7 @@ impl MutationConfig {
             strategy: Box::new(RandomMutationStrategy::default()),
         }
     }
-    
+
     /// Create a new mutation config with a deterministic strategy (default for testing)
     pub fn deterministic() -> Self {
         Self {
@@ -435,9 +424,9 @@ impl Plugin for GenomePlugin {
 
 /// System that compares current vs. previous genome snapshot and emits only the delta
 pub fn poll_genome_diff(
-    mut genome: ResMut<Genome>, 
+    mut genome: ResMut<Genome>,
     mut diff_writer: EventWriter<GenomeDiffEvent>,
-    mut metabolic_diff_writer: EventWriter<MetabolicUpdateEvent>
+    mut metabolic_diff_writer: EventWriter<MetabolicUpdateEvent>,
 ) {
     let diff = genome.compute_diff();
 
@@ -480,14 +469,17 @@ pub fn apply_genome_diff(
 
 /// System that applies mutations according to the configured strategy
 pub fn mutation_system(
-    mut genome: ResMut<Genome>, 
+    mut genome: ResMut<Genome>,
     mut mutation_config: ResMut<MutationConfig>,
-    time: Res<Time>
+    time: Res<Time>,
 ) {
     let delta_time = time.delta_secs();
 
     for (block_kind, _state) in genome.table.clone().iter() {
-        if mutation_config.strategy.should_mutate(*block_kind, delta_time) {
+        if mutation_config
+            .strategy
+            .should_mutate(*block_kind, delta_time)
+        {
             let target_state = mutation_config.strategy.get_mutation_target(*block_kind);
             match target_state {
                 GeneState::Mutated => {
@@ -525,7 +517,7 @@ pub fn spawn_metabolic_block(commands: &mut Commands, block_kind: BlockKind) -> 
         .spawn((
             MetabolicBlock { block_kind },
             Enabled::default(),
-            Name::new(format!("Metabolic Block: {:?}", block_kind)),
+            Name::new(format!("Metabolic Block: {block_kind:?}")),
         ))
         .id()
 }

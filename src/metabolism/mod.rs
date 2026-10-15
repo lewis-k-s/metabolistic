@@ -35,7 +35,7 @@ impl FluxProfile {
     /// Check if this profile has demand (consumption) for a given currency
     /// Returns true if the currency exists and has a negative value
     pub fn has_demand_for(&self, currency: Currency) -> bool {
-        self.0.get(&currency).map_or(false, |&amount| amount < 0.0)
+        self.0.get(&currency).is_some_and(|&amount| amount < 0.0)
     }
 
     /// Get the demand amount for a specific currency
@@ -50,7 +50,7 @@ impl FluxProfile {
     /// Check if this profile produces a given currency
     /// Returns true if the currency exists and has a positive value
     pub fn produces(&self, currency: Currency) -> bool {
-        self.0.get(&currency).map_or(false, |&amount| amount > 0.0)
+        self.0.get(&currency).is_some_and(|&amount| amount > 0.0)
     }
 
     /// Get the production amount for a specific currency
@@ -265,9 +265,7 @@ pub fn on_genome_diff(
 // --- Metabolic Graph Management Systems ---
 
 /// System to rebuild metabolic graphs for cells that have changed
-pub fn rebuild_cell_metabolic_graphs_system(
-    mut cell_query: Query<&mut Cell>,
-) {
+pub fn rebuild_cell_metabolic_graphs_system(mut cell_query: Query<&mut Cell>) {
     for mut cell in cell_query.iter_mut() {
         // Clear existing graph
         cell.metabolic_graph.nodes.clear();
@@ -500,7 +498,8 @@ pub fn sync_cell_blocks_with_genome_system(
             let block_exists = cell.metabolic_blocks.contains_key(&block_kind);
 
             if should_exist && !block_exists {
-                let block_entity = spawn_metabolic_block_for_cell(&mut commands, cell_entity, block_kind);
+                let block_entity =
+                    spawn_metabolic_block_for_cell(&mut commands, cell_entity, block_kind);
                 if block_entity != Entity::PLACEHOLDER {
                     cell.metabolic_blocks.insert(block_kind, block_entity);
                 }
@@ -508,10 +507,7 @@ pub fn sync_cell_blocks_with_genome_system(
                 // Despawn the block
                 if let Some(block_entity) = cell.metabolic_blocks.remove(&block_kind) {
                     commands.entity(block_entity).despawn();
-                    info!(
-                        "Despawned metabolic block {:?}",
-                        block_kind
-                    );
+                    info!("Despawned metabolic block {:?}", block_kind);
                 }
             }
         }
@@ -520,12 +516,11 @@ pub fn sync_cell_blocks_with_genome_system(
 
 /// System to run metabolic cycles for all cells with change detection
 /// This replaces Cell.run_metabolic_cycle() method with batch processing
-pub fn cell_metabolic_cycle_system(
-    mut cell_query: Query<&mut Cell, Changed<CurrencyPools>>,
-) {
+pub fn cell_metabolic_cycle_system(mut cell_query: Query<&mut Cell, Changed<CurrencyPools>>) {
     for cell in cell_query.iter_mut() {
         // Get all blocks from this cell
-        let owned_blocks: Vec<_> = cell.metabolic_blocks
+        let owned_blocks: Vec<_> = cell
+            .metabolic_blocks
             .iter()
             .map(|(&_, &entity)| entity)
             .collect();
@@ -559,23 +554,25 @@ fn spawn_metabolic_block_for_cell(
             flux_profile.set_production(Currency::ATP, 1.0);
             flux_profile.set_production(Currency::OrganicWaste, 1.0);
 
-            commands.spawn((
-                crate::blocks::fermentation::FermentationBlock,
-                MetabolicBlock,
-                MetabolicNode {
-                    kind: block_kind,
-                    status: BlockStatus::Active,
-                },
-                flux_profile,
-                Name::new("Fermentation Block"),
-            )).id()
+            commands
+                .spawn((
+                    crate::blocks::fermentation::FermentationBlock,
+                    MetabolicBlock,
+                    MetabolicNode {
+                        kind: block_kind,
+                        status: BlockStatus::Active,
+                    },
+                    flux_profile,
+                    Name::new("Fermentation Block"),
+                ))
+                .id()
         }
-        BlockKind::LipidMetabolism => {
-            commands.spawn((
+        BlockKind::LipidMetabolism => commands
+            .spawn((
                 crate::blocks::vesicle_export::VesicleExportBlock,
                 Name::new("Vesicle Export Block"),
-            )).id()
-        }
+            ))
+            .id(),
         _ => {
             warn!("Block kind {:?} not implemented in cell spawn", block_kind);
             return Entity::PLACEHOLDER;
@@ -588,7 +585,7 @@ fn spawn_metabolic_block_for_cell(
         "Spawned metabolic block {:?} for cell {:?}",
         block_kind, cell_entity
     );
-    
+
     block_entity
 }
 
@@ -736,4 +733,3 @@ impl Plugin for MetabolicFlowPlugin {
             );
     }
 }
-

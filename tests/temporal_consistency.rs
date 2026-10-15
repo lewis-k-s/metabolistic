@@ -4,18 +4,18 @@
 //! over extended periods of simulation, without drift, oscillation, or
 //! accumulation of errors that could destabilize the system.
 
-use proptest::prelude::*;
-use approx::{assert_relative_eq, assert_abs_diff_eq};
-use metabolistic3d::molecules::*;
+use approx::{assert_abs_diff_eq, assert_relative_eq};
+use bevy::prelude::*;
+use bevy::time::{Fixed, Time};
 use metabolistic3d::blocks::fermentation::FermentationBlock;
-use metabolistic3d::metabolism::CurrencyPools;
-use metabolistic3d::molecules::{PolyMer, CellMass};
-use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
 use metabolistic3d::blocks::genome::Genome;
+use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
+use metabolistic3d::metabolism::CurrencyPools;
+use metabolistic3d::molecules::*;
+use metabolistic3d::molecules::{CellMass, PolyMer};
 use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::MetabolisticApp;
-use bevy::prelude::*;
-use bevy::time::{Time, Fixed};
+use proptest::prelude::*;
 
 mod common;
 use common::*;
@@ -41,16 +41,16 @@ proptest! {
         long_simulation in 10..30usize  // Dramatically reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = initial_values;
-        
+
         let mut app = MetabolisticApp::new_headless();
-        
+
         // Spawn a cell first
         let (_player_entity, cell_entity) = {
             let mut commands = app.world_mut().commands();
             spawn_local_player_cell(&mut commands, Genome::default())
         };
         app.world_mut().flush();
-        
+
         // Set up stable system configuration in the cell
         {
             let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
@@ -64,7 +64,7 @@ proptest! {
             }
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
-        
+
         // Spawn all systems
         app.world_mut().spawn(FermentationBlock);
         app.world_mut().spawn(VesicleExportBlock);
@@ -77,45 +77,45 @@ proptest! {
                 lipo_rate: 7.0,
             },
         ));
-        
+
         let mut currency_history = Vec::new();
-        
+
         // Run long simulation and track currency levels
         for step in 0..long_simulation {
             let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             let snapshot = get_currency_snapshot(&app);
             currency_history.push(snapshot);
-            
+
             // Verify stability properties at each step
             prop_assert!(all_currencies_non_negative(&app),
                 "Currency went negative at step {}", step);
         }
-        
+
         // Analyze temporal patterns
         if currency_history.len() >= 50 {
             // Compare first quarter vs last quarter for stability
             let first_quarter_end = currency_history.len() / 4;
             let last_quarter_start = 3 * currency_history.len() / 4;
-            
+
             for currency_idx in 0..currency_history[0].len() {
                 let first_quarter_avg: f32 = currency_history[0..first_quarter_end]
                     .iter()
                     .map(|snapshot| snapshot[currency_idx])
                     .sum::<f32>() / first_quarter_end as f32;
-                
+
                 let last_quarter_avg: f32 = currency_history[last_quarter_start..]
                     .iter()
                     .map(|snapshot| snapshot[currency_idx])
                     .sum::<f32>() / (currency_history.len() - last_quarter_start) as f32;
-                
+
                 // Verify currency levels show reasonable stability (not wildly diverging)
                 if first_quarter_avg > 1.0 {
                     let relative_change = (last_quarter_avg - first_quarter_avg).abs() / first_quarter_avg;
-                    prop_assert!(relative_change <= 2.0, 
+                    prop_assert!(relative_change <= 2.0,
                         "Currency {} showed excessive drift: early avg {}, late avg {}, relative change {}",
                         currency_idx, first_quarter_avg, last_quarter_avg, relative_change);
                 }
@@ -143,21 +143,21 @@ proptest! {
         simulation_length in 5..15usize  // Reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = test_conditions;
-        
+
         // Run identical simulation twice
         let mut results1 = Vec::new();
         let mut results2 = Vec::new();
-        
+
         for run in 0..2 {
             let mut app = MetabolisticApp::new_headless();
-            
+
             // Identical initial conditions
             let (_player_entity, cell_entity) = {
                 let mut commands = app.world_mut().commands();
                 spawn_local_player_cell(&mut commands, Genome::default())
             };
             app.world_mut().flush();
-            
+
             {
                 let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
                 let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
@@ -169,7 +169,7 @@ proptest! {
                 currency_pools.set(Currency::StorageBeads, 15.0);
             }
             app.world_mut().insert_resource(LipidToxicityThreshold(80.0));
-            
+
             // Identical system configuration
             app.world_mut().spawn(FermentationBlock);
             app.world_mut().spawn(VesicleExportBlock);
@@ -182,7 +182,7 @@ proptest! {
                     lipo_rate: 10.0,
                 },
             ));
-            
+
             // Run identical simulation
             for _ in 0..simulation_length {
                 let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
@@ -190,7 +190,7 @@ proptest! {
                 app.update();
                 app.world_mut().run_schedule(FixedUpdate);
             }
-            
+
             let final_snapshot = get_currency_snapshot(&app);
             if run == 0 {
                 results1 = final_snapshot;
@@ -198,9 +198,9 @@ proptest! {
                 results2 = final_snapshot;
             }
         }
-        
+
         // Verify identical results from identical conditions
-        for (_i, (&result1, &result2)) in results1.iter().zip(results2.iter()).enumerate() {
+        for (&result1, &result2) in results1.iter().zip(results2.iter()) {
             assert_abs_diff_eq!(result1, result2, epsilon = 1e-6);
         }
     }
@@ -227,16 +227,16 @@ proptest! {
         very_long_simulation in 15..40usize  // Dramatically reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = stable_config;
-        
+
         let mut app = MetabolisticApp::new_headless();
-        
+
         // Set up stable, well-resourced system
         let (_player_entity, cell_entity) = {
             let mut commands = app.world_mut().commands();
             spawn_local_player_cell(&mut commands, Genome::default())
         };
         app.world_mut().flush();
-        
+
         {
             let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
             let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
@@ -248,7 +248,7 @@ proptest! {
             currency_pools.set(Currency::StorageBeads, 50.0);
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(200.0));
-        
+
         app.world_mut().spawn(FermentationBlock);
         app.world_mut().spawn(VesicleExportBlock);
         app.world_mut().spawn((
@@ -260,21 +260,21 @@ proptest! {
                 lipo_rate: 6.0,
             },
         ));
-        
+
         let initial_snapshot = get_currency_snapshot(&app);
         let mut error_samples = Vec::new();
-        
+
         // Run very long simulation with periodic error checking
         for step in 0..very_long_simulation {
             let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             // Sample error periodically
             if step % 100 == 0 {
                 let current_snapshot = get_currency_snapshot(&app);
-                
+
                 // Check for numerical health
                 for (i, &amount) in current_snapshot.iter().enumerate() {
                     prop_assert!(amount.is_finite(),
@@ -282,29 +282,29 @@ proptest! {
                     prop_assert!(amount >= -1e-6,
                         "Currency {} went significantly negative at step {}: {}", i, step, amount);
                 }
-                
+
                 // Check for mass balance conservation in fat storage
                 let current_ffa = current_snapshot[4]; // FreeFattyAcids index
                 let current_storage = current_snapshot[7]; // StorageBeads index
                 let total_lipids = current_ffa + current_storage;
                 let initial_lipids = initial_snapshot[4] + initial_snapshot[7];
-                
+
                 let mass_balance_error = (total_lipids - initial_lipids).abs();
                 error_samples.push(mass_balance_error);
-                
+
                 prop_assert!(mass_balance_error <= 1.0,
                     "Mass balance error exceeded threshold at step {}: {}", step, mass_balance_error);
             }
         }
-        
+
         // Verify errors don't trend upward over time
         if error_samples.len() >= 4 {
             let early_errors: f32 = error_samples[0..error_samples.len()/2].iter().sum();
             let late_errors: f32 = error_samples[error_samples.len()/2..].iter().sum();
-            
+
             let early_avg = early_errors / (error_samples.len()/2) as f32;
             let late_avg = late_errors / (error_samples.len() - error_samples.len()/2) as f32;
-            
+
             prop_assert!(late_avg <= early_avg * 3.0,
                 "Error accumulation detected over long simulation: early avg {}, late avg {}",
                 early_avg, late_avg);
@@ -333,16 +333,16 @@ proptest! {
         cycle_observation_length in 10..30usize  // Reduced for performance
     ) {
         let (pyruvate, rp, ffa, atp) = oscillation_config;
-        
+
         let mut app = MetabolisticApp::new_headless();
-        
+
         // Set up conditions that might produce cyclic behavior
         let (_player_entity, cell_entity) = {
             let mut commands = app.world_mut().commands();
             spawn_local_player_cell(&mut commands, Genome::default())
         };
         app.world_mut().flush();
-        
+
         {
             let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
             let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
@@ -354,7 +354,7 @@ proptest! {
             currency_pools.set(Currency::StorageBeads, 10.0);
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(250.0)); // Low to trigger cycles
-        
+
         app.world_mut().spawn(FermentationBlock);
         app.world_mut().spawn(VesicleExportBlock);
         app.world_mut().spawn((
@@ -366,45 +366,45 @@ proptest! {
                 lipo_rate: 15.0,
             },
         ));
-        
+
         let mut ffa_history = Vec::new();
         let mut waste_history = Vec::new();
-        
+
         // Observe system for cyclic patterns
         for _ in 0..cycle_observation_length {
             let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
             let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
             let current_waste = currency_pools.get(Currency::OrganicWaste);
-            
+
             ffa_history.push(current_ffa);
             waste_history.push(current_waste);
-            
+
             // Verify cycles don't break fundamental invariants
             prop_assert!(current_ffa >= 0.0);
             prop_assert!(current_waste >= 0.0);
             prop_assert!(all_currencies_non_negative(&app));
         }
-        
+
         // Analyze for problematic oscillations
         if ffa_history.len() >= 10 {
             let max_ffa = ffa_history.iter().copied().fold(0.0f32, f32::max);
             let min_ffa = ffa_history.iter().copied().fold(f32::INFINITY, f32::min);
             let ffa_range = max_ffa - min_ffa;
-            
+
             let max_waste = waste_history.iter().copied().fold(0.0f32, f32::max);
-            
+
             // Verify oscillations stay within reasonable bounds
             prop_assert!(ffa_range <= ffa * 2.0,
                 "FFA oscillations too extreme: range {} vs initial {}", ffa_range, ffa);
-            
+
             prop_assert!(max_waste <= 500.0,
                 "Waste accumulation too extreme: max {}", max_waste);
-            
+
             // Check for runaway oscillations (increasing amplitude)
             let first_half_range = {
                 let first_half = &ffa_history[0..ffa_history.len()/2];
@@ -412,14 +412,14 @@ proptest! {
                 let min = first_half.iter().copied().fold(f32::INFINITY, f32::min);
                 max - min
             };
-            
+
             let second_half_range = {
                 let second_half = &ffa_history[ffa_history.len()/2..];
                 let max = second_half.iter().copied().fold(0.0f32, f32::max);
                 let min = second_half.iter().copied().fold(f32::INFINITY, f32::min);
                 max - min
             };
-            
+
             prop_assert!(second_half_range <= first_half_range * 2.0,
                 "Oscillation amplitude increasing: early range {}, late range {}",
                 first_half_range, second_half_range);
@@ -453,11 +453,11 @@ proptest! {
         ]
     ) {
         let (pyruvate, rp, ffa, atp) = base_conditions;
-        
+
         // Run two simulations: one with normal time steps, one with scaled time steps
         let mut normal_app = MetabolisticApp::new_headless();
         let mut scaled_app = MetabolisticApp::new_headless();
-        
+
         // Identical initial conditions
         let mut cell_entities = Vec::new();
         for app in [&mut normal_app, &mut scaled_app] {
@@ -467,7 +467,7 @@ proptest! {
             };
             app.world_mut().flush();
             cell_entities.push(cell_entity);
-            
+
             {
                 let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
                 let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
@@ -479,7 +479,7 @@ proptest! {
                 currency_pools.set(Currency::StorageBeads, 20.0);
             }
             app.world_mut().insert_resource(LipidToxicityThreshold(120.0));
-            
+
             app.world_mut().spawn(FermentationBlock);
             app.world_mut().spawn(VesicleExportBlock);
             app.world_mut().spawn((
@@ -492,11 +492,11 @@ proptest! {
                 },
             ));
         }
-        
+
         // Run for equivalent total simulation time
         let base_steps = 50;
         let scaled_steps = (base_steps as f32 / time_scale_factor) as usize;
-        
+
         // Normal simulation
         for _ in 0..base_steps {
             let fixed_time_step = normal_app.world().resource::<Time<Fixed>>().delta();
@@ -504,7 +504,7 @@ proptest! {
             normal_app.update();
             normal_app.world_mut().run_schedule(FixedUpdate);
         }
-        
+
         // Scaled simulation (adjust time step)
         for _ in 0..scaled_steps {
             let base_time_step = scaled_app.world().resource::<Time<Fixed>>().delta();
@@ -513,7 +513,7 @@ proptest! {
             scaled_app.update();
             scaled_app.world_mut().run_schedule(FixedUpdate);
         }
-        
+
         let normal_results = {
             let currency_pools = normal_app.world().get::<CurrencyPools>(cell_entities[0]).unwrap();
             vec![
@@ -540,9 +540,9 @@ proptest! {
                 currency_pools.get(Currency::StorageBeads),
             ]
         };
-        
+
         // Results should be approximately equivalent (allowing for numerical differences)
-        for (_i, (&normal, &scaled)) in normal_results.iter().zip(scaled_results.iter()).enumerate() {
+        for (&normal, &scaled) in normal_results.iter().zip(scaled_results.iter()) {
             if normal > 1.0 {
                 assert_relative_eq!(normal, scaled, epsilon = 0.2);
             } else {

@@ -1,7 +1,6 @@
 use crate::{blocks::genome, GameState};
 use bevy::prelude::*;
 
-
 /// Shared resources and systems that persist across all game states
 pub fn setup_shared_resources(mut commands: Commands) {
     // Initialize genome with starter genes as a global resource
@@ -18,35 +17,27 @@ pub fn state_transition_input(
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // Press '1' for 3D scene
-    if input.just_pressed(KeyCode::Digit1) {
-        if current_state.get() != &GameState::Scene3D {
-            next_state.set(GameState::Scene3D);
-            info!("Switching to 3D scene");
-        }
+    if input.just_pressed(KeyCode::Digit1) && current_state.get() != &GameState::Scene3D {
+        next_state.set(GameState::Scene3D);
+        info!("Switching to 3D scene");
     }
 
     // Press '2' for 2D scene
-    if input.just_pressed(KeyCode::Digit2) {
-        if current_state.get() != &GameState::Scene2D {
-            next_state.set(GameState::Scene2D);
-            info!("Switching to 2D scene");
-        }
+    if input.just_pressed(KeyCode::Digit2) && current_state.get() != &GameState::Scene2D {
+        next_state.set(GameState::Scene2D);
+        info!("Switching to 2D scene");
     }
 
     // Press '3' for genome editing scene
-    if input.just_pressed(KeyCode::Digit3) {
-        if current_state.get() != &GameState::GenomeEditing {
-            next_state.set(GameState::GenomeEditing);
-            info!("Opening genome editor");
-        }
+    if input.just_pressed(KeyCode::Digit3) && current_state.get() != &GameState::GenomeEditing {
+        next_state.set(GameState::GenomeEditing);
+        info!("Opening genome editor");
     }
 
     // Press 'Escape' for main menu
-    if input.just_pressed(KeyCode::Escape) {
-        if current_state.get() != &GameState::MainMenu {
-            next_state.set(GameState::MainMenu);
-            info!("Returning to main menu");
-        }
+    if input.just_pressed(KeyCode::Escape) && current_state.get() != &GameState::MainMenu {
+        next_state.set(GameState::MainMenu);
+        info!("Returning to main menu");
     }
 }
 

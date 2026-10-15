@@ -19,8 +19,8 @@
 //! - **OrganicWaste**: Byproducts that can become toxic if not managed
 
 use bevy::prelude::*;
-use tracing::debug;
 use std::collections::HashMap;
+use tracing::debug;
 
 // --- Currency System Core ---
 
@@ -51,23 +51,23 @@ impl CurrencyPools {
     pub fn get(&self, currency: Currency) -> f32 {
         self.pools.get(&currency).copied().unwrap_or(0.0)
     }
-    
+
     /// Set the amount of a specific currency
     pub fn set(&mut self, currency: Currency, amount: f32) {
         self.pools.insert(currency, amount.max(0.0)); // Prevent negative currencies
     }
-    
+
     /// Add to a currency (positive) or subtract (negative)
     pub fn modify(&mut self, currency: Currency, delta: f32) {
         let current = self.get(currency);
         self.set(currency, current + delta);
     }
-    
+
     /// Check if there's enough of a currency available
     pub fn can_consume(&self, currency: Currency, amount: f32) -> bool {
         self.get(currency) >= amount
     }
-    
+
     /// Initialize with default starting amounts for a new cell
     pub fn with_defaults() -> Self {
         let mut pools = HashMap::new();
@@ -79,7 +79,7 @@ impl CurrencyPools {
         pools.insert(Currency::StorageBeads, 0.0);
         pools.insert(Currency::Pyruvate, 25.0);
         pools.insert(Currency::OrganicWaste, 0.0);
-        
+
         Self { pools }
     }
 }
@@ -98,23 +98,23 @@ impl EnvironmentalCurrencyPools {
     pub fn get(&self, currency: Currency) -> f32 {
         self.pools.get(&currency).copied().unwrap_or(0.0)
     }
-    
+
     /// Set the amount of a specific environmental currency
     pub fn set(&mut self, currency: Currency, amount: f32) {
         self.pools.insert(currency, amount.max(0.0)); // Prevent negative currencies
     }
-    
+
     /// Add to an environmental currency (positive) or subtract (negative)
     pub fn modify(&mut self, currency: Currency, delta: f32) {
         let current = self.get(currency);
         self.set(currency, current + delta);
     }
-    
+
     /// Check if there's enough of an environmental currency available
     pub fn can_consume(&self, currency: Currency, amount: f32) -> bool {
         self.get(currency) >= amount
     }
-    
+
     /// Initialize with default environmental starting amounts
     /// Environmental pools typically start lower since they represent external resources
     pub fn with_defaults() -> Self {
@@ -130,7 +130,7 @@ impl EnvironmentalCurrencyPools {
         pools.insert(Currency::FreeFattyAcids, 0.0);
         pools.insert(Currency::StorageBeads, 0.0);
         pools.insert(Currency::Pyruvate, 10.0); // Some external pyruvate sources
-        
+
         Self { pools }
     }
 }
@@ -248,4 +248,3 @@ impl Plugin for CurrencyPlugin {
         debug!("CurrencyPlugin loaded: Initialized EnvironmentalCurrencyPools and LipidToxicityThreshold. Cell currency pools are managed as components.");
     }
 }
-

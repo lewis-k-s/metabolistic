@@ -3,9 +3,9 @@
 //! This module defines the data structures and components used by the TUI
 //! to represent and display cell state information.
 
-use bevy::prelude::*;
 use crate::blocks::genome::{BlockKind, GeneState};
 use crate::molecules::Currency;
+use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Event containing updated TUI data
@@ -28,17 +28,17 @@ impl CellSnapshot {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn with_currencies(mut self, currencies: HashMap<Currency, f32>) -> Self {
         self.currencies = currencies;
         self
     }
-    
+
     pub fn with_genome(mut self, genome: HashMap<BlockKind, GeneState>) -> Self {
         self.genome = genome;
         self
     }
-    
+
     pub fn with_timestamp(mut self, timestamp: f32) -> Self {
         self.timestamp = timestamp;
         self
@@ -80,22 +80,22 @@ impl EnvironmentSnapshot {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn with_currencies(mut self, currencies: HashMap<Currency, f32>) -> Self {
         self.currencies = currencies;
         self
     }
-    
+
     pub fn with_waste_level(mut self, waste_level: f32) -> Self {
         self.waste_level = waste_level;
         self
     }
-    
+
     pub fn with_nutrient_level(mut self, nutrient_level: f32) -> Self {
         self.nutrient_level = nutrient_level;
         self
     }
-    
+
     pub fn with_timestamp(mut self, timestamp: f32) -> Self {
         self.timestamp = timestamp;
         self
@@ -151,13 +151,13 @@ impl PanelConfig {
             ..Default::default()
         }
     }
-    
+
     pub fn with_size(mut self, width_percent: u16, height_percent: u16) -> Self {
         self.width_percent = width_percent;
         self.height_percent = height_percent;
         self
     }
-    
+
     pub fn with_border(mut self, border: bool) -> Self {
         self.border = border;
         self

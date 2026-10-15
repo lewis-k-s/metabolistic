@@ -1,13 +1,13 @@
 //! Fat storage metabolic block implementation.
-//! 
+//!
 //! The fat storage block manages lipid metabolism, polymerizing free fatty acids into
 //! storage beads when they exceed toxicity thresholds, and mobilizing them back when needed.
 //! This is an active system block that runs polymerization and lipolysis systems each frame.
 
-use bevy::prelude::*;
-use crate::molecules::{Currency, CellMass, PolyMer, LipidToxicityThreshold};
-use crate::metabolism::CurrencyPools;
 use crate::cell::Cell;
+use crate::metabolism::CurrencyPools;
+use crate::molecules::{CellMass, Currency, LipidToxicityThreshold, PolyMer};
+use bevy::prelude::*;
 
 /// Component that points back to the owning entity (usually a cell)
 /// Used for PolyMer entities that need to find their parent cell
@@ -15,13 +15,12 @@ use crate::cell::Cell;
 pub struct OwnedBy(pub Entity);
 
 /// Component marker for fat storage metabolic blocks.
-/// 
+///
 /// Fat storage manages two processes:
 /// - **Polymerization**: FreeFattyAcids + ATP → StorageBeads (when above toxicity)
 /// - **Lipolysis**: StorageBeads → FreeFattyAcids + ATP (when below toxicity)
 #[derive(Component)]
 pub struct FatStorageBlock;
-
 
 /// System to polymerize FreeFattyAcids into StorageBeads.
 /// This system activates when FreeFattyAcids exceed a LipidToxicityThreshold.
@@ -36,9 +35,9 @@ pub fn polymerize_beads_system(
         let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
         if free_fatty_acids > lipid_toxicity_threshold.0 {
             let desired_polymerization: f32 = 20.0; // Desired amount to polymerize
-            // Only polymerize what's actually available, up to the desired amount
+                                                    // Only polymerize what's actually available, up to the desired amount
             let ffa_to_polymerize = desired_polymerization.min(free_fatty_acids);
-            
+
             // Use safe currency consumption
             if currency_pools.can_consume(Currency::FreeFattyAcids, ffa_to_polymerize) {
                 currency_pools.modify(Currency::FreeFattyAcids, -ffa_to_polymerize);
@@ -69,7 +68,8 @@ pub fn lipolysis_system(
                     currency_pools.modify(Currency::StorageBeads, -beads_to_mobilize);
                     currency_pools.modify(Currency::FreeFattyAcids, beads_to_mobilize);
                     cell_mass.extra -= beads_to_mobilize; // Decrease cell mass as beads are mobilized
-                    currency_pools.modify(Currency::ATP, beads_to_mobilize * 0.05); // Example ATP gain
+                    currency_pools.modify(Currency::ATP, beads_to_mobilize * 0.05);
+                    // Example ATP gain
                 }
             }
         }

@@ -18,18 +18,12 @@ pub struct LogicPlugin;
 
 impl Plugin for LogicPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            OnEnter(GameState::GenomeEditing),
-            setup_genome_logic,
-        )
-        .add_systems(
-            Update,
-            navigate_genome.run_if(in_state(GameState::GenomeEditing)),
-        )
-        .add_systems(
-            OnExit(GameState::GenomeEditing),
-            cleanup_genome_logic,
-        );
+        app.add_systems(OnEnter(GameState::GenomeEditing), setup_genome_logic)
+            .add_systems(
+                Update,
+                navigate_genome.run_if(in_state(GameState::GenomeEditing)),
+            )
+            .add_systems(OnExit(GameState::GenomeEditing), cleanup_genome_logic);
     }
 }
 
@@ -65,10 +59,7 @@ pub struct GenomeEditorState {
 /// Creates the logical entities for each genome block.
 /// These entities only contain data components, not anything for rendering.
 /// It also sets the initial selected section.
-fn setup_genome_logic(
-    mut commands: Commands,
-    genome: Res<genome::Genome>,
-) {
+fn setup_genome_logic(mut commands: Commands, genome: Res<genome::Genome>) {
     let blocks: Vec<BlockKind> = genome.table.keys().copied().collect();
     let mut section_entities = Vec::new();
 
@@ -80,7 +71,7 @@ fn setup_genome_logic(
                     section_index: i,
                 },
                 GenomeSceneEntity, // Mark for cleanup
-                Name::new(format!("GenomeSection {:?}", block_kind)),
+                Name::new(format!("GenomeSection {block_kind:?}")),
             ))
             .id();
         section_entities.push(entity);

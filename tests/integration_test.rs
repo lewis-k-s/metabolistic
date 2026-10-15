@@ -10,7 +10,6 @@ fn test_app_startup_integration() {
 
     // Verify the app is in a valid state after startup
     // Check that the world exists and has entities (startup systems ran)
-    
 }
 
 #[test]
@@ -24,7 +23,6 @@ fn test_app_multiple_updates() {
     }
 
     // App should still be in valid state
-    
 }
 
 #[test]
@@ -34,7 +32,4 @@ fn test_headless_startup() {
     app.update();
 
     // Verify headless app started successfully
-    
 }
-
-

@@ -49,7 +49,7 @@ proptest! {
             let mut genome = Genome::default();
             genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-            
+
             app.world_mut().spawn((
                 metabolistic3d::cell::Cell {
                     genome,
@@ -72,7 +72,7 @@ proptest! {
                 currency_pools.set(Currency::StorageBeads, 0.0);
             }
         }
-        
+
         // Trigger metabolic processing to ensure blocks are spawned and working
         run_cell_metabolic_cycle(&mut app, cell_entity);
 
@@ -87,7 +87,7 @@ proptest! {
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
 
@@ -139,7 +139,7 @@ proptest! {
         let cell_entity = {
             let mut genome = Genome::default();
             genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
-            
+
             app.world_mut().spawn((
                 metabolistic3d::cell::Cell {
                     genome,
@@ -180,7 +180,7 @@ proptest! {
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
 
@@ -239,7 +239,7 @@ proptest! {
             let mut genome = Genome::default();
             genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-            
+
             app.world_mut().spawn((
                 metabolistic3d::cell::Cell {
                     genome,
@@ -286,7 +286,7 @@ proptest! {
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
 
@@ -348,7 +348,7 @@ proptest! {
             let mut genome = Genome::default();
             genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
-            
+
             app.world_mut().spawn((
                 metabolistic3d::cell::Cell {
                     genome,
@@ -416,7 +416,7 @@ proptest! {
             app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
             app.update();
             app.world_mut().run_schedule(FixedUpdate);
-            
+
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
 

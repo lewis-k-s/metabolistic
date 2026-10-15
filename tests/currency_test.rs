@@ -4,9 +4,9 @@
 //! consumption logic works as expected within a minimal Bevy app environment.
 
 use bevy::prelude::*;
-use metabolistic3d::molecules::{Currency, CurrencyPools};
-use metabolistic3d::player::{spawn_local_player_cell, LocalPlayer, ControlledCell};
 use metabolistic3d::blocks::genome::Genome;
+use metabolistic3d::molecules::{Currency, CurrencyPools};
+use metabolistic3d::player::{spawn_local_player_cell, ControlledCell, LocalPlayer};
 use metabolistic3d::MetabolisticApp;
 
 /// A system that simulates a block consuming a fixed amount of ATP on every update.
@@ -38,10 +38,10 @@ fn test_atp_consumption_decreases_resource() {
         let mut commands = app.world_mut().commands();
         spawn_local_player_cell(&mut commands, Genome::default())
     };
-    
+
     // Apply commands to actually create the entities
     app.world_mut().flush();
-    
+
     // Initialize ATP with a starting amount on the cell
     {
         let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
@@ -131,10 +131,10 @@ fn test_consumption_fails_on_insufficient_funds() {
         let mut commands = app.world_mut().commands();
         spawn_local_player_cell(&mut commands, Genome::default())
     };
-    
+
     // Apply commands to actually create the entities
     app.world_mut().flush();
-    
+
     // Set up currency on the cell
     {
         let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
@@ -178,7 +178,7 @@ fn test_consumption_fails_on_insufficient_funds() {
 // These tests were temporarily removed during the currency architecture refactor
 // They need to be updated to use component-based CurrencyPools instead of resource-based
 
-/* 
+/*
 #[test]
 fn test_polymerization_on_toxicity_threshold() {
     // This test needs to be updated to use DefaultCell and component-based currency pools

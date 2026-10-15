@@ -1,23 +1,23 @@
 //! Vesicle export metabolic block implementation.
-//! 
+//!
 //! The vesicle export block simulates cellular waste removal through vesicle transport.
 //! This is an active system block that continuously removes organic waste from cells
 //! at a configurable rate.
 
-use bevy::prelude::*;
-use crate::molecules::Currency;
-use crate::metabolism::CurrencyPools;
 use crate::cell::Cell;
+use crate::metabolism::CurrencyPools;
+use crate::molecules::Currency;
+use bevy::prelude::*;
 
 /// Component marker for vesicle export metabolic blocks.
-/// 
+///
 /// Vesicle export removes organic waste from cells, preventing toxic buildup.
 /// The export rate is controlled by the `VesicleExportRate` resource.
 #[derive(Component)]
 pub struct VesicleExportBlock;
 
 /// Resource controlling the rate of organic waste export via vesicles.
-/// 
+///
 /// The value represents the amount of organic waste removed per frame.
 /// Default value is 0.1.
 #[derive(Resource)]
@@ -30,7 +30,7 @@ pub fn vesicle_export_system(
     mut query_cells: Query<&mut CurrencyPools, With<Cell>>,
 ) {
     let amount_to_export = export_rate.0;
-    
+
     // Process each cell in parallel
     query_cells.par_iter_mut().for_each(|mut currency_pools| {
         let organic_waste = currency_pools.get(Currency::OrganicWaste);

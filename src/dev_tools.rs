@@ -117,7 +117,7 @@ fn inspector_ui(world: &mut World) {
             } else {
                 ui.label("Move Direction: None");
             }
-            ui.label(format!("Jumped: {}", jumped_this_frame));
+            ui.label(format!("Jumped: {jumped_this_frame}"));
             ui.separator();
 
             if let Some(torque) = external_torque {

@@ -23,11 +23,7 @@ impl Plugin for ViewPlugin {
         app.add_systems(OnEnter(GameState::GenomeEditing), setup_view)
             .add_systems(
                 Update,
-                (
-                    spawn_visuals,
-                    rotate_genome_ring,
-                    update_visuals_from_state,
-                )
+                (spawn_visuals, rotate_genome_ring, update_visuals_from_state)
                     .run_if(in_state(GameState::GenomeEditing)),
             );
     }
@@ -208,7 +204,7 @@ fn get_block_color(block_kind: BlockKind, state: &GeneState) -> Color {
         BlockKind::NucleotideCofactorSynthesis => MAROON.into(),
         BlockKind::SecondaryMetabolites => Color::srgb(1.0, 0.5, 0.8), // Pink
         BlockKind::AromaticPrecursorSynthesis => Color::srgb(0.5, 0.8, 1.0), // Light blue
-        BlockKind::Polymerization => Color::srgb(0.8, 0.6, 0.4), // Brown
+        BlockKind::Polymerization => Color::srgb(0.8, 0.6, 0.4),       // Brown
     };
 
     match state {

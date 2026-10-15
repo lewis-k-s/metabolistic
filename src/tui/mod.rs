@@ -23,25 +23,22 @@ use bevy::prelude::*;
 use std::io::{stdout, Stdout};
 
 #[cfg(feature = "tui")]
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 #[cfg(feature = "tui")]
 use crossterm::{
-    execute,
-    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     cursor::Hide,
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 pub mod components;
-pub mod systems;
 pub mod events;
+pub mod systems;
 
 pub use components::*;
-pub use systems::*;
 pub use events::*;
+pub use systems::*;
 
 /// Plugin that enables the TUI for cell state monitoring
 #[derive(Default)]
@@ -59,13 +56,17 @@ impl Plugin for CellTuiPlugin {
             }
             app.init_resource::<TuiState>()
                 .add_event::<TuiUpdateEvent>()
-                .add_systems(Update, (
-                    tui_update_system,
-                    handle_input_system,
-                    collect_cell_data_system,
-                ).chain());
+                .add_systems(
+                    Update,
+                    (
+                        tui_update_system,
+                        handle_input_system,
+                        collect_cell_data_system,
+                    )
+                        .chain(),
+                );
         }
-        
+
         #[cfg(not(feature = "tui"))]
         {
             info!("TUI feature not enabled. Add 'tui' feature to enable terminal interface.");
@@ -87,7 +88,7 @@ impl Default for TuiState {
     fn default() -> Self {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).expect("Failed to create terminal");
-        
+
         Self {
             terminal,
             running: true,

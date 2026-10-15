@@ -2,9 +2,9 @@
 //!
 //! This module defines events and input handling for the TUI system.
 
+use crate::molecules::Currency;
 use bevy::prelude::*;
 use crossterm::event::{KeyCode, KeyEvent};
-use crate::molecules::Currency;
 
 /// Events for TUI user interactions
 #[derive(Event, Debug)]
@@ -71,7 +71,7 @@ impl TuiCommand {
             _ => None,
         }
     }
-    
+
     pub fn get_help_text() -> &'static str {
         r#"
 TUI Controls:

@@ -4,12 +4,12 @@
 //! It includes generators for currency values, metabolic states, and system configurations.
 #![allow(dead_code)] // Each test binary uses a subset of these helpers.
 
-use proptest::prelude::*;
-use metabolistic3d::molecules::*;
-use metabolistic3d::blocks::genome::{BlockKind, GeneState};
-use metabolistic3d::metabolism::{CurrencyPools};
 use bevy::prelude::*;
 use bevy::time::Fixed;
+use metabolistic3d::blocks::genome::{BlockKind, GeneState};
+use metabolistic3d::metabolism::CurrencyPools;
+use metabolistic3d::molecules::*;
+use proptest::prelude::*;
 
 // --- Currency Value Strategies ---
 
@@ -113,7 +113,7 @@ pub fn run_cell_metabolic_cycle(app: &mut App, cell_entity: Entity) {
 }
 
 /// Get currency pools from a specific cell
-pub fn get_cell_currencies<'a>(app: &'a App, cell_entity: Entity) -> Option<&'a CurrencyPools> {
+pub fn get_cell_currencies(app: &App, cell_entity: Entity) -> Option<&CurrencyPools> {
     if let Ok(entity_ref) = app.world().get_entity(cell_entity) {
         entity_ref.get::<CurrencyPools>()
     } else {
@@ -133,12 +133,16 @@ pub fn cell_currencies_non_negative(app: &App, cell_entity: Entity) -> bool {
 /// Run a metabolic cycle for a cell
 pub fn run_metabolic_cycle(app: &mut App, _cell_entity: Entity) {
     // Trigger metabolic graph rebuild if needed
-    app.world_mut().resource_mut::<metabolistic3d::metabolism::FlowDirty>().0 = true;
-    
+    app.world_mut()
+        .resource_mut::<metabolistic3d::metabolism::FlowDirty>()
+        .0 = true;
+
     // Run a few update cycles to process the metabolic systems
     for _ in 0..3 {
         let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-        app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(fixed_time_step);
         app.update();
         app.world_mut().run_schedule(FixedUpdate);
     }
