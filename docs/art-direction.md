@@ -300,7 +300,27 @@ Previews in `docs/art/anim/`: `engulf_story.gif` (engulf, digest, gene gain, for
 both pairs in two directions), `engulf_<pair>.png` and `engulf_<pair>_digest.png`
 (sheets), `gate_victory.gif` and `gate_victory.png`, and `gene_orb.png`.
 
+## In the game
+
+`src/sprites.rs` loads every sheet of `manifest.json` (the manifest is compiled
+in, and a test checks that every PNG has the size the manifest says), and plays
+them with an `Animator` component. `ImagePlugin::default_nearest()` keeps the
+pixels sharp, and sprites are drawn at `PIXEL_SCALE` (3 screen pixels for each
+sprite pixel). The Loading screen waits for the sheets.
+
+On the Run screen the player is the `player_cell` sprite: `spawn` once, then
+`idle`, or `move` with the row of the last heading (8 directions from WASD).
+The frame carries over when idle turns to move. A flagellum overlay is mounted
+at 0.95 x the radius, points away from the heading, and plays `use` while the
+cell moves. It is a placeholder until the proteome says which overlays to draw.
+`anchor_px` is rounded down to a whole pixel, so a sprite never sits on a half
+pixel (the cell frames are centred on 32.5).
+
 ## Not done yet
+
+- In the game: death, contact and hit clips, the other overlays, NPC cells, the
+  engulf pairs (their manifest entries have a frame size for each clip, so the
+  loader skips them for now), the vent backdrop and the walls.
 
 - Engulf for other pairs (NPC predators eating prey), and a failed engulf (the
   target escapes, or is too big).

@@ -25,6 +25,8 @@ pub mod inspector;
 pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
+#[cfg(feature = "full")]
+pub mod sprites;
 
 /// The top-level screens. See `screens` for each one.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -49,13 +51,18 @@ impl MetabolisticApp {
 
         #[cfg(feature = "full")]
         {
-            app.add_plugins(DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Metabolistic".into(),
-                    ..default()
-                }),
-                ..default()
-            }));
+            app.add_plugins(
+                DefaultPlugins
+                    .set(WindowPlugin {
+                        primary_window: Some(Window {
+                            title: "Metabolistic".into(),
+                            ..default()
+                        }),
+                        ..default()
+                    })
+                    // Pixel art: sharp edges, not smoothed.
+                    .set(ImagePlugin::default_nearest()),
+            );
         }
 
         app // State management
@@ -75,6 +82,7 @@ impl MetabolisticApp {
             app.add_plugins(dev_tools::plugin)
                 .add_plugins(debug::plugin)
                 .add_plugins(inspector::plugin)
+                .add_plugins(sprites::plugin)
                 .add_plugins(screens::plugin)
                 .add_systems(Startup, shared::spawn_starter_cell);
             if smoke_test::requested() {

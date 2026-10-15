@@ -2,7 +2,9 @@
 //!
 //! The app waits for `Loading` to open the menu by itself, then visits every
 //! screen and menu page, holds W on the Run screen, saves a screenshot per
-//! step, logs the run player's position, then exits. A panic or a missing
+//! step, logs the run player's position, then exits. W is held for the first
+//! frames of the Run screen only, so the screenshot shows the cell near the
+//! centre, not off screen. A panic or a missing
 //! resource fails the run. Screenshots go to `METABOLISTIC_SMOKE_DIR`
 //! (default `target/smoke`).
 
@@ -20,6 +22,9 @@ const FRAMES_PER_STATE: u32 = 120;
 const FIRST_STATE_EXTRA_FRAMES: u32 = 120;
 /// Frames to wait after a screenshot request, so it is written before we move on.
 const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
+
+/// Frames to hold W on the Run screen. At 300 px/s the cell moves about 150 px.
+const HOLD_FORWARD_FRAMES: u32 = 30;
 
 /// Frames that `Loading` may take before it counts as stuck.
 const MAX_LOADING_FRAMES: u32 = 600;
@@ -74,6 +79,7 @@ fn drive_smoke_test(
     mut next_state: ResMut<NextState<GameState>>,
     mut next_page: ResMut<NextState<MenuPage>>,
     players: Query<&Transform, With<RunPlayer>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -102,6 +108,9 @@ fn drive_smoke_test(
         None => format!("{target:?}"),
     };
     smoke.frames_in_step += 1;
+    if target == GameState::Run && smoke.frames_in_step == HOLD_FORWARD_FRAMES {
+        keys.release(KeyCode::KeyW);
+    }
 
     let hold = FRAMES_PER_STATE
         + if smoke.step == 0 {

@@ -22,6 +22,7 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`), the shared 2D camera, and UI helpers
 - `player/`: The player-cell link (`LocalPlayer`, `ControlledCell`) and spawn helpers
 - `shared.rs`: Starter cell and screen navigation (`navigate`, a pure function)
+- `sprites.rs` (`full` only): loads the sheets listed in `assets/sprites/anim/manifest.json` (`Sheets`) and plays them (`Animator`). The art comes from `art/gen_sprites.py`; see `docs/art-direction.md`
 
 ### Plugin Architecture
 The app uses a plugin-based architecture where each major system is implemented as a Bevy plugin:
