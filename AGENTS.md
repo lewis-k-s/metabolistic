@@ -152,7 +152,6 @@ Core metabolic currencies that flow between blocks:
 - **Single test**: `cargo test test_name`
 - **All tests**: `cargo test`
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`)
-- **Quarantined tests**: `cargo tq` (tests ignored until the Cell model is fixed)
 - **Lint**: `cargo lint` (alias for `cargo clippy --all-targets`)
 - **Format**: `cargo fmt`
 

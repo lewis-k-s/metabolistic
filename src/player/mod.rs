@@ -7,9 +7,7 @@ use leafwing_input_manager::prelude::*;
 use std::f32::consts::PI;
 
 use crate::blocks::genome::Genome;
-use crate::cell::Cell;
-use crate::metabolism::{CurrencyPools, MetabolicGraph};
-use std::collections::HashMap;
+use crate::metabolism::CurrencyPools;
 
 #[cfg(feature = "full")]
 pub mod controller;
@@ -49,9 +47,10 @@ pub fn spawn_player(
     let player_transform = Transform::from_xyz(0.0, 1.0, 0.0);
     let radius = 0.5;
 
+    // The physics avatar. The local player's cell is a separate entity
+    // (see `spawn_local_player_cell`).
     commands.spawn((
         Player { client_id: 0 },
-        LocalPlayer,
         Mesh3d(meshes.add(Sphere::new(radius).mesh())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         player_transform,
@@ -67,16 +66,9 @@ pub fn spawn_player(
 
 // === Player-Cell Spawn Utilities ===
 
-/// Spawn a cell entity with all required components
+/// Spawn a cell entity with empty pools. See `crate::cell::spawn_cell`.
 pub fn spawn_cell(commands: &mut Commands, genome: Genome) -> Entity {
-    commands
-        .spawn(Cell {
-            genome,
-            currency_pools: CurrencyPools::default(),
-            metabolic_graph: MetabolicGraph::default(),
-            metabolic_blocks: HashMap::new(),
-        })
-        .id()
+    crate::cell::spawn_cell(commands, genome, CurrencyPools::default())
 }
 
 /// Spawn a player-cell pair with ownership link
@@ -114,6 +106,20 @@ pub fn spawn_local_player_cell(commands: &mut Commands, genome: Genome) -> (Enti
         .id();
 
     (player_entity, cell_entity)
+}
+
+/// System param: the genome of the local player's cell, if there is one.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LocalCellGenome<'w, 's> {
+    players: Query<'w, 's, &'static ControlledCell, With<LocalPlayer>>,
+    genomes: Query<'w, 's, &'static Genome>,
+}
+
+impl LocalCellGenome<'_, '_> {
+    pub fn get(&self) -> Option<&Genome> {
+        let cell = self.players.get_single().ok()?.0;
+        self.genomes.get(cell).ok()
+    }
 }
 
 /// Query helper to find the cell controlled by the local player

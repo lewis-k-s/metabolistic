@@ -7,7 +7,8 @@
 
 use super::{logic, GenomeSceneEntity};
 use crate::{
-    blocks::genome::{self, BlockKind, GeneState},
+    blocks::genome::{BlockKind, GeneState, Genome},
+    player::LocalCellGenome,
     GameState,
 };
 use bevy::{
@@ -84,8 +85,10 @@ fn spawn_visuals(
     state: Res<logic::GenomeEditorState>,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    genome: Res<genome::Genome>,
+    local_genome: LocalCellGenome,
 ) {
+    let empty = Genome::default();
+    let genome = local_genome.get().unwrap_or(&empty);
     let Ok(root_entity) = root_query.get_single() else {
         return;
     };
@@ -160,12 +163,14 @@ fn rotate_genome_ring(time: Res<Time>, mut query: Query<&mut Transform, With<Gen
 /// based on the state of the logical entities they represent.
 fn update_visuals_from_state(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    genome: Res<genome::Genome>,
+    local_genome: LocalCellGenome,
     // Query for all visual helices and their materials.
     visuals_query: Query<(&MeshMaterial3d<StandardMaterial>, &VisualHelix)>,
     // Query to get data from the logical entities.
     logic_query: Query<(&logic::GenomeSection, Option<&logic::SelectedSection>)>,
 ) {
+    let empty = Genome::default();
+    let genome = local_genome.get().unwrap_or(&empty);
     for (material_component, helix_link) in visuals_query.iter() {
         // Get the logical entity that corresponds to this visual helix.
         if let Ok((section, opt_selected)) = logic_query.get(helix_link.logical_entity) {
@@ -205,6 +210,8 @@ fn get_block_color(block_kind: BlockKind, state: &GeneState) -> Color {
         BlockKind::SecondaryMetabolites => Color::srgb(1.0, 0.5, 0.8), // Pink
         BlockKind::AromaticPrecursorSynthesis => Color::srgb(0.5, 0.8, 1.0), // Light blue
         BlockKind::Polymerization => Color::srgb(0.8, 0.6, 0.4),       // Brown
+        BlockKind::FatStorage => Color::srgb(1.0, 0.9, 0.5),           // Butter
+        BlockKind::VesicleExport => Color::srgb(0.6, 0.6, 0.6),        // Grey
     };
 
     match state {

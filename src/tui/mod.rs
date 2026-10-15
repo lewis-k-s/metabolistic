@@ -7,7 +7,8 @@
 //! ## Usage
 //!
 //! Add the TUI plugin to your Bevy app:
-//! ```rust
+//! ```rust,no_run
+//! use bevy::prelude::*;
 //! use metabolistic3d::tui::CellTuiPlugin;
 //!
 //! fn main() {
@@ -48,14 +49,10 @@ impl Plugin for CellTuiPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "tui")]
         {
-            use std::io::IsTerminal;
-            // Without a real terminal (tests, CI, IDE runners) the TUI cannot start.
-            if !stdout().is_terminal() {
-                warn!("stdout is not a terminal; CellTuiPlugin is disabled");
-                return;
-            }
             app.init_resource::<TuiState>()
+                .init_resource::<TuiConfig>()
                 .add_event::<TuiUpdateEvent>()
+                .add_event::<TuiInputEvent>()
                 .add_systems(
                     Update,
                     (
@@ -78,7 +75,9 @@ impl Plugin for CellTuiPlugin {
 #[cfg(feature = "tui")]
 #[derive(Resource)]
 pub struct TuiState {
-    pub terminal: Terminal<CrosstermBackend<Stdout>>,
+    /// `None` when stdout is not a terminal (tests, CI, IDE runners). Data
+    /// collection and events still work; only rendering is skipped.
+    pub terminal: Option<Terminal<CrosstermBackend<Stdout>>>,
     pub running: bool,
     pub last_update: f32,
 }
@@ -86,8 +85,13 @@ pub struct TuiState {
 #[cfg(feature = "tui")]
 impl Default for TuiState {
     fn default() -> Self {
-        let backend = CrosstermBackend::new(stdout());
-        let terminal = Terminal::new(backend).expect("Failed to create terminal");
+        use std::io::IsTerminal;
+        let terminal = if stdout().is_terminal() {
+            Terminal::new(CrosstermBackend::new(stdout())).ok()
+        } else {
+            warn!("stdout is not a terminal; the TUI will not render");
+            None
+        };
 
         Self {
             terminal,

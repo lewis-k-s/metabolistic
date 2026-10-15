@@ -58,7 +58,10 @@ fn render_tui(
     cell_data: &CellSnapshot,
     env_data: &EnvironmentSnapshot,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut frame = tui_state.terminal.get_frame();
+    let Some(terminal) = tui_state.terminal.as_mut() else {
+        return Ok(());
+    };
+    let mut frame = terminal.get_frame();
 
     // Clear the frame
     frame.render_widget(
@@ -222,9 +225,12 @@ fn render_environment_panel(
 #[cfg(feature = "tui")]
 pub fn handle_input_system(
     mut tui_state: ResMut<TuiState>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mut tui_input_events: EventWriter<TuiInputEvent>,
 ) {
+    let Some(keyboard) = keyboard else {
+        return; // No input plugin (headless)
+    };
     if !tui_state.running {
         return;
     }
@@ -256,14 +262,20 @@ pub fn handle_input_system(
 
 /// Collect cell data for TUI display
 pub fn collect_cell_data_system(
-    cell_query: Query<&Cell>,
+    cell_query: Query<
+        (
+            &crate::molecules::CurrencyPools,
+            &crate::blocks::genome::Genome,
+        ),
+        With<Cell>,
+    >,
     mut tui_events: EventWriter<TuiUpdateEvent>,
     time: Res<Time>,
 ) {
-    for cell in cell_query.iter() {
+    for (pools, genome) in cell_query.iter() {
         let cell_snapshot = CellSnapshot {
-            currencies: get_currency_snapshot(&cell.currency_pools),
-            genome: cell.genome.table.clone(),
+            currencies: get_currency_snapshot(pools),
+            genome: genome.table.clone(),
             metabolic_blocks: Vec::new(), // TODO: Implement block data collection
             timestamp: time.elapsed_secs(),
         };

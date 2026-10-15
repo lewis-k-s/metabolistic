@@ -5,8 +5,7 @@
 #![allow(dead_code)] // Each test binary uses a subset of these helpers.
 
 use bevy::prelude::*;
-use bevy::time::Fixed;
-use metabolistic3d::blocks::genome::{BlockKind, GeneState};
+pub use metabolistic3d::blocks::genome::{BlockKind, GeneState};
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
@@ -130,20 +129,47 @@ pub fn cell_currencies_non_negative(app: &App, cell_entity: Entity) -> bool {
     }
 }
 
-/// Run a metabolic cycle for a cell
+/// Run a few metabolic ticks for a cell (block sync, then flux).
 pub fn run_metabolic_cycle(app: &mut App, _cell_entity: Entity) {
-    // Trigger metabolic graph rebuild if needed
-    app.world_mut()
-        .resource_mut::<metabolistic3d::metabolism::FlowDirty>()
-        .0 = true;
-
-    // Run a few update cycles to process the metabolic systems
     for _ in 0..3 {
-        let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-        app.world_mut()
-            .resource_mut::<Time>()
-            .advance_by(fixed_time_step);
-        app.update();
-        app.world_mut().run_schedule(FixedUpdate);
+        sim_step(app);
     }
+}
+
+/// One simulation step: a frame (block sync from genome changes), then one
+/// metabolic tick. Test apps use manual ticks, so this is deterministic.
+pub fn sim_step(app: &mut App) {
+    app.update();
+    metabolistic3d::metabolism::run_metabolic_tick(app.world_mut());
+}
+
+/// Add and express genes on a cell. The blocks spawn on the next frame.
+pub fn express_blocks(app: &mut App, cell: Entity, kinds: &[BlockKind]) {
+    let mut genome = app
+        .world_mut()
+        .get_mut::<metabolistic3d::blocks::genome::Genome>(cell)
+        .expect("cell has a genome");
+    for &kind in kinds {
+        if genome.get_gene_state(&kind).is_none() {
+            genome.add_gene(kind);
+        }
+        genome.express_gene(kind);
+    }
+}
+
+/// Set the rates of the cell's fat storage block. Runs a frame first so that the
+/// block exists. Express `BlockKind::FatStorage` before calling this.
+pub fn set_fat_storage_rates(app: &mut App, cell: Entity, poly_rate: f32, lipo_rate: f32) {
+    app.update();
+    let block = app
+        .world()
+        .get::<metabolistic3d::cell::CellBlocks>(cell)
+        .and_then(|blocks| blocks.get(BlockKind::FatStorage))
+        .expect("cell has a fat storage block");
+    *app.world_mut()
+        .get_mut::<metabolistic3d::blocks::fat_storage::FatStorageBlock>(block)
+        .unwrap() = metabolistic3d::blocks::fat_storage::FatStorageBlock {
+        poly_rate,
+        lipo_rate,
+    };
 }

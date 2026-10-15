@@ -1,222 +1,107 @@
+//! Fat storage block: stores FreeFattyAcids as StorageBeads above the lipid
+//! toxicity threshold, and releases them at or below it.
+
 use bevy::prelude::*;
-use metabolistic3d::blocks::fat_storage::OwnedBy;
-use metabolistic3d::blocks::genome::{Genome, GenomePlugin};
+use metabolistic3d::blocks::fat_storage::FatStorageBlock;
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
-use metabolistic3d::metabolism::MetabolicFlowPlugin;
-use metabolistic3d::molecules::{
-    CellMass, Currency, CurrencyPools, LipidToxicityThreshold, PolyMer,
-};
+use metabolistic3d::metabolism::{run_metabolic_tick, FlowmapTimingConfig, MetabolicFlowPlugin};
+use metabolistic3d::molecules::{Currency, CurrencyPools, LipidToxicityThreshold};
 use metabolistic3d::player::spawn_local_player_cell;
 
-/// Tests that fat storage polymerizes FreeFattyAcids into StorageBeads when above toxicity threshold.
+fn app_with_cell(genes: &[BlockKind]) -> (App, Entity) {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins((GenomePlugin, MetabolicBlocksPlugin, MetabolicFlowPlugin))
+        .insert_resource(MutationConfig::deterministic())
+        .insert_resource(FlowmapTimingConfig::manual())
+        .insert_resource(LipidToxicityThreshold(50.0));
+
+    let mut genome = Genome::default();
+    for &kind in genes {
+        genome.add_gene(kind);
+        genome.express_gene(kind);
+    }
+    let (_player, cell) = {
+        let mut commands = app.world_mut().commands();
+        spawn_local_player_cell(&mut commands, genome)
+    };
+    app.update();
+    (app, cell)
+}
+
+fn set_pools(app: &mut App, cell: Entity, values: &[(Currency, f32)]) {
+    let mut pools = app.world_mut().get_mut::<CurrencyPools>(cell).unwrap();
+    for &(currency, amount) in values {
+        pools.set(currency, amount);
+    }
+}
+
+fn pool(app: &App, cell: Entity, currency: Currency) -> f32 {
+    app.world()
+        .get::<CurrencyPools>(cell)
+        .unwrap()
+        .get(currency)
+}
+
+fn dt(app: &App) -> f32 {
+    app.world().resource::<FlowmapTimingConfig>().target_delta()
+}
+
 #[test]
-#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn test_fat_storage_polymerization() {
-    // --- Setup ---
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(GenomePlugin);
-    app.add_plugins(MetabolicBlocksPlugin);
-    app.add_plugins(MetabolicFlowPlugin);
-    app.insert_resource(LipidToxicityThreshold(50.0)); // Set toxicity threshold
+    let (mut app, cell) = app_with_cell(&[BlockKind::FatStorage]);
+    set_pools(&mut app, cell, &[(Currency::FreeFattyAcids, 80.0)]);
 
-    // Spawn a local player-cell pair for testing
-    let (_player_entity, cell_entity) = {
-        let mut commands = app.world_mut().commands();
-        spawn_local_player_cell(&mut commands, Genome::default())
-    };
+    run_metabolic_tick(app.world_mut());
 
-    // Apply commands to actually create the entities
-    app.world_mut().flush();
-
-    // Initialize FreeFattyAcids above toxicity threshold
-    {
-        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-        currency_pools.set(Currency::FreeFattyAcids, 80.0); // Above threshold of 50.0
-        currency_pools.set(Currency::ATP, 10.0); // Provide ATP for polymerization
-    }
-
-    // --- Run Simulation ---
-    app.update();
-
-    // --- Verification ---
-    {
-        let currency_pools = app
-            .world()
-            .get_entity(cell_entity)
-            .unwrap()
-            .get::<CurrencyPools>()
-            .unwrap();
-        let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
-        let storage_beads = currency_pools.get(Currency::StorageBeads);
-
-        // Should have polymerized some FreeFattyAcids
-        assert!(
-            free_fatty_acids < 80.0,
-            "FreeFattyAcids should be reduced from 80.0: {free_fatty_acids}"
-        );
-        assert!(
-            storage_beads > 0.0,
-            "StorageBeads should be produced: {storage_beads}"
-        );
-
-        // Conservation check (20:20 ratio)
-        assert_eq!(
-            80.0 - free_fatty_acids,
-            storage_beads,
-            "FreeFattyAcids consumed should equal StorageBeads produced"
-        );
-    }
+    let stored = FatStorageBlock::default().poly_rate * dt(&app);
+    let ffa = pool(&app, cell, Currency::FreeFattyAcids);
+    let beads = pool(&app, cell, Currency::StorageBeads);
+    assert!((ffa - (80.0 - stored)).abs() < 1e-4, "{ffa}");
+    assert!((beads - stored).abs() < 1e-4, "{beads}");
+    assert!((ffa + beads - 80.0).abs() < 1e-4, "lipids are conserved");
 }
 
-/// Tests that lipolysis mobilizes StorageBeads back to FreeFattyAcids when below toxicity threshold.
 #[test]
-#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn test_fat_storage_lipolysis() {
-    // --- Setup ---
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(GenomePlugin);
-    app.add_plugins(MetabolicBlocksPlugin);
-    app.add_plugins(MetabolicFlowPlugin);
-    app.insert_resource(LipidToxicityThreshold(50.0)); // Set toxicity threshold
+    let (mut app, cell) = app_with_cell(&[BlockKind::FatStorage]);
+    set_pools(
+        &mut app,
+        cell,
+        &[
+            (Currency::FreeFattyAcids, 10.0),
+            (Currency::StorageBeads, 40.0),
+        ],
+    );
 
-    // Spawn a local player-cell pair for testing
-    let (_player_entity, cell_entity) = {
-        let mut commands = app.world_mut().commands();
-        spawn_local_player_cell(&mut commands, Genome::default())
-    };
+    run_metabolic_tick(app.world_mut());
 
-    // Apply commands to actually create the entities
-    app.world_mut().flush();
-
-    // Initialize currencies with low FreeFattyAcids and high StorageBeads
-    {
-        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-        currency_pools.set(Currency::FreeFattyAcids, 10.0); // Below threshold of 50.0
-        currency_pools.set(Currency::StorageBeads, 40.0); // Available for lipolysis
-    }
-
-    // Spawn a PolyMer entity for lipolysis
-    let polymer_entity = app
-        .world_mut()
-        .spawn((
-            PolyMer {
-                capacity: 100.0,
-                target_fill: 0.8,
-                poly_rate: 10.0,
-                lipo_rate: 5.0,
-            },
-            CellMass {
-                base: 10.0,
-                extra: 40.0,
-            },
-            OwnedBy(cell_entity),
-        ))
-        .id();
-
-    // --- Run Simulation ---
-    app.update();
-
-    // --- Verification ---
-    {
-        let currency_pools = app
-            .world()
-            .get_entity(cell_entity)
-            .unwrap()
-            .get::<CurrencyPools>()
-            .unwrap();
-        let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
-        let storage_beads = currency_pools.get(Currency::StorageBeads);
-        let atp = currency_pools.get(Currency::ATP);
-
-        // Should have mobilized some StorageBeads
-        assert!(
-            free_fatty_acids > 10.0,
-            "FreeFattyAcids should increase from 10.0: {free_fatty_acids}"
-        );
-        assert!(
-            storage_beads < 40.0,
-            "StorageBeads should decrease from 40.0: {storage_beads}"
-        );
-        assert!(atp > 0.0, "ATP should be produced during lipolysis: {atp}");
-
-        // Check that lipolysis rate was applied correctly (up to 5.0)
-        assert_eq!(
-            free_fatty_acids - 10.0,
-            5.0,
-            "Should mobilize exactly lipo_rate amount"
-        );
-    }
-
-    // Check cell mass was updated
-    {
-        let cell_mass = app
-            .world()
-            .get_entity(polymer_entity)
-            .unwrap()
-            .get::<CellMass>()
-            .unwrap();
-        assert_eq!(
-            cell_mass.extra, 35.0,
-            "Cell mass should decrease by amount mobilized"
-        );
-    }
+    let released = FatStorageBlock::default().lipo_rate * dt(&app);
+    let ffa = pool(&app, cell, Currency::FreeFattyAcids);
+    let beads = pool(&app, cell, Currency::StorageBeads);
+    assert!((ffa - (10.0 + released)).abs() < 1e-4, "{ffa}");
+    assert!((beads - (40.0 - released)).abs() < 1e-4, "{beads}");
 }
 
-/// Tests that polymerization doesn't occur below toxicity threshold.
 #[test]
-#[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
 fn test_no_polymerization_below_threshold() {
-    // --- Setup ---
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(GenomePlugin);
-    app.add_plugins(MetabolicBlocksPlugin);
-    app.add_plugins(MetabolicFlowPlugin);
-    app.insert_resource(LipidToxicityThreshold(50.0)); // Set toxicity threshold
+    let (mut app, cell) = app_with_cell(&[BlockKind::FatStorage]);
+    set_pools(&mut app, cell, &[(Currency::FreeFattyAcids, 30.0)]);
 
-    // Spawn a local player-cell pair for testing
-    let (_player_entity, cell_entity) = {
-        let mut commands = app.world_mut().commands();
-        spawn_local_player_cell(&mut commands, Genome::default())
-    };
+    run_metabolic_tick(app.world_mut());
 
-    // Apply commands to actually create the entities
-    app.world_mut().flush();
+    assert_eq!(pool(&app, cell, Currency::FreeFattyAcids), 30.0);
+    assert_eq!(pool(&app, cell, Currency::StorageBeads), 0.0);
+}
 
-    // Initialize FreeFattyAcids below toxicity threshold
-    {
-        let mut entity_mut = app.world_mut().get_entity_mut(cell_entity).unwrap();
-        let mut currency_pools = entity_mut.get_mut::<CurrencyPools>().unwrap();
-        currency_pools.set(Currency::FreeFattyAcids, 30.0); // Below threshold of 50.0
-        currency_pools.set(Currency::ATP, 10.0);
-    }
+#[test]
+fn test_no_fat_storage_without_gene() {
+    let (mut app, cell) = app_with_cell(&[]);
+    set_pools(&mut app, cell, &[(Currency::FreeFattyAcids, 80.0)]);
 
-    // --- Run Simulation ---
-    app.update();
+    run_metabolic_tick(app.world_mut());
 
-    // --- Verification ---
-    {
-        let currency_pools = app
-            .world()
-            .get_entity(cell_entity)
-            .unwrap()
-            .get::<CurrencyPools>()
-            .unwrap();
-        let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
-        let storage_beads = currency_pools.get(Currency::StorageBeads);
-
-        // Should not have polymerized
-        assert_eq!(
-            free_fatty_acids, 30.0,
-            "FreeFattyAcids should remain at 30.0: {free_fatty_acids}"
-        );
-        assert_eq!(
-            storage_beads, 0.0,
-            "StorageBeads should remain at 0.0: {storage_beads}"
-        );
-    }
+    assert_eq!(pool(&app, cell, Currency::FreeFattyAcids), 80.0);
+    assert_eq!(pool(&app, cell, Currency::StorageBeads), 0.0);
 }

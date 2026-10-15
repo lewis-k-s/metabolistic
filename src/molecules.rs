@@ -135,103 +135,16 @@ impl EnvironmentalCurrencyPools {
     }
 }
 
-/// Defines the threshold of FreeFattyAcids above which the polymerization system
-/// should automatically activate to prevent cellular damage.
-#[derive(Resource, Debug, Default)]
+/// Free fatty acid level above which fat storage stores lipids as beads, to
+/// protect the cell from lipid toxicity. At or below it, fat storage releases them.
+#[derive(Resource, Debug, Clone, Copy)]
 pub struct LipidToxicityThreshold(pub f32);
 
-// --- Components ---
-
-/// Represents the total mass of the cell, affecting physical properties like speed and drag.
-#[derive(Component, Debug)]
-pub struct CellMass {
-    pub base: f32,
-    pub extra: f32,
+impl Default for LipidToxicityThreshold {
+    fn default() -> Self {
+        Self(50.0)
+    }
 }
-
-/// Manages the polymerization and depolymerization of storage molecules (e.g., fatty acid beads).
-#[derive(Component, Debug)]
-pub struct PolyMer {
-    pub capacity: f32,
-    pub target_fill: f32,
-    pub poly_rate: f32,
-    pub lipo_rate: f32,
-}
-
-// --- Legacy Currency Resource Implementations (commented out) ---
-// These were the old individual currency resources, now replaced by unified CurrencyPools
-
-// A trait for generic operations on currency resources.
-// This allows the `try_consume_currency` function to work with any currency type.
-// pub trait CurrencyResource: Resource + Default + std::fmt::Debug {
-//     /// Returns the current amount of the currency.
-//     fn amount(&self) -> f32;
-//     /// Sets the amount of the currency.
-//     fn set_amount(&mut self, value: f32);
-// }
-
-// impl CurrencyResource for ATP {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for ReducingPower {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for AcetylCoA {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for CarbonSkeletons {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for FreeFattyAcids {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for Pyruvate {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
-
-// impl CurrencyResource for OrganicWaste {
-//     fn amount(&self) -> f32 {
-//         self.0
-//     }
-//     fn set_amount(&mut self, value: f32) {
-//         self.0 = value;
-//     }
-// }
 
 // --- Plugin for Initialization ---
 

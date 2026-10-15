@@ -47,7 +47,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
-- **Quarantined tests**: `cargo tq` runs the tests marked `#[ignore = "pre-pivot Cell model: ..."]`. They fail because `Cell` holds `CurrencyPools` as a field, not as a component. Remove the `#[ignore]` when the Cell model is fixed.
+- **Simulation tests**: use `MetabolisticApp::new_headless()` (manual ticks, no random mutations). Advance with `app.update()` (genome -> block sync) and `metabolism::run_metabolic_tick(app.world_mut())`. `tests/common/mod.rs` has `sim_step` and `express_blocks`.
 - **TUI tests**: `cargo test --features tui` (the `tui_*` tests need the `tui` feature)
 - **Property-based tests**: Uses `proptest` for invariant testing. Shared strategies are in `tests/common/mod.rs`. Do not set `timeout` in `ProptestConfig`: it forks one process per case and makes tests very slow.
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
@@ -120,8 +120,13 @@ impl Cell {
 - Currency systems use shared resources accessible across plugins
 - State transitions managed through `NextState<GameState>` resource
 - Asset loading handled through Bevy's `AssetServer`
-- MetabolicGraph and FluxResult resources track metabolic calculations
-- FlowDirty resource triggers metabolic graph rebuilds when set to true
+
+### Simulation Model
+- **Cell**: an entity with the `Cell` marker. `#[require]` adds `Genome`, `CurrencyPools`, `CellBlocks`, and `MetabolicGraph`. There is no global `Genome` resource: each cell's `Genome` component is the only source of truth. UI code reads the local player's cell with `player::LocalCellGenome`.
+- **Blocks**: one entity per implemented gene, with `MetabolicBlock`, `MetabolicNode` (kind, status), `FluxProfile` (rates per second), and `OwnedBy(cell)`. `blocks::sync_cell_blocks_system` keeps them in line with the genome (Expressed = full rate, Mutated = half, Silent = no flux). Removing a cell despawns its blocks.
+- **Metabolic tick**: `MetabolicSchedule`, in the sets Genome -> Regulate -> Solve -> Exchange. `metabolism::solve_tick` is a pure function: each block runs at the largest activity in [0, 1] that its inputs allow, so stoichiometry is conserved and pools never go negative. All rates scale by `dt = FlowmapTimingConfig::target_delta()`.
+- **Tick-length independence**: regulation and exchange rules must not overshoot a target by `rate * dt`. Cap at the gap (see `fat_storage_profile`) or use exact decay (`decay_fraction`). `time_scale_consistency` tests this.
+- **New block kind**: add the gene to `BlockKind`, a profile to `blocks::block_flux_profile`, and a marker in `blocks::spawn_block`. Regulated blocks set their `FluxProfile` in `MetabolicSet::Regulate`.
 
 ### Error Handling
 - Tests use `Result` types with proper error propagation

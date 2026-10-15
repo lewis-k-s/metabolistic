@@ -4,14 +4,9 @@
 //! metabolic simulation, including economic balance, genetic-metabolic
 //! consistency, and cellular viability constraints.
 
-use bevy::prelude::*;
-use bevy::time::{Fixed, Time};
-use metabolistic3d::blocks::fermentation::FermentationBlock;
 use metabolistic3d::blocks::genome::{GeneState, Genome};
-use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
-use metabolistic3d::molecules::{CellMass, PolyMer};
 use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
@@ -30,7 +25,6 @@ proptest! {
     /// Test that cellular metabolism maintains economic viability over time
     /// (enough ATP production to sustain cellular processes)
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn metabolic_economic_viability(
         initial_resources in (
             100.0f32..400.0f32, // pyruvate
@@ -80,10 +74,7 @@ proptest! {
                 app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP)
             };
 
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             let atp_after = {
                 app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::ATP)
@@ -127,7 +118,6 @@ proptest! {
     })]
     /// Test that resource scarcity leads to graceful degradation, not system failure
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn scarcity_graceful_degradation(
         scarcity_scenario in prop_oneof![
             Just("energy_scarce"),      // Low ATP/pyruvate/RP
@@ -178,24 +168,11 @@ proptest! {
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
 
         // Spawn all systems under stress
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 2000.0,
-                target_fill: 1000.0,
-                poly_rate: 25.0,
-                lipo_rate: 12.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         // Monitor graceful degradation
         for step in 0..degradation_period {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Verify graceful degradation properties
             prop_assert!(all_currencies_non_negative(&app),
@@ -226,7 +203,6 @@ proptest! {
     })]
     /// Test that genome state changes properly propagate to metabolic system state
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn genome_metabolic_consistency(
         gene_operations in prop::collection::vec(
             (block_kind(), gene_state()),
@@ -290,23 +266,26 @@ proptest! {
 
             // Run simulation to propagate changes
             for step in 0..consistency_check_steps {
-                app.update();
+                sim_step(&mut app);
 
                 // After a few steps, check for consistency
                 if step > 5 {
-                    let should_exist = matches!(target_state, GeneState::Expressed | GeneState::Mutated);
+                    // Every implemented gene in the genome has a block. Its status
+                    // follows the gene's current state (silent blocks run no flux).
+                    let genome = app.world().get::<Genome>(cell_entity).unwrap();
+                    let gene_state = genome.get_gene_state(&block_kind).cloned();
+                    let implemented = metabolistic3d::blocks::block_flux_profile(block_kind).is_some();
+                    let block = app.world()
+                        .get::<metabolistic3d::cell::CellBlocks>(cell_entity)
+                        .unwrap()
+                        .get(block_kind);
 
-                    let mut block_exists = false;
-                    // Check if block exists by looking at cell's metabolic_blocks map
-                    if let Ok(cell) = app.world().get_entity(cell_entity) {
-                        if let Some(cell_component) = cell.get::<metabolistic3d::cell::Cell>() {
-                            block_exists = cell_component.metabolic_blocks.contains_key(&block_kind);
-                        }
+                    prop_assert_eq!(block.is_some(), implemented && gene_state.is_some(),
+                        "Block existence inconsistency for {:?}", block_kind);
+                    if let (Some(block), Some(state)) = (block, gene_state) {
+                        let node = app.world().get::<metabolistic3d::metabolism::MetabolicNode>(block).unwrap();
+                        prop_assert_eq!(node.status, metabolistic3d::metabolism::BlockStatus::from(state));
                     }
-
-                    prop_assert_eq!(block_exists, should_exist,
-                        "Block existence inconsistency for {:?}: expected {}, found {}",
-                        block_kind, should_exist, block_exists);
                 }
             }
              // Verify consistency doesn't break other invariants
@@ -326,7 +305,6 @@ proptest! {
     })]
     /// Test that toxic waste levels trigger appropriate protective responses
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn toxicity_response_mechanisms(
         toxicity_scenario in (
             200.0f32..800.0f32, // high initial organic waste
@@ -359,8 +337,7 @@ proptest! {
         app.world_mut().insert_resource(LipidToxicityThreshold(threshold));
 
         // Spawn detoxification systems
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn(FermentationBlock); // Can produce more waste
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport]);
 
         let mut waste_levels = Vec::new();
         let mut toxicity_responses_observed = false;
@@ -369,10 +346,7 @@ proptest! {
         for step in 0..toxicity_resolution_time {
             let waste_before = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::OrganicWaste);
 
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             let waste_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::OrganicWaste);
             waste_levels.push(waste_after);
@@ -412,7 +386,6 @@ proptest! {
     })]
     /// Test that lipid toxicity triggers polymerization protective responses
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn lipid_toxicity_protection(
         lipid_stress in (
             300.0f32..1000.0f32, // high initial FFA
@@ -445,15 +418,8 @@ proptest! {
         }
 
         // Spawn lipid management system
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 3000.0,
-                target_fill: 1500.0,
-                poly_rate,
-                lipo_rate: poly_rate / 2.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
+        set_fat_storage_rates(&mut app, cell_entity, poly_rate, 5.0);
 
         let mut ffa_levels = Vec::new();
         let mut protection_activated = false;
@@ -462,7 +428,7 @@ proptest! {
         for step in 0..protection_duration {
             let ffa_before = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::FreeFattyAcids);
 
-            app.update();
+            sim_step(&mut app);
 
             let ffa_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::FreeFattyAcids);
             let storage_after = app.world().get::<CurrencyPools>(cell_entity).unwrap().get(Currency::StorageBeads);
@@ -506,7 +472,6 @@ proptest! {
     })]
     /// Test that full metabolic system maintains overall cellular health
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn cellular_health_maintenance(
         health_scenario in (
             100.0f32..300.0f32, // pyruvate
@@ -541,26 +506,13 @@ proptest! {
         app.world_mut().insert_resource(LipidToxicityThreshold(threshold));
 
         // Spawn complete metabolic system
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 2000.0,
-                target_fill: 1000.0,
-                poly_rate: 20.0,
-                lipo_rate: 10.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         let mut health_metrics = Vec::new();
 
         // Monitor cellular health over time
         for step in 0..health_monitoring_period {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Calculate health metrics
             let snapshot = get_currency_snapshot(&app);

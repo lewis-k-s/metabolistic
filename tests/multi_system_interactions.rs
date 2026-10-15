@@ -6,10 +6,8 @@
 
 use approx::assert_relative_eq;
 use bevy::prelude::*;
-use bevy::time::{Fixed, Time};
 use metabolistic3d::blocks::genome::{BlockKind, Genome};
 use metabolistic3d::molecules::*;
-use metabolistic3d::molecules::{CellMass, PolyMer};
 use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
 
@@ -37,7 +35,6 @@ proptest! {
     /// Test that fermentation and vesicle export work together correctly
     /// Fermentation produces organic waste, vesicle export removes it
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn fermentation_vesicle_export_coordination(
         initial_pyruvate in 100.0f32..500.0f32,
         initial_rp in 100.0f32..500.0f32,
@@ -51,12 +48,7 @@ proptest! {
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
 
             app.world_mut().spawn((
-                metabolistic3d::cell::Cell {
-                    genome,
-                    currency_pools: CurrencyPools::default(),
-                    metabolic_graph: metabolistic3d::metabolism::MetabolicGraph::default(),
-                    metabolic_blocks: std::collections::HashMap::new(),
-                },
+                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
             )).id()
         };
 
@@ -83,10 +75,7 @@ proptest! {
         for _ in 0..simulation_steps {
             let waste_before = get_cell_currency_value(&app, cell_entity, Currency::OrganicWaste);
 
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
@@ -125,7 +114,6 @@ proptest! {
     })]
     /// Test fermentation + fat storage interaction with shared ATP consumption
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn fermentation_fat_storage_atp_competition(
         initial_pyruvate in 100.0f32..300.0f32,
         initial_rp in 100.0f32..300.0f32,
@@ -141,12 +129,7 @@ proptest! {
             genome.add_gene(BlockKind::Fermentation).express_gene(BlockKind::Fermentation);
 
             app.world_mut().spawn((
-                metabolistic3d::cell::Cell {
-                    genome,
-                    currency_pools: CurrencyPools::default(),
-                    metabolic_graph: metabolistic3d::metabolism::MetabolicGraph::default(),
-                    metabolic_blocks: std::collections::HashMap::new(),
-                },
+                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
             )).id()
         };
 
@@ -164,22 +147,11 @@ proptest! {
         // Trigger metabolic processing to ensure blocks are spawned and working
         run_cell_metabolic_cycle(&mut app, cell_entity);
 
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 1000.0,
-                target_fill: 500.0,
-                poly_rate: 20.0,
-                lipo_rate: 5.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
 
         // Run simulation with ATP competition
         for step in 0..simulation_steps {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
@@ -215,7 +187,6 @@ proptest! {
     })]
     /// Test all three systems operating simultaneously with realistic parameters
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn three_system_integration(
         metabolic_inputs in (
             100.0f32..400.0f32, // pyruvate
@@ -241,12 +212,7 @@ proptest! {
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
 
             app.world_mut().spawn((
-                metabolistic3d::cell::Cell {
-                    genome,
-                    currency_pools: CurrencyPools::default(),
-                    metabolic_graph: metabolistic3d::metabolism::MetabolicGraph::default(),
-                    metabolic_blocks: std::collections::HashMap::new(),
-                },
+                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
             )).id()
         };
 
@@ -264,15 +230,8 @@ proptest! {
         // Trigger metabolic processing to ensure blocks are spawned and working
         run_cell_metabolic_cycle(&mut app, cell_entity);
 
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 2000.0,
-                target_fill: 1000.0,
-                poly_rate,
-                lipo_rate,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
+        set_fat_storage_rates(&mut app, cell_entity, poly_rate, lipo_rate);
 
         let initial_total = if let Some(snapshot) = get_cell_currencies(&app, cell_entity) {
             snapshot.pools.values().sum::<f32>()
@@ -282,10 +241,7 @@ proptest! {
 
         // Run integrated three-system simulation
         for step in 0..simulation_steps {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);
@@ -332,7 +288,6 @@ proptest! {
     })]
     /// Test system interactions when one system is completely depleted
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn depleted_system_interactions(
         depletion_scenario in prop_oneof![
             Just("no_fermentation_inputs"),
@@ -350,12 +305,7 @@ proptest! {
             genome.add_gene(BlockKind::LipidMetabolism).express_gene(BlockKind::LipidMetabolism);
 
             app.world_mut().spawn((
-                metabolistic3d::cell::Cell {
-                    genome,
-                    currency_pools: CurrencyPools::default(),
-                    metabolic_graph: metabolistic3d::metabolism::MetabolicGraph::default(),
-                    metabolic_blocks: std::collections::HashMap::new(),
-                },
+                metabolistic3d::cell::Cell, genome, CurrencyPools::default(),
             )).id()
         };
 
@@ -400,22 +350,11 @@ proptest! {
         // Trigger metabolic processing to ensure blocks are spawned and working
         run_cell_metabolic_cycle(&mut app, cell_entity);
 
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 1000.0,
-                target_fill: 500.0,
-                poly_rate: 25.0,
-                lipo_rate: 8.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
 
         // Run simulation with depleted resources
         for step in 0..simulation_steps {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Run per-cell metabolic processing each step
             run_cell_metabolic_cycle(&mut app, cell_entity);

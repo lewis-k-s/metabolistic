@@ -26,7 +26,7 @@
 //!
 //! The system automatically:
 //! - Tracks gene expression changes via `GenomeDiffEvent`
-//! - Applies changes to metabolic block entities
+//! - Syncs each cell's metabolic blocks with its genome (see `blocks`)
 //! - Handles random mutations over time
 //!
 //! ## Controls (Demo)
@@ -34,7 +34,6 @@
 //! - Press 'G' to express the Sugar Catabolism gene
 //! - Press 'H' to silence the Fermentation gene  
 //! - Press 'J' to add a new Light Capture gene
-//! - Press 'K' to spawn new metabolic block entities
 
 use bevy::prelude::*;
 use rand::prelude::*;
@@ -42,7 +41,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Represents the different types of metabolic blocks that can be encoded in the genome
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Component, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Component, Serialize, Deserialize,
+)]
 pub enum BlockKind {
     LightCapture,
     SugarCatabolism,
@@ -56,6 +57,10 @@ pub enum BlockKind {
     SecondaryMetabolites,
     AromaticPrecursorSynthesis,
     Polymerization,
+    /// Stores free fatty acids as storage beads and releases them again.
+    FatStorage,
+    /// Removes organic waste from the cell in vesicles.
+    VesicleExport,
 }
 
 impl BlockKind {
@@ -74,6 +79,8 @@ impl BlockKind {
             BlockKind::SecondaryMetabolites => "Produce pigments and toxins",
             BlockKind::AromaticPrecursorSynthesis => "Create aromatic precursors",
             BlockKind::Polymerization => "Polymerize lignin and other biopolymers",
+            BlockKind::FatStorage => "Store free fatty acids as lipid beads",
+            BlockKind::VesicleExport => "Export organic waste in vesicles",
         }
     }
 }
@@ -91,8 +98,9 @@ pub enum GeneState {
 }
 
 /// Resource/Component containing the entire chromosome of gene tiles
-/// Can be used as a Resource (global genome) or Component (per-cell genome)
-#[derive(Resource, Component, Default, Clone)]
+/// Each `Cell` entity owns one `Genome` component. It is the only source of truth
+/// for which metabolic blocks the cell has.
+#[derive(Component, Default, Clone, Debug)]
 pub struct Genome {
     pub table: HashMap<BlockKind, GeneState>,
     /// Track previous state for diff computation
@@ -236,12 +244,12 @@ impl Genome {
     }
 
     /// Internal method to update the previous state snapshot
-    fn update_previous_state(&mut self) {
+    pub(crate) fn update_previous_state(&mut self) {
         self.previous_table = self.table.clone();
     }
 
     /// Compute the diff between current and previous state
-    fn compute_diff(&self) -> GenomeDiff {
+    pub(crate) fn compute_diff(&self) -> GenomeDiff {
         let mut enabled = Vec::new();
         let mut disabled = Vec::new();
 
@@ -276,14 +284,17 @@ impl Genome {
     }
 }
 
-/// Event containing changes in gene expression that affect metabolic blocks
+/// Event containing changes in gene expression of one cell
 #[derive(Event, Debug)]
 pub struct GenomeDiffEvent {
+    /// The cell whose genome changed
+    pub cell: Entity,
     pub enabled: Vec<BlockKind>,
     pub disabled: Vec<BlockKind>,
 }
 
-/// Event triggered when any genome state changes, requiring metabolic system updates
+/// Forces every cell to resync its metabolic blocks with its genome.
+/// Normal genome edits do not need it: block sync reacts to `Changed<Genome>`.
 #[derive(Event, Debug)]
 pub struct MetabolicUpdateEvent;
 
@@ -293,16 +304,6 @@ pub struct GenomeDiff {
     pub enabled: Vec<BlockKind>,
     pub disabled: Vec<BlockKind>,
 }
-
-/// Marker component for metabolic blocks that can be controlled by the genome
-#[derive(Component)]
-pub struct MetabolicBlock {
-    pub block_kind: BlockKind,
-}
-
-/// Component to enable/disable metabolic blocks
-#[derive(Component, Default)]
-pub struct Enabled(pub bool);
 
 /// Currency costs for genome operations
 #[derive(Resource)]
@@ -411,90 +412,62 @@ pub struct GenomePlugin;
 
 impl Plugin for GenomePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Genome::default())
-            .insert_resource(GenomeOperationCosts::default())
-            .insert_resource(MutationConfig::default())
+        app.insert_resource(GenomeOperationCosts::default())
+            .init_resource::<MutationConfig>()
             .add_event::<GenomeDiffEvent>()
             .add_event::<MetabolicUpdateEvent>()
             .add_systems(PreUpdate, poll_genome_diff)
-            .add_systems(Update, apply_genome_diff)
-            .add_systems(PostUpdate, mutation_system);
+            .add_systems(
+                crate::metabolism::MetabolicSchedule,
+                mutation_system.in_set(crate::metabolism::MetabolicSet::Genome),
+            );
     }
 }
 
-/// System that compares current vs. previous genome snapshot and emits only the delta
+/// Compares each changed genome with its previous snapshot and emits the delta.
 pub fn poll_genome_diff(
-    mut genome: ResMut<Genome>,
+    mut genomes: Query<(Entity, &mut Genome), Changed<Genome>>,
     mut diff_writer: EventWriter<GenomeDiffEvent>,
-    mut metabolic_diff_writer: EventWriter<MetabolicUpdateEvent>,
 ) {
-    let diff = genome.compute_diff();
-
-    // Send expression change events (for existing systems)
-    if !diff.enabled.is_empty() || !diff.disabled.is_empty() {
-        diff_writer.send(GenomeDiffEvent {
-            enabled: diff.enabled,
-            disabled: diff.disabled,
-        });
-    }
-
-    // Send metabolic update events for ANY genome changes (including Silent <-> Mutated)
-    if genome.has_any_changes() {
-        metabolic_diff_writer.send(MetabolicUpdateEvent);
-    }
-
-    // Update the previous state snapshot for next frame
-    genome.update_previous_state();
-}
-
-/// System that receives genome diff events and toggles metabolic blocks accordingly
-pub fn apply_genome_diff(
-    mut diff_reader: EventReader<GenomeDiffEvent>,
-    mut metabolic_blocks: Query<(&mut Enabled, &MetabolicBlock)>,
-) {
-    for diff in diff_reader.read() {
-        for (mut enabled, metabolic_block) in metabolic_blocks.iter_mut() {
-            if diff.enabled.contains(&metabolic_block.block_kind) {
-                enabled.0 = true;
-                info!("Enabled metabolic block: {:?}", metabolic_block.block_kind);
-            }
-
-            if diff.disabled.contains(&metabolic_block.block_kind) {
-                enabled.0 = false;
-                info!("Disabled metabolic block: {:?}", metabolic_block.block_kind);
-            }
+    for (cell, mut genome) in &mut genomes {
+        let diff = genome.compute_diff();
+        if !diff.enabled.is_empty() || !diff.disabled.is_empty() {
+            diff_writer.send(GenomeDiffEvent {
+                cell,
+                enabled: diff.enabled,
+                disabled: diff.disabled,
+            });
         }
+        // Do not mark the genome as changed again for the snapshot update.
+        genome.bypass_change_detection().update_previous_state();
     }
 }
 
-/// System that applies mutations according to the configured strategy
+/// Applies random mutations to every cell genome, once per metabolic tick.
 pub fn mutation_system(
-    mut genome: ResMut<Genome>,
+    mut genomes: Query<&mut Genome>,
     mut mutation_config: ResMut<MutationConfig>,
-    time: Res<Time>,
+    timing: Res<crate::metabolism::FlowmapTimingConfig>,
 ) {
-    let delta_time = time.delta_secs();
-
-    for (block_kind, _state) in genome.table.clone().iter() {
-        if mutation_config
-            .strategy
-            .should_mutate(*block_kind, delta_time)
-        {
-            let target_state = mutation_config.strategy.get_mutation_target(*block_kind);
-            match target_state {
+    let dt = timing.target_delta();
+    for mut genome in &mut genomes {
+        let kinds: Vec<BlockKind> = genome.table.keys().copied().collect();
+        for block_kind in kinds {
+            if !mutation_config.strategy.should_mutate(block_kind, dt) {
+                continue;
+            }
+            match mutation_config.strategy.get_mutation_target(block_kind) {
                 GeneState::Mutated => {
-                    genome.mutate_gene(*block_kind);
-                    warn!("Gene {:?} has mutated!", block_kind);
+                    genome.mutate_gene(block_kind);
                 }
                 GeneState::Silent => {
-                    genome.silence_gene(*block_kind);
-                    warn!("Gene {:?} has been silenced!", block_kind);
+                    genome.silence_gene(block_kind);
                 }
                 GeneState::Expressed => {
-                    genome.express_gene(*block_kind);
-                    warn!("Gene {:?} has been expressed!", block_kind);
+                    genome.express_gene(block_kind);
                 }
             }
+            debug!("Gene {block_kind:?} changed by mutation");
         }
     }
 }
@@ -509,15 +482,4 @@ pub fn create_starter_genome() -> Genome {
     genome.add_gene(BlockKind::AminoAcidBiosynthesis);
 
     genome
-}
-
-/// Helper function to spawn a metabolic block entity
-pub fn spawn_metabolic_block(commands: &mut Commands, block_kind: BlockKind) -> Entity {
-    commands
-        .spawn((
-            MetabolicBlock { block_kind },
-            Enabled::default(),
-            Name::new(format!("Metabolic Block: {block_kind:?}")),
-        ))
-        .id()
 }

@@ -1,77 +1,92 @@
-//! Fat storage metabolic block implementation.
+//! Fat storage metabolic block.
 //!
-//! The fat storage block manages lipid metabolism, polymerizing free fatty acids into
-//! storage beads when they exceed toxicity thresholds, and mobilizing them back when needed.
-//! This is an active system block that runs polymerization and lipolysis systems each frame.
+//! A regulated block. Each tick, `regulate_fat_storage_system` sets its flux
+//! profile from the owning cell's pools. It moves FreeFattyAcids toward the
+//! lipid toxicity threshold:
+//! - **Polymerization**: above the threshold, FreeFattyAcids become StorageBeads.
+//! - **Lipolysis**: below the threshold, StorageBeads become FreeFattyAcids.
+//!
+//! The rate is capped so that one tick never moves past the threshold. Without
+//! the cap, the block overshoots by up to `rate * dt`, and the result depends on
+//! the tick length. Both directions conserve FreeFattyAcids + StorageBeads.
 
-use crate::cell::Cell;
-use crate::metabolism::CurrencyPools;
-use crate::molecules::{CellMass, Currency, LipidToxicityThreshold, PolyMer};
 use bevy::prelude::*;
 
-/// Component that points back to the owning entity (usually a cell)
-/// Used for PolyMer entities that need to find their parent cell
-#[derive(Component)]
-pub struct OwnedBy(pub Entity);
+use crate::cell::{Cell, OwnedBy};
+use crate::metabolism::{CurrencyPools, FlowmapTimingConfig, FluxProfile};
+use crate::molecules::{Currency, LipidToxicityThreshold};
 
-/// Component marker for fat storage metabolic blocks.
-///
-/// Fat storage manages two processes:
-/// - **Polymerization**: FreeFattyAcids + ATP → StorageBeads (when above toxicity)
-/// - **Lipolysis**: StorageBeads → FreeFattyAcids + ATP (when below toxicity)
-#[derive(Component)]
-pub struct FatStorageBlock;
-
-/// System to polymerize FreeFattyAcids into StorageBeads.
-/// This system activates when FreeFattyAcids exceed a LipidToxicityThreshold.
-/// It consumes FFA and ATP, produces StorageBeads, and updates CellMass.
-/// Runs in parallel for each cell.
-pub fn polymerize_beads_system(
-    mut query_cells: Query<&mut CurrencyPools, With<Cell>>,
-    lipid_toxicity_threshold: Res<LipidToxicityThreshold>,
-) {
-    // Process each cell in parallel
-    query_cells.par_iter_mut().for_each(|mut currency_pools| {
-        let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
-        if free_fatty_acids > lipid_toxicity_threshold.0 {
-            let desired_polymerization: f32 = 20.0; // Desired amount to polymerize
-                                                    // Only polymerize what's actually available, up to the desired amount
-            let ffa_to_polymerize = desired_polymerization.min(free_fatty_acids);
-
-            // Use safe currency consumption
-            if currency_pools.can_consume(Currency::FreeFattyAcids, ffa_to_polymerize) {
-                currency_pools.modify(Currency::FreeFattyAcids, -ffa_to_polymerize);
-                currency_pools.modify(Currency::StorageBeads, ffa_to_polymerize);
-            }
-        }
-    });
+/// Fat storage block with its rates, per second.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct FatStorageBlock {
+    pub poly_rate: f32,
+    pub lipo_rate: f32,
 }
 
-/// System to mobilize StorageBeads back into FreeFattyAcids.
-/// Only runs when FreeFattyAcids are below the toxicity threshold and there's a need for mobilization.
-/// Runs for each cell with PolyMer entities.
-pub fn lipolysis_system(
-    mut query_cells: Query<&mut CurrencyPools, With<Cell>>,
-    lipid_toxicity_threshold: Res<LipidToxicityThreshold>,
-    mut query_polymers: Query<(&mut CellMass, &PolyMer, &OwnedBy)>,
-) {
-    // Process each PolyMer entity and find its owning cell
-    for (mut cell_mass, polymer, owned_by) in query_polymers.iter_mut() {
-        if let Ok(mut currency_pools) = query_cells.get_mut(owned_by.0) {
-            let free_fatty_acids = currency_pools.get(Currency::FreeFattyAcids);
-            // Only run lipolysis if we're NOT in a toxic state (i.e., when FFA levels are safe)
-            // This prevents lipolysis from interfering with toxicity management
-            if free_fatty_acids <= lipid_toxicity_threshold.0 {
-                let storage_beads = currency_pools.get(Currency::StorageBeads);
-                let beads_to_mobilize = polymer.lipo_rate.min(storage_beads);
-                if beads_to_mobilize > 0.0 {
-                    currency_pools.modify(Currency::StorageBeads, -beads_to_mobilize);
-                    currency_pools.modify(Currency::FreeFattyAcids, beads_to_mobilize);
-                    cell_mass.extra -= beads_to_mobilize; // Decrease cell mass as beads are mobilized
-                    currency_pools.modify(Currency::ATP, beads_to_mobilize * 0.05);
-                    // Example ATP gain
-                }
-            }
+impl Default for FatStorageBlock {
+    fn default() -> Self {
+        Self {
+            poly_rate: 20.0,
+            lipo_rate: 5.0,
         }
+    }
+}
+
+/// The flux profile (per second) for the current pools and a tick of `dt` seconds.
+pub fn fat_storage_profile(
+    block: &FatStorageBlock,
+    free_fatty_acids: f32,
+    threshold: f32,
+    dt: f32,
+) -> FluxProfile {
+    let mut profile = FluxProfile::default();
+    let gap = free_fatty_acids - threshold;
+    if gap > 0.0 {
+        let rate = block.poly_rate.min(gap / dt);
+        profile.set_demand(Currency::FreeFattyAcids, rate);
+        profile.set_production(Currency::StorageBeads, rate);
+    } else if gap < 0.0 {
+        let rate = block.lipo_rate.min(-gap / dt);
+        profile.set_demand(Currency::StorageBeads, rate);
+        profile.set_production(Currency::FreeFattyAcids, rate);
+    }
+    profile
+}
+
+/// Sets each fat storage block's profile from its cell's pools.
+pub fn regulate_fat_storage_system(
+    threshold: Option<Res<LipidToxicityThreshold>>,
+    timing: Res<FlowmapTimingConfig>,
+    cells: Query<&CurrencyPools, With<Cell>>,
+    mut blocks: Query<(&FatStorageBlock, &OwnedBy, &mut FluxProfile)>,
+) {
+    let threshold = threshold.map(|t| *t).unwrap_or_default();
+    let dt = timing.target_delta();
+    for (block, owner, mut profile) in &mut blocks {
+        if let Ok(pools) = cells.get(owner.0) {
+            *profile =
+                fat_storage_profile(block, pools.get(Currency::FreeFattyAcids), threshold.0, dt);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn regulation_moves_toward_threshold_without_overshoot() {
+        let block = FatStorageBlock::default();
+        // Far above: full poly rate.
+        let p = fat_storage_profile(&block, 100.0, 50.0, 0.2);
+        assert_eq!(p.get_demand(Currency::FreeFattyAcids), block.poly_rate);
+        // Just above: only the excess, spread over the tick.
+        let p = fat_storage_profile(&block, 51.0, 50.0, 0.2);
+        assert!((p.get_demand(Currency::FreeFattyAcids) * 0.2 - 1.0).abs() < 1e-5);
+        // Below: lipolysis, capped by the deficit.
+        let p = fat_storage_profile(&block, 49.5, 50.0, 0.2);
+        assert!((p.get_production(Currency::FreeFattyAcids) * 0.2 - 0.5).abs() < 1e-5);
+        // At the threshold: nothing.
+        assert!(fat_storage_profile(&block, 50.0, 50.0, 0.2).0.is_empty());
     }
 }

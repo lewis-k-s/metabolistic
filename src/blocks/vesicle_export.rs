@@ -1,46 +1,23 @@
-//! Vesicle export metabolic block implementation.
+//! Vesicle export metabolic block.
 //!
-//! The vesicle export block simulates cellular waste removal through vesicle transport.
-//! This is an active system block that continuously removes organic waste from cells
-//! at a configurable rate.
+//! The block packs organic waste into vesicles and removes it from the cell.
+//! This is a flux-only block: it consumes OrganicWaste and produces nothing
+//! inside the cell.
 
-use crate::cell::Cell;
-use crate::metabolism::CurrencyPools;
-use crate::molecules::Currency;
 use bevy::prelude::*;
 
-/// Component marker for vesicle export metabolic blocks.
-///
-/// Vesicle export removes organic waste from cells, preventing toxic buildup.
-/// The export rate is controlled by the `VesicleExportRate` resource.
+use crate::metabolism::FluxProfile;
+use crate::molecules::Currency;
+
+/// Marker for vesicle export blocks.
 #[derive(Component)]
 pub struct VesicleExportBlock;
 
-/// Resource controlling the rate of organic waste export via vesicles.
-///
-/// The value represents the amount of organic waste removed per frame.
-/// Default value is 0.1.
-#[derive(Resource)]
-pub struct VesicleExportRate(pub f32);
+/// OrganicWaste removed per second at full rate.
+pub const RATE: f32 = 2.0;
 
-/// System that exports organic waste from cells via vesicles.
-/// Runs in parallel for each cell.
-pub fn vesicle_export_system(
-    export_rate: Res<VesicleExportRate>,
-    mut query_cells: Query<&mut CurrencyPools, With<Cell>>,
-) {
-    let amount_to_export = export_rate.0;
-
-    // Process each cell in parallel
-    query_cells.par_iter_mut().for_each(|mut currency_pools| {
-        let organic_waste = currency_pools.get(Currency::OrganicWaste);
-
-        if organic_waste >= amount_to_export {
-            currency_pools.modify(Currency::OrganicWaste, -amount_to_export);
-            // debug!("VesicleExport: Exported {:.2} OrganicWaste", amount_to_export);
-        } else {
-            currency_pools.set(Currency::OrganicWaste, 0.0);
-            // debug!("VesicleExport: Exported remaining {:.2} OrganicWaste", organic_waste);
-        }
-    });
+pub fn flux_profile() -> FluxProfile {
+    let mut profile = FluxProfile::default();
+    profile.set_demand(Currency::OrganicWaste, RATE);
+    profile
 }

@@ -33,10 +33,7 @@ fn test_tui_data_collection() {
     // Create a test cell
     let cell_entity = app
         .world_mut()
-        .spawn((
-            metabolistic3d::cell::Cell::default(),
-            Name::new("Test Cell"),
-        ))
+        .spawn((metabolistic3d::cell::Cell, Name::new("Test Cell")))
         .id();
 
     // Run systems to collect data
@@ -81,21 +78,22 @@ fn test_tui_with_cell_data() {
     app.add_plugins(CellTuiPlugin);
 
     // Create a cell with some data
-    let mut cell = metabolistic3d::cell::Cell::default();
+    let mut genome = metabolistic3d::blocks::genome::Genome::default();
+    genome.add_gene(BlockKind::Fermentation);
+    genome.express_gene(BlockKind::Fermentation);
+    genome.add_gene(BlockKind::LipidMetabolism);
 
-    // Add some genes to the genome
-    cell.genome.add_gene(BlockKind::Fermentation);
-    cell.genome.express_gene(BlockKind::Fermentation);
-    cell.genome.add_gene(BlockKind::LipidMetabolism);
+    let mut pools = metabolistic3d::molecules::CurrencyPools::default();
+    pools.set(Currency::ATP, 100.0);
+    pools.set(Currency::ReducingPower, 50.0);
+    pools.set(Currency::OrganicWaste, 10.0);
 
-    // Set some currency values
-    cell.currency_pools.set(Currency::ATP, 100.0);
-    cell.currency_pools.set(Currency::ReducingPower, 50.0);
-    cell.currency_pools.set(Currency::OrganicWaste, 10.0);
-
-    // Spawn the cell
-    app.world_mut()
-        .spawn((cell, Name::new("Test Cell with Data")));
+    app.world_mut().spawn((
+        metabolistic3d::cell::Cell,
+        genome,
+        pools,
+        Name::new("Test Cell with Data"),
+    ));
 
     // Run systems to collect data
     app.update();

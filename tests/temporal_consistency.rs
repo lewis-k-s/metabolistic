@@ -5,14 +5,10 @@
 //! accumulation of errors that could destabilize the system.
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use bevy::prelude::*;
-use bevy::time::{Fixed, Time};
-use metabolistic3d::blocks::fermentation::FermentationBlock;
 use metabolistic3d::blocks::genome::Genome;
-use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
 use metabolistic3d::metabolism::CurrencyPools;
+use metabolistic3d::metabolism::{run_metabolic_tick, FlowmapTimingConfig};
 use metabolistic3d::molecules::*;
-use metabolistic3d::molecules::{CellMass, PolyMer};
 use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
@@ -30,7 +26,6 @@ proptest! {
     })]
     /// Test that currency levels stabilize over time rather than oscillating wildly
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn currency_stabilization_over_time(
         initial_values in (
             100.0f32..300.0f32, // pyruvate
@@ -66,26 +61,13 @@ proptest! {
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
 
         // Spawn all systems
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 1500.0,
-                target_fill: 750.0,
-                poly_rate: 15.0,
-                lipo_rate: 7.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         let mut currency_history = Vec::new();
 
         // Run long simulation and track currency levels
         for step in 0..long_simulation {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             let snapshot = get_currency_snapshot(&app);
             currency_history.push(snapshot);
@@ -132,7 +114,6 @@ proptest! {
     })]
     /// Test that system behavior is consistent across identical initial conditions
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn reproducible_behavior(
         test_conditions in (
             50.0f32..200.0f32, // pyruvate
@@ -171,24 +152,11 @@ proptest! {
             app.world_mut().insert_resource(LipidToxicityThreshold(80.0));
 
             // Identical system configuration
-            app.world_mut().spawn(FermentationBlock);
-            app.world_mut().spawn(VesicleExportBlock);
-            app.world_mut().spawn((
-                CellMass { base: 1.0, extra: 0.0 },
-                PolyMer {
-                    capacity: 1000.0,
-                    target_fill: 500.0,
-                    poly_rate: 20.0,
-                    lipo_rate: 10.0,
-                },
-            ));
+            express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
             // Run identical simulation
             for _ in 0..simulation_length {
-                let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-                app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-                app.update();
-                app.world_mut().run_schedule(FixedUpdate);
+                sim_step(&mut app);
             }
 
             let final_snapshot = get_currency_snapshot(&app);
@@ -216,7 +184,6 @@ proptest! {
     })]
     /// Test that systems don't accumulate errors over very long simulations
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn long_term_error_accumulation(
         stable_config in (
             200.0f32..500.0f32, // initial pyruvate
@@ -249,27 +216,14 @@ proptest! {
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(200.0));
 
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 2000.0,
-                target_fill: 1000.0,
-                poly_rate: 12.0,
-                lipo_rate: 6.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         let initial_snapshot = get_currency_snapshot(&app);
         let mut error_samples = Vec::new();
 
         // Run very long simulation with periodic error checking
         for step in 0..very_long_simulation {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Sample error periodically
             if step % 100 == 0 {
@@ -322,7 +276,6 @@ proptest! {
     })]
     /// Test for healthy cyclic behavior vs problematic oscillations
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn cyclic_behavior_analysis(
         oscillation_config in (
             80.0f32..150.0f32,  // pyruvate
@@ -355,27 +308,14 @@ proptest! {
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(250.0)); // Low to trigger cycles
 
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 1500.0,
-                target_fill: 750.0,
-                poly_rate: 30.0,  // High rates to encourage cycling
-                lipo_rate: 15.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         let mut ffa_history = Vec::new();
         let mut waste_history = Vec::new();
 
         // Observe system for cyclic patterns
         for _ in 0..cycle_observation_length {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
             let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
@@ -437,7 +377,6 @@ proptest! {
     })]
     /// Test that system behavior is consistent across different time scales
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn time_scale_consistency(
         base_conditions in (
             100.0f32..250.0f32, // pyruvate
@@ -480,38 +419,28 @@ proptest! {
             }
             app.world_mut().insert_resource(LipidToxicityThreshold(120.0));
 
-            app.world_mut().spawn(FermentationBlock);
-            app.world_mut().spawn(VesicleExportBlock);
-            app.world_mut().spawn((
-                CellMass { base: 1.0, extra: 0.0 },
-                PolyMer {
-                    capacity: 1200.0,
-                    target_fill: 600.0,
-                    poly_rate: 18.0,
-                    lipo_rate: 9.0,
-                },
-            ));
+            express_blocks(app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
         }
 
         // Run for equivalent total simulation time
-        let base_steps = 50;
+        // Divisible by every scale factor, so both apps simulate the same time.
+        let base_steps = 40;
         let scaled_steps = (base_steps as f32 / time_scale_factor) as usize;
 
-        // Normal simulation
-        for _ in 0..base_steps {
-            let fixed_time_step = normal_app.world().resource::<Time<Fixed>>().delta();
-            normal_app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            normal_app.update();
-            normal_app.world_mut().run_schedule(FixedUpdate);
-        }
+        // The scaled app simulates the same time in fewer, longer ticks.
+        let base_rate = normal_app.world().resource::<FlowmapTimingConfig>().updates_per_second;
+        scaled_app.insert_resource(FlowmapTimingConfig {
+            manual: true,
+            ..FlowmapTimingConfig::new(base_rate / time_scale_factor)
+        });
 
-        // Scaled simulation (adjust time step)
+        normal_app.update();
+        for _ in 0..base_steps {
+            run_metabolic_tick(normal_app.world_mut());
+        }
+        scaled_app.update();
         for _ in 0..scaled_steps {
-            let base_time_step = scaled_app.world().resource::<Time<Fixed>>().delta();
-            let scaled_time_step = base_time_step.mul_f32(time_scale_factor);
-            scaled_app.world_mut().resource_mut::<Time>().advance_by(scaled_time_step);
-            scaled_app.update();
-            scaled_app.world_mut().run_schedule(FixedUpdate);
+            run_metabolic_tick(scaled_app.world_mut());
         }
 
         let normal_results = {

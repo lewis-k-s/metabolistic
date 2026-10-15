@@ -73,7 +73,7 @@ impl MetabolisticApp {
                 .add_plugins(scenes::scene_2d::Scene2DPlugin)
                 .add_plugins(scenes::genome_edit::GenomeEditPlugin)
                 // Shared systems that run in multiple states
-                .add_systems(Startup, shared::setup_shared_resources)
+                .add_systems(Startup, shared::spawn_starter_cell)
                 .add_systems(
                     Update,
                     (shared::state_transition_input, shared::genome_demo_system),
@@ -98,10 +98,10 @@ impl MetabolisticApp {
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
-            // Override with deterministic mutations for testing
+            // Deterministic for tests: no random mutations, and metabolic ticks run
+            // only on `metabolism::run_metabolic_tick`, not from real time.
             .insert_resource(blocks::genome::MutationConfig::deterministic())
-            // Only add shared systems that don't require input
-            .add_systems(Startup, shared::setup_shared_resources);
+            .insert_resource(metabolism::FlowmapTimingConfig::manual());
 
         app
     }

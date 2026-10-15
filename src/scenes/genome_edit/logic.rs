@@ -7,10 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::{
-    blocks::genome::{self, BlockKind},
-    GameState,
-};
+use crate::{blocks::genome::BlockKind, player::LocalCellGenome, GameState};
 
 use super::GenomeSceneEntity;
 
@@ -59,8 +56,12 @@ pub struct GenomeEditorState {
 /// Creates the logical entities for each genome block.
 /// These entities only contain data components, not anything for rendering.
 /// It also sets the initial selected section.
-fn setup_genome_logic(mut commands: Commands, genome: Res<genome::Genome>) {
-    let blocks: Vec<BlockKind> = genome.table.keys().copied().collect();
+fn setup_genome_logic(mut commands: Commands, local_genome: LocalCellGenome) {
+    let mut blocks: Vec<BlockKind> = local_genome
+        .get()
+        .map(|genome| genome.table.keys().copied().collect())
+        .unwrap_or_default();
+    blocks.sort();
     let mut section_entities = Vec::new();
 
     for (i, block_kind) in blocks.iter().enumerate() {

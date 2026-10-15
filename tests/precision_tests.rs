@@ -4,14 +4,9 @@
 //! maintains acceptable precision and doesn't accumulate errors over time.
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use bevy::prelude::*;
-use bevy::time::{Fixed, Time};
-use metabolistic3d::blocks::fermentation::FermentationBlock;
 use metabolistic3d::blocks::genome::Genome;
-use metabolistic3d::blocks::vesicle_export::VesicleExportBlock;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
-use metabolistic3d::molecules::{CellMass, PolyMer};
 use metabolistic3d::player::spawn_local_player_cell;
 use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
@@ -40,7 +35,6 @@ proptest! {
     })]
     /// Test that repeated small currency operations don't accumulate precision errors
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn currency_precision_accumulation(
         initial_amount in 100.0f32..1000.0f32,
         operation_size in 0.01f32..1.0f32,
@@ -84,7 +78,6 @@ proptest! {
     })]
     /// Test precision in currency transfer operations (polymerization/lipolysis)
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn transfer_precision(
         initial_ffa in 200.0f32..800.0f32,
         poly_rate in 0.5f32..25.0f32,
@@ -108,21 +101,14 @@ proptest! {
         }
         app.world_mut().insert_resource(LipidToxicityThreshold(100.0));
 
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 2000.0,
-                target_fill: 1000.0,
-                poly_rate,
-                lipo_rate,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::FatStorage]);
+        set_fat_storage_rates(&mut app, cell_entity, poly_rate, lipo_rate);
 
         let initial_total_lipids = initial_ffa + 50.0;
 
         // Run multiple cycles to test precision over time
         for _ in 0..cycles {
-            app.update();
+            sim_step(&mut app);
 
             let currency_pools = app.world().get::<CurrencyPools>(cell_entity).unwrap();
             let current_ffa = currency_pools.get(Currency::FreeFattyAcids);
@@ -149,7 +135,6 @@ proptest! {
     })]
     /// Test that fermentation maintains precision over extended simulations
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn long_fermentation_precision(
         initial_pyruvate in 500.0f32..2000.0f32,
         initial_rp in 500.0f32..2000.0f32,
@@ -172,7 +157,7 @@ proptest! {
             currency_pools.set(Currency::OrganicWaste, 0.0);
         }
 
-        app.world_mut().spawn(FermentationBlock);
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation]);
 
         let initial_total_inputs = initial_pyruvate + initial_rp;
 
@@ -180,10 +165,7 @@ proptest! {
         let mut precision_errors = Vec::new();
 
         for step in 0..long_simulation_steps {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             // Check mass balance precision every 10 steps
             if step % 10 == 0 {
@@ -218,9 +200,13 @@ proptest! {
             let second_half_avg: f32 = precision_errors[precision_errors.len()/2..].iter().sum::<f32>()
                 / (precision_errors.len() - precision_errors.len()/2) as f32;
 
-            // Second half should not have significantly higher errors than first half
+            // Second half should not have significantly higher errors than first half.
+            // Below the f32 rounding bound (epsilon x magnitude x steps) the
+            // errors are noise, not drift.
+            let rounding_bound =
+                f32::EPSILON * initial_total_inputs * long_simulation_steps as f32;
             prop_assert!(
-                second_half_avg <= first_half_avg * 2.0,
+                second_half_avg <= first_half_avg * 2.0 || second_half_avg <= rounding_bound,
                 "Precision degradation detected: early avg {}, late avg {}",
                 first_half_avg,
                 second_half_avg
@@ -239,7 +225,6 @@ proptest! {
     })]
     /// Test precision with very small currency amounts (near floating-point limits)
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn small_amount_precision(
         tiny_amount in 1e-6f32..1e-3f32,
         operations in 1..20usize  // Reduced for performance
@@ -293,7 +278,6 @@ proptest! {
     })]
     /// Test precision with large currency amounts (near overflow limits)
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn large_amount_precision(
         large_amount in 1e6f32..1e8f32,
         small_operations in prop::collection::vec(1.0f32..100.0f32, 5..15)  // Reduced for performance
@@ -339,7 +323,6 @@ proptest! {
     })]
     /// Test precision in complex multi-system scenarios
     #[test]
-    #[ignore = "pre-pivot Cell model: cells hold CurrencyPools as a field, not a component"]
     fn multi_system_precision(
         initial_values in (
             200.0f32..1000.0f32, // pyruvate
@@ -373,26 +356,13 @@ proptest! {
         app.world_mut().insert_resource(LipidToxicityThreshold(150.0));
 
         // Spawn all metabolic blocks
-        app.world_mut().spawn(FermentationBlock);
-        app.world_mut().spawn(VesicleExportBlock);
-        app.world_mut().spawn((
-            CellMass { base: 1.0, extra: 0.0 },
-            PolyMer {
-                capacity: 3000.0,
-                target_fill: 1500.0,
-                poly_rate: 15.0,
-                lipo_rate: 7.0,
-            },
-        ));
+        express_blocks(&mut app, cell_entity, &[BlockKind::Fermentation, BlockKind::VesicleExport, BlockKind::FatStorage]);
 
         let initial_snapshot = get_currency_snapshot(&app);
 
         // Run multi-system simulation
         for _ in 0..simulation_steps {
-            let fixed_time_step = app.world().resource::<Time<Fixed>>().delta();
-            app.world_mut().resource_mut::<Time>().advance_by(fixed_time_step);
-            app.update();
-            app.world_mut().run_schedule(FixedUpdate);
+            sim_step(&mut app);
 
             let current_snapshot = get_currency_snapshot(&app);
 

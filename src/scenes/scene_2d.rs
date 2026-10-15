@@ -1,4 +1,3 @@
-use crate::blocks::genome::BlockKind;
 use crate::GameState;
 use bevy::prelude::*;
 
@@ -76,20 +75,6 @@ fn setup_2d_scene(
         color: Color::WHITE,
         brightness: 800.0,
     });
-
-    // Spawn initial metabolic block entities for this scene
-    let sugar_entity =
-        crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::SugarCatabolism);
-    let fermentation_entity =
-        crate::blocks::genome::spawn_metabolic_block(&mut commands, BlockKind::Fermentation);
-    let amino_entity = crate::blocks::genome::spawn_metabolic_block(
-        &mut commands,
-        BlockKind::AminoAcidBiosynthesis,
-    );
-    // Mark them as part of this scene for cleanup
-    commands.entity(sugar_entity).insert(Scene2DEntity);
-    commands.entity(fermentation_entity).insert(Scene2DEntity);
-    commands.entity(amino_entity).insert(Scene2DEntity);
 
     info!("2D scene setup complete");
     info!("Controls:");

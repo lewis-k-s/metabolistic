@@ -1,13 +1,11 @@
-use crate::{blocks::genome, GameState};
+use crate::player::{spawn_local_player_cell, ControlledCell, LocalPlayer};
+use crate::{blocks::genome, cell::Cell, metabolism::CurrencyPools, GameState};
 use bevy::prelude::*;
 
-/// Shared resources and systems that persist across all game states
-pub fn setup_shared_resources(mut commands: Commands) {
-    // Initialize genome with starter genes as a global resource
-    let starter_genome = genome::create_starter_genome();
-    commands.insert_resource(starter_genome);
-
-    // Note: Player-cell entities are now spawned by individual scenes or systems as needed
+/// Spawns the local player's cell with the starter genome and default pools.
+pub fn spawn_starter_cell(mut commands: Commands) {
+    let (_player, cell) = spawn_local_player_cell(&mut commands, genome::create_starter_genome());
+    commands.entity(cell).insert(CurrencyPools::with_defaults());
 }
 
 /// Input system for state transitions
@@ -41,12 +39,21 @@ pub fn state_transition_input(
     }
 }
 
-/// Demo system to showcase genome functionality (works in all states)
+/// Demo system to showcase genome functionality (works in all states).
+/// Edits the genome of the local player's cell.
 pub fn genome_demo_system(
-    mut genome: ResMut<genome::Genome>,
     input: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
+    local_players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut genomes: Query<&mut genome::Genome, With<Cell>>,
 ) {
+    let Some(mut genome) = local_players
+        .get_single()
+        .ok()
+        .and_then(|controlled| genomes.get_mut(controlled.0).ok())
+    else {
+        return;
+    };
+
     // Press 'G' to express sugar catabolism gene
     if input.just_pressed(KeyCode::KeyG) {
         genome.express_gene(genome::BlockKind::SugarCatabolism);
@@ -63,11 +70,5 @@ pub fn genome_demo_system(
     if input.just_pressed(KeyCode::KeyJ) {
         genome.add_gene(genome::BlockKind::LightCapture);
         info!("Added LightCapture gene to genome!");
-    }
-
-    // Press 'K' to spawn metabolic block entities
-    if input.just_pressed(KeyCode::KeyK) {
-        genome::spawn_metabolic_block(&mut commands, genome::BlockKind::Respiration);
-        info!("Spawned Respiration metabolic block entity!");
     }
 }

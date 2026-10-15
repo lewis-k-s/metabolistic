@@ -1,25 +1,25 @@
 use bevy::prelude::*;
 use metabolistic3d::blocks::genome::{
-    apply_genome_diff, poll_genome_diff, BlockKind, GeneState, Genome, GenomeDiffEvent,
-    GenomeOperationCosts, MetabolicUpdateEvent,
+    poll_genome_diff, BlockKind, GeneState, Genome, GenomeDiffEvent, GenomeOperationCosts,
+    MetabolicUpdateEvent,
 };
 
-fn setup_app() -> App {
+/// App with one entity that holds a genome. Returns the app and that entity.
+fn setup_app() -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.insert_resource(Genome::default());
     app.insert_resource(GenomeOperationCosts::default());
     app.add_event::<GenomeDiffEvent>();
     app.add_event::<MetabolicUpdateEvent>();
     app.add_systems(PreUpdate, poll_genome_diff);
-    app.add_systems(Update, apply_genome_diff);
-    app
+    let cell = app.world_mut().spawn(Genome::default()).id();
+    (app, cell)
 }
 
 #[test]
 fn test_genome_diff_events_expression_and_silencing() {
-    let mut app = setup_app();
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let (mut app, cell) = setup_app();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
 
     // Add a gene
     genome.add_gene(BlockKind::SugarCatabolism);
@@ -29,7 +29,7 @@ fn test_genome_diff_events_expression_and_silencing() {
     app.update();
 
     // Express a gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     genome.express_gene(BlockKind::SugarCatabolism);
     assert_eq!(
         *genome.get_gene_state(&BlockKind::SugarCatabolism).unwrap(),
@@ -37,7 +37,7 @@ fn test_genome_diff_events_expression_and_silencing() {
     );
 
     // Express another gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     genome.express_gene(BlockKind::LightCapture);
     assert_eq!(
         *genome.get_gene_state(&BlockKind::LightCapture).unwrap(),
@@ -65,7 +65,7 @@ fn test_genome_diff_events_expression_and_silencing() {
         .clear();
 
     // Silence a gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     genome.silence_gene(BlockKind::SugarCatabolism);
     assert_eq!(
         *genome.get_gene_state(&BlockKind::SugarCatabolism).unwrap(),
@@ -89,8 +89,8 @@ fn test_genome_diff_events_expression_and_silencing() {
 
 #[test]
 fn test_genome_diff_events_mutation_and_repair() {
-    let mut app = setup_app();
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let (mut app, cell) = setup_app();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
 
     // Add and express a gene
     genome.add_gene(BlockKind::Fermentation);
@@ -105,7 +105,7 @@ fn test_genome_diff_events_mutation_and_repair() {
         .clear();
 
     // Mutate the expressed gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     assert!(genome.mutate_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
@@ -135,7 +135,7 @@ fn test_genome_diff_events_mutation_and_repair() {
         .clear();
 
     // Repair the mutated gene (it should go back to Silent)
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     assert!(genome.repair_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
@@ -157,7 +157,7 @@ fn test_genome_diff_events_mutation_and_repair() {
         .clear();
 
     // Now express the repaired gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     genome.express_gene(BlockKind::Fermentation);
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
@@ -180,8 +180,8 @@ fn test_genome_diff_events_mutation_and_repair() {
 
 #[test]
 fn test_genome_diff_mutated_to_silent_no_event() {
-    let mut app = setup_app();
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let (mut app, cell) = setup_app();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
 
     // Add and express a gene
     genome.add_gene(BlockKind::Fermentation);
@@ -196,7 +196,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
         .clear();
 
     // Mutate the expressed gene
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     assert!(genome.mutate_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
@@ -212,7 +212,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
         .clear();
 
     // Repair the mutated gene (it should go back to Silent)
-    let mut genome = app.world_mut().resource_mut::<Genome>();
+    let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
     assert!(genome.repair_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
