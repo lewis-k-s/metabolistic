@@ -37,6 +37,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 ## Development Commands
 
 ### Build Commands
+- **Toolchain**: Rust 1.96.1, pinned in `rust-toolchain.toml` (Bevy 0.19 needs 1.95+). Bevy 0.20 exists, but avian3d, leafwing-input-manager and bevy-inspector-egui do not support it yet.
 - **Development build**: `cargo run` (includes hot reloading, debug tools)
 - **Optimized build**: `cargo run --profile release-native`
 - **Web-optimized build**: `cargo build --release`
@@ -89,7 +90,7 @@ fn update_cell_currencies(
     mut cell_query: Query<&mut CurrencyPools, With<Cell>>,
     player_query: Query<&ControlledCell, With<LocalPlayer>>,
 ) {
-    if let Ok(controlled_cell) = player_query.get_single() {
+    if let Ok(controlled_cell) = player_query.single() {
         if let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0) {
             currency_pools.modify(Currency::ATP, 10.0);
         }

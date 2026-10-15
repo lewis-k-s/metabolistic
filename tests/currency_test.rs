@@ -4,10 +4,10 @@
 //! consumption logic works as expected within a minimal Bevy app environment.
 
 use bevy::prelude::*;
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::Genome;
 use metabolistic3d::molecules::{Currency, CurrencyPools};
-use metabolistic3d::player::{spawn_local_player_cell, ControlledCell, LocalPlayer};
-use metabolistic3d::MetabolisticApp;
+use metabolistic3d::player::{ControlledCell, LocalPlayer, spawn_local_player_cell};
 
 /// A system that simulates a block consuming a fixed amount of ATP on every update.
 fn atp_consuming_system(
@@ -15,12 +15,11 @@ fn atp_consuming_system(
     mut cell_query: Query<&mut CurrencyPools>,
 ) {
     // This system represents a metabolic block that requires 10 ATP per cycle.
-    if let Ok(controlled_cell) = local_players.get_single() {
-        if let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0) {
-            if currency_pools.can_consume(Currency::ATP, 10.0) {
-                currency_pools.modify(Currency::ATP, -10.0);
-            }
-        }
+    if let Ok(controlled_cell) = local_players.single()
+        && let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0)
+        && currency_pools.can_consume(Currency::ATP, 10.0)
+    {
+        currency_pools.modify(Currency::ATP, -10.0);
     }
 }
 
@@ -145,12 +144,11 @@ fn test_consumption_fails_on_insufficient_funds() {
         mut cell_query: Query<&mut CurrencyPools>,
     ) {
         // This will fail, but shouldn't panic.
-        if let Ok(controlled_cell) = local_players.get_single() {
-            if let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0) {
-                if currency_pools.can_consume(Currency::ReducingPower, 10.0) {
-                    currency_pools.modify(Currency::ReducingPower, -10.0);
-                }
-            }
+        if let Ok(controlled_cell) = local_players.single()
+            && let Ok(mut currency_pools) = cell_query.get_mut(controlled_cell.0)
+            && currency_pools.can_consume(Currency::ReducingPower, 10.0)
+        {
+            currency_pools.modify(Currency::ReducingPower, -10.0);
         }
     }
     app.add_systems(Update, test_system);

@@ -1,3 +1,25 @@
+> **Version note.** This guide was written for Bevy 0.15. The project now uses
+> **Bevy 0.19**. Where this guide differs, follow the 0.19 API:
+>
+> | Bevy 0.15 (this guide) | Bevy 0.19 |
+> | --- | --- |
+> | `Event`, `EventReader`, `EventWriter`, `add_event`, `Events<T>`, `writer.send(x)` | Buffered: `Message`, `MessageReader`, `MessageWriter`, `add_message`, `Messages<T>`, `writer.write(x)`. `Event` is now for observers only. |
+> | `Trigger<OnRemove, C>`, `trigger.entity()` | `On<Remove, C>`, `trigger.entity` |
+> | `query.get_single()` / `single()` (panics) | `query.single()` returns `Result` |
+> | `despawn_recursive()` | `despawn()` (despawns children too) |
+> | `ChildBuilder` | `ChildSpawnerCommands` |
+> | `#[require(Name(\|\| Name::new("x")))]` | `#[require(Name::new("x"))]` |
+> | `commands.get_entity(e)` returns `Option` | returns `Result` |
+> | `AmbientLight` resource | `GlobalAmbientLight` resource (`AmbientLight` is a per-camera component) |
+> | `PointLight { shadows_enabled }` | `PointLight { shadow_maps_enabled }` |
+> | `TextFont { font_size: 40.0 }` | `TextFont { font_size: FontSize::Px(40.0) }` |
+> | `Entity::from_raw(n)` | `Entity::from_raw_u32(n).unwrap()` |
+> | `InputManagerBundle::with_map(map)` (leafwing) | insert the `InputMap` itself |
+> | `ExternalTorque` (avian) | `ConstantTorque`, or the `Forces` query data |
+>
+> With `default-features = false`, `KeyCode` needs the `keyboard` feature and
+> `info!` needs `bevy_log`.
+
 # Apps
 
 We define our app in `main.rs` which will be executed when we run our binary

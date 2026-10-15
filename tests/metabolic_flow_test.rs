@@ -1,8 +1,8 @@
 //! Metabolic flow plugin: schedule, genome -> block sync, block ownership, timing.
 
 use bevy::prelude::*;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
 use metabolistic3d::cell::{CellBlocks, OwnedBy};
 use metabolistic3d::metabolism::*;
 use metabolistic3d::molecules::Currency;
@@ -30,10 +30,11 @@ fn block_status(app: &App, cell: Entity, kind: BlockKind) -> Option<BlockStatus>
 #[test]
 fn metabolic_flow_plugin_adds_schedule_and_timing() {
     let app = app(FlowmapTimingConfig::default());
-    assert!(app
-        .world()
-        .resource::<Schedules>()
-        .contains(MetabolicSchedule));
+    assert!(
+        app.world()
+            .resource::<Schedules>()
+            .contains(MetabolicSchedule)
+    );
     assert!(app.world().contains_resource::<FlowmapTimingConfig>());
 }
 

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use metabolistic3d::blocks::genome::{
-    poll_genome_diff, BlockKind, GeneState, Genome, GenomeDiffEvent, GenomeOperationCosts,
-    MetabolicUpdateEvent,
+    BlockKind, GeneState, Genome, GenomeDiffEvent, GenomeOperationCosts, MetabolicUpdateEvent,
+    poll_genome_diff,
 };
 
 /// App with one entity that holds a genome. Returns the app and that entity.
@@ -9,8 +9,8 @@ fn setup_app() -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.insert_resource(GenomeOperationCosts::default());
-    app.add_event::<GenomeDiffEvent>();
-    app.add_event::<MetabolicUpdateEvent>();
+    app.add_message::<GenomeDiffEvent>();
+    app.add_message::<MetabolicUpdateEvent>();
     app.add_systems(PreUpdate, poll_genome_diff);
     let cell = app.world_mut().spawn(Genome::default()).id();
     (app, cell)
@@ -48,7 +48,7 @@ fn test_genome_diff_events_expression_and_silencing() {
     app.update();
 
     // Check for GenomeDiffEvent
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
 
@@ -61,7 +61,7 @@ fn test_genome_diff_events_expression_and_silencing() {
 
     // Clear events before next phase
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Silence a gene
@@ -76,7 +76,7 @@ fn test_genome_diff_events_expression_and_silencing() {
     app.update();
 
     // Check for GenomeDiffEvent (create fresh cursor)
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
 
@@ -101,7 +101,7 @@ fn test_genome_diff_events_mutation_and_repair() {
 
     // Clear all events from initial expression by updating the event system
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Mutate the expressed gene
@@ -116,7 +116,7 @@ fn test_genome_diff_events_mutation_and_repair() {
     app.update();
 
     // Check for GenomeDiffEvent
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
 
@@ -131,7 +131,7 @@ fn test_genome_diff_events_mutation_and_repair() {
 
     // Clear events before repair phase
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Repair the mutated gene (it should go back to Silent)
@@ -146,14 +146,14 @@ fn test_genome_diff_events_mutation_and_repair() {
     app.update();
 
     // Check for GenomeDiffEvent (should be empty as it went from Mutated to Silent, which is not an expression change)
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
     assert!(diff_events.is_empty());
 
     // Clear events before final expression phase
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Now express the repaired gene
@@ -168,7 +168,7 @@ fn test_genome_diff_events_mutation_and_repair() {
     app.update();
 
     // Check for GenomeDiffEvent (should now show Fermentation as enabled)
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
 
@@ -192,7 +192,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
 
     // Clear events from initial expression
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Mutate the expressed gene
@@ -208,7 +208,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
 
     // Clear events from mutation
     app.world_mut()
-        .resource_mut::<Events<GenomeDiffEvent>>()
+        .resource_mut::<Messages<GenomeDiffEvent>>()
         .clear();
 
     // Repair the mutated gene (it should go back to Silent)
@@ -223,7 +223,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
     app.update();
 
     // Check for GenomeDiffEvent (should be empty)
-    let events = app.world_mut().resource_mut::<Events<GenomeDiffEvent>>();
+    let events = app.world_mut().resource_mut::<Messages<GenomeDiffEvent>>();
     let mut reader = events.get_cursor();
     let diff_events: Vec<&GenomeDiffEvent> = reader.read(&events).collect();
     eprintln!(

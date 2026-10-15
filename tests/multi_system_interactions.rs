@@ -6,9 +6,9 @@
 
 use approx::assert_relative_eq;
 use bevy::prelude::*;
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::{BlockKind, Genome};
 use metabolistic3d::molecules::*;
-use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
 
 mod common;
@@ -16,10 +16,10 @@ use common::*;
 
 // Helper function to get currency from a cell using ECS patterns
 fn get_cell_currency_value(app: &App, cell_entity: Entity, currency: Currency) -> f32 {
-    if let Ok(entity) = app.world().get_entity(cell_entity) {
-        if let Some(currency_pools) = entity.get::<CurrencyPools>() {
-            return currency_pools.get(currency);
-        }
+    if let Ok(entity) = app.world().get_entity(cell_entity)
+        && let Some(currency_pools) = entity.get::<CurrencyPools>()
+    {
+        return currency_pools.get(currency);
     }
     0.0
 }

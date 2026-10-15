@@ -1,0 +1,4 @@
+# Bevy 0.19 needs Rust 1.95 or later.
+[toolchain]
+channel = "1.96.1"
+components = ["rustfmt", "clippy"]

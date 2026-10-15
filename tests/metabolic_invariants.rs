@@ -4,11 +4,11 @@
 //! metabolic simulation, including economic balance, genetic-metabolic
 //! consistency, and cellular viability constraints.
 
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::{GeneState, Genome};
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use metabolistic3d::player::spawn_local_player_cell;
-use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
 
 mod common;

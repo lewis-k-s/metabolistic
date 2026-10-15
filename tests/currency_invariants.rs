@@ -6,10 +6,10 @@
 //! 3. Transfer operations are zero-sum (conservation of total currency)
 
 use approx::assert_relative_eq;
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::Genome;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
-use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
 
 mod common;

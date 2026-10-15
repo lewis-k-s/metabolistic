@@ -1,13 +1,13 @@
 use crate::metabolism::FlowmapTimingConfig;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_egui::{egui, EguiContext, EguiPlugin};
+use bevy_egui::{EguiContext, EguiPlugin, egui};
 use bevy_inspector_egui::DefaultInspectorConfigPlugin;
 
 /// Plugin for adding inspector functionality to debug builds
 pub(crate) fn plugin(app: &mut App) {
     // Make sure we have egui available
-    app.add_plugins(EguiPlugin);
+    app.add_plugins(EguiPlugin::default());
 
     // Add the default inspector configuration
     app.add_plugins(DefaultInspectorConfigPlugin);
@@ -19,7 +19,7 @@ pub(crate) fn plugin(app: &mut App) {
 fn inspector_ui(world: &mut World) {
     let Ok(egui_context) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
-        .get_single(world)
+        .single(world)
     else {
         return;
     };

@@ -88,11 +88,7 @@ impl FluxProfile {
             .iter()
             .filter_map(
                 |(&currency, &amount)| {
-                    if amount < 0.0 {
-                        Some(currency)
-                    } else {
-                        None
-                    }
+                    if amount < 0.0 { Some(currency) } else { None }
                 },
             )
             .collect()
@@ -104,11 +100,7 @@ impl FluxProfile {
             .iter()
             .filter_map(
                 |(&currency, &amount)| {
-                    if amount > 0.0 {
-                        Some(currency)
-                    } else {
-                        None
-                    }
+                    if amount > 0.0 { Some(currency) } else { None }
                 },
             )
             .collect()

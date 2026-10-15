@@ -42,7 +42,7 @@ fn setup_menu(mut commands: Commands) {
             parent.spawn((
                 Text::new("Metabolistic3D"),
                 TextFont {
-                    font_size: 80.0,
+                    font_size: FontSize::Px(80.0),
                     ..default()
                 },
                 TextColor(Color::WHITE),
@@ -61,7 +61,7 @@ fn setup_menu(mut commands: Commands) {
         });
 }
 
-fn create_button(parent: &mut ChildBuilder, text: &str, button_type: MenuButton) {
+fn create_button(parent: &mut ChildSpawnerCommands, text: &str, button_type: MenuButton) {
     parent
         .spawn((
             Button,
@@ -80,7 +80,7 @@ fn create_button(parent: &mut ChildBuilder, text: &str, button_type: MenuButton)
             p.spawn((
                 Text::new(text),
                 TextFont {
-                    font_size: 40.0,
+                    font_size: FontSize::Px(40.0),
                     ..default()
                 },
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
@@ -117,6 +117,6 @@ fn button_system(
 
 fn cleanup_menu(mut commands: Commands, query: Query<Entity, With<MenuUIRoot>>) {
     for entity in query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

@@ -36,7 +36,7 @@ pub struct MetabolicBlocksPlugin;
 
 impl Plugin for MetabolicBlocksPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<MetabolicUpdateEvent>()
+        app.add_message::<MetabolicUpdateEvent>()
             .add_systems(Update, sync_cell_blocks_system)
             .add_systems(
                 crate::metabolism::MetabolicSchedule,
@@ -123,7 +123,7 @@ pub fn spawn_block(
 
 /// Applies `plan_blocks` to every cell whose genome changed.
 pub fn sync_cell_blocks_system(
-    mut force: EventReader<MetabolicUpdateEvent>,
+    mut force: MessageReader<MetabolicUpdateEvent>,
     mut cells: Query<(Entity, Ref<Genome>, &mut CellBlocks), With<Cell>>,
     mut nodes: Query<&mut MetabolicNode>,
     mut commands: Commands,
@@ -163,10 +163,10 @@ fn set_status(
     kind: BlockKind,
     status: BlockStatus,
 ) {
-    if let Some(mut node) = blocks.get(kind).and_then(|e| nodes.get_mut(e).ok()) {
-        if node.status != status {
-            node.status = status;
-        }
+    if let Some(mut node) = blocks.get(kind).and_then(|e| nodes.get_mut(e).ok())
+        && node.status != status
+    {
+        node.status = status;
     }
 }
 
@@ -200,10 +200,10 @@ mod tests {
         let mut existing = CellBlocks::default();
         existing
             .0
-            .insert(BlockKind::Fermentation, Entity::from_raw(1));
+            .insert(BlockKind::Fermentation, Entity::from_raw_u32(1).unwrap());
         existing
             .0
-            .insert(BlockKind::VesicleExport, Entity::from_raw(2));
+            .insert(BlockKind::VesicleExport, Entity::from_raw_u32(2).unwrap());
         let plan = plan_blocks(&genome, &existing);
         assert!(plan.spawn.is_empty());
         assert_eq!(

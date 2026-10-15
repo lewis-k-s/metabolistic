@@ -20,13 +20,7 @@ use crate::metabolism::{CurrencyPools, MetabolicGraph};
 
 /// Marker for a cell entity. Adding it also adds the cell's data components.
 #[derive(Component, Default, Debug)]
-#[require(
-    Name(|| Name::new("Cell")),
-    Genome,
-    CurrencyPools,
-    CellBlocks,
-    MetabolicGraph
-)]
+#[require(Name::new("Cell"), Genome, CurrencyPools, CellBlocks, MetabolicGraph)]
 pub struct Cell;
 
 /// The metabolic block entities that a cell owns, keyed by block kind.
@@ -62,13 +56,13 @@ pub fn spawn_cell(commands: &mut Commands, genome: Genome, pools: CurrencyPools)
 
 /// Observer: despawn the blocks of a cell when the cell is removed.
 pub(crate) fn despawn_blocks_of_removed_cell(
-    trigger: Trigger<OnRemove, Cell>,
+    removed: On<Remove, Cell>,
     cells: Query<&CellBlocks>,
     mut commands: Commands,
 ) {
-    if let Ok(blocks) = cells.get(trigger.entity()) {
+    if let Ok(blocks) = cells.get(removed.entity) {
         for &block in blocks.0.values() {
-            if let Some(mut entity) = commands.get_entity(block) {
+            if let Ok(mut entity) = commands.get_entity(block) {
                 entity.despawn();
             }
         }

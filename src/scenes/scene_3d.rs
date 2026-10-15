@@ -1,4 +1,4 @@
-use crate::{camera, player, GameState};
+use crate::{GameState, camera, player};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
@@ -51,16 +51,17 @@ fn setup_3d_scene(
     commands.spawn((
         PointLight {
             intensity: 1_000_000.0,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(4.0, 8.0, 4.0),
         Scene3DEntity,
     ));
 
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 500.0,
+        ..default()
     });
 
     // Spawn the 3D camera
@@ -88,16 +89,16 @@ fn cleanup_3d_scene(
 
     // Remove scene-specific entities (including cameras)
     for entity in scene_entities.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     // Remove player entities
     for entity in player_entities.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     // Remove any remaining cameras (safety check)
     for entity in camera_entities.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

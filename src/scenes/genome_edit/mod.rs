@@ -37,6 +37,6 @@ pub struct GenomeSceneEntity;
 /// logic and view modules.
 fn cleanup_genome_scene(mut commands: Commands, entities: Query<Entity, With<GenomeSceneEntity>>) {
     for entity in &entities {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

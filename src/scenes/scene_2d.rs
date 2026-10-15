@@ -71,9 +71,10 @@ fn setup_2d_scene(
     ));
 
     // Add some ambient light
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 800.0,
+        ..default()
     });
 
     info!("2D scene setup complete");
@@ -118,7 +119,7 @@ fn update_2d_camera(
     time: Res<Time>,
 ) {
     if let (Ok(player_transform), Ok(mut camera_transform)) =
-        (player_query.get_single(), camera_query.get_single_mut())
+        (player_query.single(), camera_query.single_mut())
     {
         let target_position = Vec3::new(
             player_transform.translation.x,
@@ -143,11 +144,11 @@ fn cleanup_2d_scene(
 
     // Remove scene-specific entities (including cameras)
     for entity in scene_entities.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     // Remove any remaining cameras (safety check)
     for entity in camera_entities.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }

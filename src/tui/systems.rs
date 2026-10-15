@@ -7,11 +7,11 @@ use bevy::prelude::*;
 
 #[cfg(feature = "tui")]
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::Text,
     widgets::{Block, Paragraph},
-    Frame,
 };
 
 use crate::blocks::genome::GeneState;
@@ -27,7 +27,7 @@ use bevy::input::keyboard::KeyCode;
 #[cfg(feature = "tui")]
 pub fn tui_update_system(
     mut tui_state: ResMut<TuiState>,
-    mut tui_events: EventReader<TuiUpdateEvent>,
+    mut tui_events: MessageReader<TuiUpdateEvent>,
     time: Res<Time>,
 ) {
     if !tui_state.running {
@@ -44,10 +44,10 @@ pub fn tui_update_system(
     tui_state.last_update = current_time;
 
     // Get the latest data
-    if let Some(event) = tui_events.read().last() {
-        if let Err(e) = render_tui(&mut tui_state, &event.cell_data, &event.environment_data) {
-            error!("Failed to render TUI: {}", e);
-        }
+    if let Some(event) = tui_events.read().last()
+        && let Err(e) = render_tui(&mut tui_state, &event.cell_data, &event.environment_data)
+    {
+        error!("Failed to render TUI: {}", e);
     }
 }
 
@@ -226,7 +226,7 @@ fn render_environment_panel(
 pub fn handle_input_system(
     mut tui_state: ResMut<TuiState>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
-    mut tui_input_events: EventWriter<TuiInputEvent>,
+    mut tui_input_events: MessageWriter<TuiInputEvent>,
 ) {
     let Some(keyboard) = keyboard else {
         return; // No input plugin (headless)
@@ -238,25 +238,25 @@ pub fn handle_input_system(
     // Check for exit key
     if keyboard.just_pressed(KeyCode::Escape) {
         tui_state.running = false;
-        tui_input_events.send(TuiInputEvent::Exit);
+        tui_input_events.write(TuiInputEvent::Exit);
         return;
     }
 
     // Handle other key presses
     if keyboard.just_pressed(KeyCode::KeyC) {
-        tui_input_events.send(TuiInputEvent::TogglePanel(PanelType::Currency));
+        tui_input_events.write(TuiInputEvent::TogglePanel(PanelType::Currency));
     }
 
     if keyboard.just_pressed(KeyCode::KeyG) {
-        tui_input_events.send(TuiInputEvent::TogglePanel(PanelType::Genome));
+        tui_input_events.write(TuiInputEvent::TogglePanel(PanelType::Genome));
     }
 
     if keyboard.just_pressed(KeyCode::KeyB) {
-        tui_input_events.send(TuiInputEvent::TogglePanel(PanelType::Blocks));
+        tui_input_events.write(TuiInputEvent::TogglePanel(PanelType::Blocks));
     }
 
     if keyboard.just_pressed(KeyCode::KeyE) {
-        tui_input_events.send(TuiInputEvent::TogglePanel(PanelType::Environment));
+        tui_input_events.write(TuiInputEvent::TogglePanel(PanelType::Environment));
     }
 }
 
@@ -269,7 +269,7 @@ pub fn collect_cell_data_system(
         ),
         With<Cell>,
     >,
-    mut tui_events: EventWriter<TuiUpdateEvent>,
+    mut tui_events: MessageWriter<TuiUpdateEvent>,
     time: Res<Time>,
 ) {
     for (pools, genome) in cell_query.iter() {
@@ -287,7 +287,7 @@ pub fn collect_cell_data_system(
             timestamp: time.elapsed_secs(),
         };
 
-        tui_events.send(TuiUpdateEvent {
+        tui_events.write(TuiUpdateEvent {
             cell_data: cell_snapshot,
             environment_data: env_snapshot,
         });
@@ -331,7 +331,7 @@ fn get_currency_snapshot(
 #[cfg(not(feature = "tui"))]
 pub fn tui_update_system(
     _tui_state: ResMut<TuiState>,
-    _tui_events: EventReader<TuiUpdateEvent>,
+    _tui_events: MessageReader<TuiUpdateEvent>,
     _time: Res<Time>,
 ) {
     // No-op when TUI feature is not enabled
@@ -341,7 +341,7 @@ pub fn tui_update_system(
 pub fn handle_input_system(
     _tui_state: ResMut<TuiState>,
     _keyboard: Res<ButtonInput<KeyCode>>,
-    _tui_input_events: EventWriter<TuiInputEvent>,
+    _tui_input_events: MessageWriter<TuiInputEvent>,
 ) {
     // No-op when TUI feature is not enabled
 }

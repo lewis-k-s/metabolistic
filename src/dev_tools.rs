@@ -1,15 +1,12 @@
 //! Development tools for the game. This plugin is only enabled in dev builds.
 
-use crate::player::{controller::MovementAction, Player}; // Import MovementAction
-use avian3d::prelude::{AngularVelocity, ExternalTorque};
+use crate::player::{Player, controller::MovementAction}; // Import MovementAction
+use avian3d::prelude::{AngularVelocity, ConstantTorque};
 use bevy::{
-    dev_tools::ui_debug_overlay::{DebugUiPlugin, UiDebugOptions},
-    ecs::event::EventReader,
-    input::common_conditions::input_just_pressed,
-    prelude::*,
+    input::common_conditions::input_just_pressed, prelude::*, ui_render::GlobalUiDebugOptions,
     window::PrimaryWindow,
 };
-use bevy_egui::{egui, EguiContext}; // Import egui and EguiContext
+use bevy_egui::{EguiContext, egui}; // Import egui and EguiContext
 
 // Resource to store the latest movement info for debugging
 #[derive(Resource, Default, Debug)]
@@ -24,8 +21,8 @@ pub(crate) fn plugin(app: &mut App) {
     let toggle_system = toggle_debug_ui.run_if(input_just_pressed(TOGGLE_KEY));
 
     // Toggle the debug overlay for UI.
-    app.add_plugins(DebugUiPlugin)
-        .init_resource::<DebugMovementInfo>() // Initialize the resource
+    // The UI debug overlay comes with the `bevy_ui_debug` feature.
+    app.init_resource::<DebugMovementInfo>() // Initialize the resource
         .add_systems(
             Update,
             (
@@ -39,19 +36,19 @@ pub(crate) fn plugin(app: &mut App) {
 
 const TOGGLE_KEY: KeyCode = KeyCode::Backquote;
 
-fn toggle_debug_ui(mut options: ResMut<UiDebugOptions>) {
+fn toggle_debug_ui(mut options: ResMut<GlobalUiDebugOptions>) {
     println!("Toggling debug UI");
     options.toggle();
 }
 
 // Run condition that checks if the debug UI is enabled
-fn is_debug_ui_enabled(debug_options: Res<UiDebugOptions>) -> bool {
+fn is_debug_ui_enabled(debug_options: Res<GlobalUiDebugOptions>) -> bool {
     debug_options.enabled
 }
 
 // System to read MovementAction events and update the DebugMovementInfo resource
 fn read_movement_actions(
-    mut reader: EventReader<MovementAction>,
+    mut reader: MessageReader<MovementAction>,
     mut move_info: ResMut<DebugMovementInfo>,
 ) {
     // Reset jump state for the new frame
@@ -74,9 +71,9 @@ fn read_movement_actions(
 
 fn read_angular_movement_info(
     mut move_info: ResMut<DebugMovementInfo>,
-    query: Query<(&ExternalTorque, &AngularVelocity), With<Player>>,
+    query: Query<(&ConstantTorque, &AngularVelocity), With<Player>>,
 ) {
-    if let Ok((torque, angular_velocity)) = query.get_single() {
+    if let Ok((torque, angular_velocity)) = query.single() {
         move_info.external_torque = Some(**torque);
         move_info.angular_velocity = Some(**angular_velocity);
     }
@@ -101,7 +98,7 @@ fn inspector_ui(world: &mut World) {
 
     let Ok(egui_context) = world
         .query_filtered::<&mut EguiContext, With<PrimaryWindow>>()
-        .get_single_mut(world)
+        .single_mut(world)
     else {
         return;
     };

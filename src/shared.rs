@@ -1,5 +1,9 @@
-use crate::player::{spawn_local_player_cell, ControlledCell, LocalPlayer};
-use crate::{blocks::genome, cell::Cell, metabolism::CurrencyPools, GameState};
+use crate::player::spawn_local_player_cell;
+#[cfg(feature = "full")]
+use crate::player::{ControlledCell, LocalPlayer};
+#[cfg(feature = "full")]
+use crate::{GameState, cell::Cell};
+use crate::{blocks::genome, metabolism::CurrencyPools};
 use bevy::prelude::*;
 
 /// Spawns the local player's cell with the starter genome and default pools.
@@ -9,6 +13,7 @@ pub fn spawn_starter_cell(mut commands: Commands) {
 }
 
 /// Input system for state transitions
+#[cfg(feature = "full")]
 pub fn state_transition_input(
     input: Res<ButtonInput<KeyCode>>,
     current_state: Res<State<GameState>>,
@@ -41,13 +46,14 @@ pub fn state_transition_input(
 
 /// Demo system to showcase genome functionality (works in all states).
 /// Edits the genome of the local player's cell.
+#[cfg(feature = "full")]
 pub fn genome_demo_system(
     input: Res<ButtonInput<KeyCode>>,
     local_players: Query<&ControlledCell, With<LocalPlayer>>,
     mut genomes: Query<&mut genome::Genome, With<Cell>>,
 ) {
     let Some(mut genome) = local_players
-        .get_single()
+        .single()
         .ok()
         .and_then(|controlled| genomes.get_mut(controlled.0).ok())
     else {

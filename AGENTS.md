@@ -14,12 +14,12 @@ This file provides essential context for cloud-based LLM agents working on the M
 
 ## Technology Stack
 
-- **Engine**: [Bevy 0.15](https://bevyengine.org/) - Modern ECS-based game engine
-- **Physics**: [Avian3D 0.2.1](https://github.com/Jondolf/avian) - 3D physics simulation
-- **Input**: [Leafwing Input Manager 0.16](https://github.com/Leafwing-Studios/leafwing-input-manager)
+- **Engine**: [Bevy 0.19](https://bevyengine.org/) - Modern ECS-based game engine (Rust 1.96.1, pinned in `rust-toolchain.toml`)
+- **Physics**: [Avian3D 0.7](https://github.com/Jondolf/avian) - 3D physics simulation
+- **Input**: [Leafwing Input Manager 0.21](https://github.com/Leafwing-Studios/leafwing-input-manager)
 - **Debug/Dev Tools**: 
-  - bevy-inspector-egui 0.30.0 (runtime inspection)
-  - bevy_egui 0.33.0 (immediate mode GUI)
+  - bevy-inspector-egui 0.37 (runtime inspection)
+  - bevy_egui 0.40 (immediate mode GUI; pinned by bevy-inspector-egui)
   - bevy_dev_tools (development utilities)
 
 ## Project Architecture

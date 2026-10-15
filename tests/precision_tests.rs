@@ -4,11 +4,11 @@
 //! maintains acceptable precision and doesn't accumulate errors over time.
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::Genome;
 use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use metabolistic3d::player::spawn_local_player_cell;
-use metabolistic3d::MetabolisticApp;
 use proptest::prelude::*;
 
 mod common;

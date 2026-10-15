@@ -61,33 +61,31 @@ pub fn get_first_cell_entity(world: &World) -> Option<Entity> {
 
 /// Checks if all currencies in an app are non-negative
 pub fn all_currencies_non_negative(app: &App) -> bool {
-    if let Some(cell_entity) = get_first_cell_entity(app.world()) {
-        if let Ok(entity) = app.world().get_entity(cell_entity) {
-            if let Some(currency_pools) = entity.get::<CurrencyPools>() {
-                return currency_pools.pools.values().all(|&v| v >= 0.0);
-            }
-        }
+    if let Some(cell_entity) = get_first_cell_entity(app.world())
+        && let Ok(entity) = app.world().get_entity(cell_entity)
+        && let Some(currency_pools) = entity.get::<CurrencyPools>()
+    {
+        return currency_pools.pools.values().all(|&v| v >= 0.0);
     }
     false
 }
 
 /// Gets all currency amounts as a vector for easy comparison
 pub fn get_currency_snapshot(app: &App) -> Vec<f32> {
-    if let Some(cell_entity) = get_first_cell_entity(app.world()) {
-        if let Ok(entity) = app.world().get_entity(cell_entity) {
-            if let Some(currency_pools) = entity.get::<CurrencyPools>() {
-                return vec![
-                    currency_pools.get(Currency::ATP),
-                    currency_pools.get(Currency::ReducingPower),
-                    currency_pools.get(Currency::AcetylCoA),
-                    currency_pools.get(Currency::CarbonSkeletons),
-                    currency_pools.get(Currency::FreeFattyAcids),
-                    currency_pools.get(Currency::Pyruvate),
-                    currency_pools.get(Currency::OrganicWaste),
-                    currency_pools.get(Currency::StorageBeads),
-                ];
-            }
-        }
+    if let Some(cell_entity) = get_first_cell_entity(app.world())
+        && let Ok(entity) = app.world().get_entity(cell_entity)
+        && let Some(currency_pools) = entity.get::<CurrencyPools>()
+    {
+        return vec![
+            currency_pools.get(Currency::ATP),
+            currency_pools.get(Currency::ReducingPower),
+            currency_pools.get(Currency::AcetylCoA),
+            currency_pools.get(Currency::CarbonSkeletons),
+            currency_pools.get(Currency::FreeFattyAcids),
+            currency_pools.get(Currency::Pyruvate),
+            currency_pools.get(Currency::OrganicWaste),
+            currency_pools.get(Currency::StorageBeads),
+        ];
     }
     vec![0.0; 8]
 }
@@ -97,11 +95,11 @@ pub fn modify_cell_currencies<F>(app: &mut App, cell_entity: Entity, f: F) -> bo
 where
     F: FnOnce(&mut CurrencyPools),
 {
-    if let Ok(mut entity_mut) = app.world_mut().get_entity_mut(cell_entity) {
-        if let Some(mut currency_pools) = entity_mut.get_mut::<CurrencyPools>() {
-            f(&mut currency_pools);
-            return true;
-        }
+    if let Ok(mut entity_mut) = app.world_mut().get_entity_mut(cell_entity)
+        && let Some(mut currency_pools) = entity_mut.get_mut::<CurrencyPools>()
+    {
+        f(&mut currency_pools);
+        return true;
     }
     false
 }

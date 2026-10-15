@@ -15,7 +15,7 @@
 //! ## Usage
 //!
 //! Add the `GenomePlugin` to your Bevy app and use the genome system:
-//! ```rust,no_run
+//! ```rust,no_run,standalone_crate
 //! use metabolistic3d::blocks::genome::{Genome, BlockKind};
 //!
 //! // Create and manipulate a genome
@@ -181,20 +181,20 @@ impl Genome {
 
     /// Express a gene (activate the metabolic block)
     pub fn express_gene(&mut self, block_kind: BlockKind) -> &mut Self {
-        if let Some(state) = self.table.get_mut(&block_kind) {
-            if *state == GeneState::Silent {
-                *state = GeneState::Expressed;
-            }
+        if let Some(state) = self.table.get_mut(&block_kind)
+            && *state == GeneState::Silent
+        {
+            *state = GeneState::Expressed;
         }
         self
     }
 
     /// Silence a gene (deactivate the metabolic block)
     pub fn silence_gene(&mut self, block_kind: BlockKind) -> &mut Self {
-        if let Some(state) = self.table.get_mut(&block_kind) {
-            if *state == GeneState::Expressed {
-                *state = GeneState::Silent;
-            }
+        if let Some(state) = self.table.get_mut(&block_kind)
+            && *state == GeneState::Expressed
+        {
+            *state = GeneState::Silent;
         }
         self
     }
@@ -285,7 +285,7 @@ impl Genome {
 }
 
 /// Event containing changes in gene expression of one cell
-#[derive(Event, Debug)]
+#[derive(Message, Debug)]
 pub struct GenomeDiffEvent {
     /// The cell whose genome changed
     pub cell: Entity,
@@ -295,7 +295,7 @@ pub struct GenomeDiffEvent {
 
 /// Forces every cell to resync its metabolic blocks with its genome.
 /// Normal genome edits do not need it: block sync reacts to `Changed<Genome>`.
-#[derive(Event, Debug)]
+#[derive(Message, Debug)]
 pub struct MetabolicUpdateEvent;
 
 /// A differential summary of genome changes
@@ -357,7 +357,7 @@ impl Default for RandomMutationStrategy {
 
 impl MutationStrategy for RandomMutationStrategy {
     fn should_mutate(&mut self, _block_kind: BlockKind, delta_time: f32) -> bool {
-        thread_rng().gen::<f32>() < self.mutation_rate * delta_time
+        rand::rng().random::<f32>() < self.mutation_rate * delta_time
     }
 
     fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
@@ -414,8 +414,8 @@ impl Plugin for GenomePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GenomeOperationCosts::default())
             .init_resource::<MutationConfig>()
-            .add_event::<GenomeDiffEvent>()
-            .add_event::<MetabolicUpdateEvent>()
+            .add_message::<GenomeDiffEvent>()
+            .add_message::<MetabolicUpdateEvent>()
             .add_systems(PreUpdate, poll_genome_diff)
             .add_systems(
                 crate::metabolism::MetabolicSchedule,
@@ -427,12 +427,12 @@ impl Plugin for GenomePlugin {
 /// Compares each changed genome with its previous snapshot and emits the delta.
 pub fn poll_genome_diff(
     mut genomes: Query<(Entity, &mut Genome), Changed<Genome>>,
-    mut diff_writer: EventWriter<GenomeDiffEvent>,
+    mut diff_writer: MessageWriter<GenomeDiffEvent>,
 ) {
     for (cell, mut genome) in &mut genomes {
         let diff = genome.compute_diff();
         if !diff.enabled.is_empty() || !diff.disabled.is_empty() {
-            diff_writer.send(GenomeDiffEvent {
+            diff_writer.write(GenomeDiffEvent {
                 cell,
                 enabled: diff.enabled,
                 disabled: diff.disabled,

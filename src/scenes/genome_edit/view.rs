@@ -5,11 +5,11 @@
 //! entities and spawns the corresponding visual meshes. It also handles
 //! all visual effects, like highlighting and rotation.
 
-use super::{logic, GenomeSceneEntity};
+use super::{GenomeSceneEntity, logic};
 use crate::{
+    GameState,
     blocks::genome::{BlockKind, GeneState, Genome},
     player::LocalCellGenome,
-    GameState,
 };
 use bevy::{
     color::palettes::basic::{BLUE, GRAY, GREEN, LIME, MAROON, PURPLE, RED, YELLOW},
@@ -52,9 +52,10 @@ fn setup_view(mut commands: Commands) {
         Transform::from_xyz(0.0, 5.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         GenomeSceneEntity,
     ));
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 100.0,
+        ..default()
     });
     commands.spawn((
         DirectionalLight {
@@ -89,7 +90,7 @@ fn spawn_visuals(
 ) {
     let empty = Genome::default();
     let genome = local_genome.get().unwrap_or(&empty);
-    let Ok(root_entity) = root_query.get_single() else {
+    let Ok(root_entity) = root_query.single() else {
         return;
     };
 
@@ -154,7 +155,7 @@ fn spawn_visuals(
 
 /// Rotates the entire genome ring by rotating the `GenomeRoot` parent entity.
 fn rotate_genome_ring(time: Res<Time>, mut query: Query<&mut Transform, With<GenomeRoot>>) {
-    if let Ok(mut transform) = query.get_single_mut() {
+    if let Ok(mut transform) = query.single_mut() {
         transform.rotate_y(time.delta_secs() * 0.3);
     }
 }
@@ -175,7 +176,7 @@ fn update_visuals_from_state(
         // Get the logical entity that corresponds to this visual helix.
         if let Ok((section, opt_selected)) = logic_query.get(helix_link.logical_entity) {
             // Get the material asset so we can modify it.
-            if let Some(mat) = materials.get_mut(&material_component.0) {
+            if let Some(mut mat) = materials.get_mut(&material_component.0) {
                 // 1. Update color based on GeneState
                 let gene_state = genome
                     .get_gene_state(&section.block_kind)

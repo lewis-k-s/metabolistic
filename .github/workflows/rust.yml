@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# The Rust version comes from rust-toolchain.toml.
+
 jobs:
   # Simulation tests. No graphics or audio libraries needed.
   headless-tests:
@@ -25,7 +27,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install Bevy system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config libwayland-dev libxkbcommon-dev
     - uses: Swatinem/rust-cache@v2
     - name: Check full build
       run: cargo check --all-targets

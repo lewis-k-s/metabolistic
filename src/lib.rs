@@ -46,7 +46,7 @@ impl MetabolisticApp {
         {
             app.add_plugins(DefaultPlugins)
                 .add_plugins(PhysicsPlugins::default())
-                .add_plugins(PhysicsDebugPlugin::default());
+                .add_plugins(PhysicsDebugPlugin);
         }
 
         app // State management

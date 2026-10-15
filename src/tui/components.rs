@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// Event containing updated TUI data
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct TuiUpdateEvent {
     pub cell_data: CellSnapshot,
     pub environment_data: EnvironmentSnapshot,

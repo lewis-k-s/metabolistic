@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use crossterm::event::{KeyCode, KeyEvent};
 
 /// Events for TUI user interactions
-#[derive(Event, Debug)]
+#[derive(Message, Debug)]
 pub enum TuiInputEvent {
     /// Key press event
     KeyPress(KeyCode),

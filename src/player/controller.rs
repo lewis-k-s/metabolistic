@@ -1,7 +1,7 @@
 use crate::player::Player;
 use avian3d::{math::*, prelude::*};
-use bevy::color::palettes::basic::{GREEN, RED, YELLOW};
 use bevy::color::LinearRgba;
+use bevy::color::palettes::basic::{GREEN, RED, YELLOW};
 use bevy::gizmos::gizmos::Gizmos;
 use bevy::{ecs::query::Has, prelude::*};
 use leafwing_input_manager::prelude::*;
@@ -30,7 +30,7 @@ impl Action {
 
 impl Plugin for CharacterControllerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<MovementAction>()
+        app.add_message::<MovementAction>()
             .add_plugins(InputManagerPlugin::<Action>::default())
             .add_systems(
                 Update,
@@ -42,7 +42,7 @@ impl Plugin for CharacterControllerPlugin {
 }
 
 /// An event sent for a movement input action.
-#[derive(Event)]
+#[derive(Message)]
 pub enum MovementAction {
     Move(Vector2),
     Jump,
@@ -75,7 +75,7 @@ pub struct CharacterControllerBundle {
     rigid_body: RigidBody,
     collider: Collider,
     friction: Friction,
-    external_torque: ExternalTorque,
+    constant_torque: ConstantTorque,
     ground_caster: ShapeCaster,
     locked_axes: LockedAxes,
     movement: MovementBundle,
@@ -127,7 +127,7 @@ impl CharacterControllerBundle {
                 dynamic_coefficient: 0.9,
                 combine_rule: CoefficientCombine::Average,
             },
-            external_torque: ExternalTorque::ZERO,
+            constant_torque: ConstantTorque::default(),
             ground_caster: ShapeCaster::new(
                 caster_shape,
                 Vector::ZERO,
@@ -155,16 +155,16 @@ impl CharacterControllerBundle {
 /// Sends [`MovementAction`] events based on keyboard input.
 /// local to the player perspective because we query for camera. Then the event reader is 'global'
 fn movement_input(
-    mut movement_event_writer: EventWriter<MovementAction>,
+    mut movement_event_writer: MessageWriter<MovementAction>,
     player_query: Query<(&ActionState<Action>, &GlobalTransform), With<Player>>,
     camera_query: Query<&GlobalTransform, With<Camera3d>>,
     mut gizmos: Gizmos,
 ) {
-    let Ok((action_state, player_transform)) = player_query.get_single() else {
+    let Ok((action_state, player_transform)) = player_query.single() else {
         return;
     };
 
-    let Ok(camera_transform) = camera_query.get_single() else {
+    let Ok(camera_transform) = camera_query.single() else {
         error!("No Camera3d found");
         return;
     };
@@ -193,7 +193,7 @@ fn movement_input(
             (forward * input_direction.y + right * input_direction.x).normalize_or_zero();
 
         if move_direction != Vector2::ZERO {
-            movement_event_writer.send(MovementAction::Move(move_direction));
+            movement_event_writer.write(MovementAction::Move(move_direction));
 
             // gizmo facing direction
             let start = player_transform.translation();
@@ -203,7 +203,7 @@ fn movement_input(
     }
 
     if action_state.just_pressed(&Action::Jump) {
-        movement_event_writer.send(MovementAction::Jump);
+        movement_event_writer.write(MovementAction::Jump);
     }
 }
 
@@ -236,11 +236,11 @@ fn update_grounded(
 
 /// Responds to [`MovementAction`] events and moves character controllers accordingly.
 fn movement(
-    mut movement_event_reader: EventReader<MovementAction>,
+    mut movement_event_reader: MessageReader<MovementAction>,
     mut controllers: Query<(
         &MovementAcceleration,
         &JumpImpulse,
-        &mut ExternalTorque,
+        &mut ConstantTorque,
         &mut LinearVelocity,
         Has<Grounded>,
     )>,
@@ -249,7 +249,7 @@ fn movement(
     for (
         movement_acceleration,
         jump_impulse,
-        mut external_torque,
+        mut constant_torque,
         mut linear_velocity,
         is_grounded,
     ) in &mut controllers
@@ -257,11 +257,9 @@ fn movement(
         for event in movement_event_reader.read() {
             match event {
                 MovementAction::Move(direction) => {
-                    external_torque
-                        .apply_torque(
-                            Vec3::new(direction.y, 0.0, -direction.x) * movement_acceleration.0,
-                        )
-                        .with_persistence(false);
+                    // Spin the ball while a move key is down.
+                    constant_torque.0 =
+                        Vec3::new(direction.y, 0.0, -direction.x) * movement_acceleration.0;
                     active_spin = true;
                 }
                 MovementAction::Jump => {
@@ -272,7 +270,7 @@ fn movement(
             }
         }
         if !active_spin {
-            external_torque.set_torque(Vec3::ZERO);
+            constant_torque.0 = Vec3::ZERO;
         }
     }
 }

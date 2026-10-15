@@ -7,7 +7,7 @@
 //! ## Usage
 //!
 //! Add the TUI plugin to your Bevy app:
-//! ```rust,no_run
+//! ```rust,no_run,standalone_crate
 //! use bevy::prelude::*;
 //! use metabolistic3d::tui::CellTuiPlugin;
 //!
@@ -21,16 +21,16 @@
 //! The TUI will automatically start and display the cell state when the app runs.
 
 use bevy::prelude::*;
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 
 #[cfg(feature = "tui")]
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 #[cfg(feature = "tui")]
 use crossterm::{
     cursor::Hide,
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
 pub mod components;
@@ -51,8 +51,8 @@ impl Plugin for CellTuiPlugin {
         {
             app.init_resource::<TuiState>()
                 .init_resource::<TuiConfig>()
-                .add_event::<TuiUpdateEvent>()
-                .add_event::<TuiInputEvent>()
+                .add_message::<TuiUpdateEvent>()
+                .add_message::<TuiInputEvent>()
                 .add_systems(
                     Update,
                     (

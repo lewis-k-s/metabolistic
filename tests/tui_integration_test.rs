@@ -4,10 +4,10 @@
 //! and can be initialized without panicking.
 
 use bevy::prelude::*;
+use metabolistic3d::MetabolisticApp;
 use metabolistic3d::blocks::genome::{BlockKind, GeneState};
 use metabolistic3d::molecules::Currency;
 use metabolistic3d::tui::*;
-use metabolistic3d::MetabolisticApp;
 
 #[test]
 fn test_tui_plugin_initialization() {
@@ -31,7 +31,7 @@ fn test_tui_data_collection() {
     app.add_plugins(CellTuiPlugin);
 
     // Create a test cell
-    let cell_entity = app
+    let _cell_entity = app
         .world_mut()
         .spawn((metabolistic3d::cell::Cell, Name::new("Test Cell")))
         .id();
@@ -40,11 +40,11 @@ fn test_tui_data_collection() {
     app.update();
 
     // Check that TUI update events are being sent
-    let events = app.world().resource::<Events<TuiUpdateEvent>>();
-    let mut reader = events.get_reader();
+    let events = app.world().resource::<Messages<TuiUpdateEvent>>();
+    let mut reader = events.get_cursor();
 
     // Should have at least one event after update
-    let event_count = reader.read(&events).count();
+    let event_count = reader.read(events).count();
     assert!(event_count > 0, "Expected at least one TUI update event");
 }
 
@@ -64,11 +64,11 @@ fn test_tui_input_handling() {
     app.update();
 
     // Check that TUI input events are being sent
-    let events = app.world().resource::<Events<TuiInputEvent>>();
-    let mut reader = events.get_reader();
+    let events = app.world().resource::<Messages<TuiInputEvent>>();
+    let mut reader = events.get_cursor();
 
     // Should have at least one input event after pressing Escape
-    let event_count = reader.read(&events).count();
+    let event_count = reader.read(events).count();
     assert!(event_count > 0, "Expected at least one TUI input event");
 }
 
@@ -99,10 +99,10 @@ fn test_tui_with_cell_data() {
     app.update();
 
     // Check that TUI update events contain the cell data
-    let events = app.world().resource::<Events<TuiUpdateEvent>>();
-    let mut reader = events.get_reader();
+    let events = app.world().resource::<Messages<TuiUpdateEvent>>();
+    let mut reader = events.get_cursor();
 
-    for event in reader.read(&events) {
+    for event in reader.read(events) {
         // Verify that the event contains cell data
         assert!(
             !event.cell_data.currencies.is_empty(),

@@ -1,5 +1,5 @@
-use crate::player::controller::Action; // Added for Action enum
 use crate::player::Player;
+use crate::player::controller::Action; // Added for Action enum
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*; // Added for ActionState
 use std::f32::consts::PI; // Import Player marker component
@@ -46,7 +46,7 @@ pub fn spawn_3d_camera(commands: &mut Commands) -> Entity {
             Camera3d::default(),
             Transform::from_xyz(0.0, 1.5, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
             FollowCamera::default(),
-            InputManagerBundle::with_map(Action::input_map()),
+            Action::input_map(),
         ))
         .id()
 }
@@ -104,14 +104,14 @@ fn follow_player(
     let follow_speed = 10.0; // Adjust for desired camera follow smoothness
 
     // Try to find the player entity and its transform
-    let player_entity_and_transform = player_query.get_single().ok();
+    let player_entity_and_transform = player_query.single().ok();
 
     for (mut camera_transform, mut follow_camera) in camera_query.iter_mut() {
         // Assign the player entity to the camera's target if it's not already set
-        if follow_camera.target.is_none() {
-            if let Some((player_entity, _)) = player_entity_and_transform {
-                follow_camera.target = Some(player_entity);
-            }
+        if follow_camera.target.is_none()
+            && let Some((player_entity, _)) = player_entity_and_transform
+        {
+            follow_camera.target = Some(player_entity);
         }
 
         // If the camera has a target (the player)

@@ -1,3 +1,6 @@
+> **Historical design note** (Bevy 0.15). The implemented engine differs: there is no
+> `FlowDirty` or `FluxResult`; see "Simulation Model" in `CLAUDE.md`.
+
 # MetabolicFlow & FlowEditor – Bevy 0.15 Implementation Guide
 
 **Context** The game now separates metabolism solving (**MetabolicFlow**) from its editing overlay (**FlowEditor**). MetabolicFlow owns the resource‑routing graph and runs on its own low‑frequency schedule, automatically handling *all* flux. FlowEditor is an on‑demand UI layer ticking every frame for smooth interaction.

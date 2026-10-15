@@ -158,6 +158,8 @@ impl Plugin for CurrencyPlugin {
         app.init_resource::<EnvironmentalCurrencyPools>()
             .init_resource::<LipidToxicityThreshold>();
 
-        debug!("CurrencyPlugin loaded: Initialized EnvironmentalCurrencyPools and LipidToxicityThreshold. Cell currency pools are managed as components.");
+        debug!(
+            "CurrencyPlugin loaded: Initialized EnvironmentalCurrencyPools and LipidToxicityThreshold. Cell currency pools are managed as components."
+        );
     }
 }

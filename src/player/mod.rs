@@ -2,8 +2,6 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 #[cfg(feature = "full")]
-use leafwing_input_manager::prelude::*;
-#[cfg(feature = "full")]
 use std::f32::consts::PI;
 
 use crate::blocks::genome::Genome;
@@ -54,7 +52,7 @@ pub fn spawn_player(
         Mesh3d(meshes.add(Sphere::new(radius).mesh())),
         MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
         player_transform,
-        InputManagerBundle::with_map(controller::Action::input_map()),
+        controller::Action::input_map(),
         controller::CharacterControllerBundle::new(Collider::sphere(radius)).with_movement(
             0.5,
             5.0,
@@ -117,7 +115,7 @@ pub struct LocalCellGenome<'w, 's> {
 
 impl LocalCellGenome<'_, '_> {
     pub fn get(&self) -> Option<&Genome> {
-        let cell = self.players.get_single().ok()?.0;
+        let cell = self.players.single().ok()?.0;
         self.genomes.get(cell).ok()
     }
 }

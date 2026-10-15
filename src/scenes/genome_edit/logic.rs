@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::{blocks::genome::BlockKind, player::LocalCellGenome, GameState};
+use crate::{GameState, blocks::genome::BlockKind, player::LocalCellGenome};
 
 use super::GenomeSceneEntity;
 
@@ -102,7 +102,7 @@ fn navigate_genome(
         return;
     }
 
-    if let Ok((current_entity, section)) = selected_query.get_single() {
+    if let Ok((current_entity, section)) = selected_query.single() {
         let current_index = section.section_index;
         let num_blocks = state.blocks.len();
         let next_index = if input.just_pressed(KeyCode::ArrowRight) {
