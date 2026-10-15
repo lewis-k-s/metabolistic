@@ -28,6 +28,7 @@ pub fn death_message(cause: Option<DeathCause>, source: Option<DamageSource>) ->
         Some(DeathCause::Starved) => "You starved: ATP ran out.".to_string(),
         Some(DeathCause::MembraneBroken) => match source {
             Some(DamageSource::Heat) => "Your membrane failed. Main damage: heat.".to_string(),
+            Some(DamageSource::Uv) => "Your membrane failed. Main damage: UV light.".to_string(),
             None => "Your membrane failed.".to_string(),
         },
         None => "The run ended.".to_string(),
@@ -73,6 +74,8 @@ mod tests {
         let burnt = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Heat));
         assert_ne!(starved, broken);
         assert_ne!(broken, burnt);
+        let uv = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Uv));
+        assert!(uv.contains("UV") && uv != burnt);
         assert!(burnt.contains("heat"));
         assert_ne!(starved, death_message(None, None));
     }

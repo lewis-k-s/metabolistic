@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin};
 use metabolistic3d::cell::{CellBlocks, OwnedBy};
 use metabolistic3d::metabolism::*;
 use metabolistic3d::molecules::Currency;
@@ -13,7 +13,6 @@ fn app(timing: FlowmapTimingConfig) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins((GenomePlugin, MetabolicBlocksPlugin, MetabolicFlowPlugin))
-        .insert_resource(MutationConfig::deterministic())
         .insert_resource(timing);
     app
 }

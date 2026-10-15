@@ -7,11 +7,13 @@ pub mod cell;
 pub mod envgrid;
 pub mod environment;
 pub mod exchange;
+pub mod genome_damage;
 pub mod level;
 pub mod membrane;
 pub mod metabolism;
 pub mod molecules;
 pub mod movement;
+pub mod pickups;
 pub mod player;
 pub mod proteins;
 pub mod run;
@@ -100,7 +102,11 @@ impl MetabolisticApp {
             .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
-            .add_plugins(run::RunPlugin);
+            .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(pickups::PickupPlugin)
+            .add_plugins(run::RunPlugin)
+            // The game picks mutated genes at random; tests use a fixed seed.
+            .insert_resource(genome_damage::GeneRng::from_entropy());
 
         #[cfg(feature = "tui")]
         app.add_plugins(tui::CellTuiPlugin);
@@ -138,10 +144,11 @@ impl MetabolisticApp {
             .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
+            .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(pickups::PickupPlugin)
             .add_plugins(run::RunPlugin)
-            // Deterministic for tests: no random mutations, and metabolic ticks run
-            // only on `metabolism::run_metabolic_tick`, not from real time.
-            .insert_resource(blocks::genome::MutationConfig::deterministic())
+            // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not
+            // from real time.
             .insert_resource(metabolism::FlowmapTimingConfig::manual());
 
         app

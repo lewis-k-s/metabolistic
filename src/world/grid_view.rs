@@ -5,7 +5,8 @@
 //! few world pixels. The image is rewritten after each metabolic tick.
 //!
 //! Colours follow `docs/art-direction.md`: heat is orange and red, minerals are
-//! cyan. A glow is dithered with an ordered 4x4 pattern: a texel is either
+//! cyan. Light (UV) is pale yellow with a violet edge: the art doc has no light
+//! colour yet, so these are stand-ins (see its "Not done yet" list). A glow is dithered with an ordered 4x4 pattern: a texel is either
 //! fully set or fully clear, never blended. `render_grid` is a pure function
 //! of the grid, so the colours and the dither can be tested without a window.
 
@@ -14,7 +15,7 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use crate::envgrid::{CELL_SIZE, EnvGrid};
+use crate::envgrid::{CELL_SIZE, EnvGrid, bilinear_taps};
 use crate::environment::Channel;
 use crate::level::Vent;
 use crate::InRun;
@@ -57,6 +58,16 @@ const MINERAL_BANDS: [Band; 3] = [
     Band { lo: 8.0, hi: 20.0, color: [0x92, 0xec, 0xff] },
 ];
 
+/// Light bands: a violet edge, then pale yellow. The bands start where the
+/// UV is still small, so the player can see the dim edge.
+const LIGHT_BANDS: [Band; 2] = [
+    Band { lo: 0.2, hi: 2.5, color: [0x7c, 0x52, 0xcc] },
+    Band { lo: 2.0, hi: 7.0, color: [0xff, 0xf4, 0xb4] },
+];
+
+/// Heat level from which heat is drawn over light.
+const HEAT_OVER_LIGHT: f32 = 25.0;
+
 /// The dither threshold of a texel.
 fn dither(tx: usize, ty: usize) -> f32 {
     BAYER4[ty % 4][tx % 4]
@@ -74,6 +85,16 @@ fn band_color(bands: &[Band], level: f32, threshold: f32) -> Option<[u8; 3]> {
     color
 }
 
+/// The bilinear level at the taps of a position, or 0 if no tap reaches
+/// `lowest`. Below `lowest` no band draws, so the result is the same as a full
+/// `EnvGrid::sample` for the colours.
+fn level_at(taps: &[(usize, f32); 4], layer: &[f32], lowest: f32) -> f32 {
+    if taps.iter().all(|&(i, _)| layer[i] < lowest) {
+        return 0.0;
+    }
+    taps.iter().map(|&(i, w)| layer[i] * w).sum()
+}
+
 /// Size of the image in texels.
 pub fn texture_size(grid: &EnvGrid) -> (usize, usize) {
     let dims = grid.dims();
@@ -81,11 +102,12 @@ pub fn texture_size(grid: &EnvGrid) -> (usize, usize) {
 }
 
 /// RGBA8 pixels of the grid, row 0 at the top. A texel is clear (alpha 0) or
-/// fully set (alpha 255). Heat is drawn over minerals.
+/// fully set (alpha 255). Strong heat is drawn over light, light over weak heat, and heat over minerals.
 pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
     let (width, height) = texture_size(grid);
     let texel = CELL_SIZE / TEXELS_PER_CELL as f32;
     let origin = grid.origin();
+    let dims = grid.dims();
     let mut data = vec![0u8; width * height * 4];
     for ty in 0..height {
         // Image rows go down; world y goes up.
@@ -94,10 +116,22 @@ pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
             let world_x = origin.x + tx as f32 * texel + texel * 0.5;
             let pos = Vec2::new(world_x, world_y);
             let threshold = dither(tx, ty);
-            let color = band_color(&HEAT_BANDS, grid.sample(Channel::Heat, pos), threshold)
-                .or_else(|| {
-                    band_color(&MINERAL_BANDS, grid.sample(Channel::Minerals, pos), threshold)
-                });
+            // One set of taps for all channels. A channel below its lowest band
+            // cannot draw anything here, so it is not interpolated.
+            let taps = bilinear_taps(dims, origin, pos);
+            let heat = level_at(&taps, grid.layer(Channel::Heat), HEAT_BANDS[0].lo);
+            let light = level_at(&taps, grid.layer(Channel::Light), LIGHT_BANDS[0].lo);
+            let minerals = level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo);
+            // Strong heat is drawn over light. Weak heat is not, so the faint
+            // halo of a vent does not hide a shaft.
+            let color = if heat >= HEAT_OVER_LIGHT {
+                band_color(&HEAT_BANDS, heat, threshold)
+            } else {
+                None
+            }
+            .or_else(|| band_color(&LIGHT_BANDS, light, threshold))
+            .or_else(|| band_color(&HEAT_BANDS, heat, threshold))
+            .or_else(|| band_color(&MINERAL_BANDS, minerals, threshold));
             if let Some([r, g, b]) = color {
                 let i = (ty * width + tx) * 4;
                 data[i..i + 4].copy_from_slice(&[r, g, b, 255]);
@@ -296,6 +330,33 @@ mod tests {
             }
         }
         assert!(heat_texels > 10 && mineral_texels > 10);
+    }
+
+    #[test]
+    fn light_is_pale_yellow_with_a_violet_edge() {
+        let mut grid = EnvGrid::centered(8, 8);
+        let (width, height) = texture_size(&grid);
+        // A strong shaft in column 4, a faint edge in column 2.
+        for y in 0..8 {
+            grid.set_level(Channel::Light, 4, y, 10.0);
+            grid.set_level(Channel::Light, 2, y, 1.0);
+        }
+        let data = render_grid(&grid);
+        let (mut yellow, mut violet) = (0, 0);
+        for ty in 0..height {
+            for tx in 0..width {
+                if alpha(&data, width, tx, ty) == 0 {
+                    continue;
+                }
+                let i = (ty * width + tx) * 4;
+                match [data[i], data[i + 1], data[i + 2]] {
+                    [0xff, 0xf4, 0xb4] => yellow += 1,
+                    [0x7c, 0x52, 0xcc] => violet += 1,
+                    other => panic!("unexpected colour {other:?}"),
+                }
+            }
+        }
+        assert!(yellow > 20 && violet > 10, "yellow {yellow}, violet {violet}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! # Internal pools (currencies)
 //!
-//! A cell keeps ten internal pools. See `docs/gameplay-roadmap.md`, section
+//! A cell keeps eleven internal pools. See `docs/gameplay-roadmap.md`, section
 //! "Internal pools".
 //!
 //! | Group | Pools |
@@ -11,6 +11,7 @@
 //! | Cofactor | Metals (Fe-S clusters) |
 //! | Intake | Minerals (the stock that transporters fill from the grid) |
 //! | Waste | Waste |
+//! | Screen | Pigments (block UV; they decay slowly) |
 //!
 //! Lipids have a stored form, `StoredLipids` (lipid beads), on the cell. Fat
 //! storage moves lipids between the pool and the store.
@@ -47,11 +48,13 @@ pub enum Currency {
     /// Reduced minerals (for example H2S) that the cell took in. Chemosynthesis
     /// uses them. Transporters fill this pool from the `EnvGrid`.
     Minerals,
+    /// Pigments that screen UV. They decay slowly (see `genome_damage`).
+    Pigments,
 }
 
 impl Currency {
     /// All pools, in a fixed order.
-    pub const ALL: [Currency; 10] = [
+    pub const ALL: [Currency; 11] = [
         Currency::ATP,
         Currency::ReducingPower,
         Currency::Pyruvate,
@@ -62,6 +65,7 @@ impl Currency {
         Currency::Metals,
         Currency::Waste,
         Currency::Minerals,
+        Currency::Pigments,
     ];
 }
 
@@ -106,6 +110,7 @@ impl CurrencyPools {
             (Currency::Metals, 5.0),
             (Currency::Waste, 0.0),
             (Currency::Minerals, 10.0),
+            (Currency::Pigments, 0.0),
         ]);
         Self { pools }
     }

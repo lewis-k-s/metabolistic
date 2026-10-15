@@ -136,7 +136,7 @@ fn test_genome_diff_events_mutation_and_repair() {
 
     // Repair the mutated gene (it should go back to Silent)
     let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
-    assert!(genome.repair_gene(BlockKind::Fermentation));
+    assert!(genome.silence_mutated_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
         GeneState::Silent
@@ -213,7 +213,7 @@ fn test_genome_diff_mutated_to_silent_no_event() {
 
     // Repair the mutated gene (it should go back to Silent)
     let mut genome = app.world_mut().get_mut::<Genome>(cell).unwrap();
-    assert!(genome.repair_gene(BlockKind::Fermentation));
+    assert!(genome.silence_mutated_gene(BlockKind::Fermentation));
     assert_eq!(
         *genome.get_gene_state(&BlockKind::Fermentation).unwrap(),
         GeneState::Silent

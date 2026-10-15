@@ -16,6 +16,8 @@
 //! - `Transform`: the position in the world (`EnvGrid` is sampled there)
 //! - `MoveInput`, `ThrustEffort`: the wanted direction, and the thrust used
 //! - `ExchangeStats`: minerals taken from the grid and used
+//! - `GenomeIntegrity`, `MutationLoad`, `RepairProgress`: genome damage from UV
+//!   (see `genome_damage`)
 //!
 //! Each metabolic block is a separate entity with `OwnedBy(cell)`. The block
 //! sync system in `blocks` keeps `CellBlocks` in line with the genome. When a
@@ -28,6 +30,7 @@ use std::f32::consts::PI;
 use crate::blocks::genome::{BlockKind, Genome};
 use crate::environment::LocalEnvironment;
 use crate::exchange::ExchangeStats;
+use crate::genome_damage::{GenomeIntegrity, MutationLoad, RepairProgress};
 use crate::membrane::Membrane;
 use crate::metabolism::{CurrencyPools, MetabolicGraph};
 use crate::molecules::{Currency, StoredLipids};
@@ -52,7 +55,10 @@ use crate::proteins::{Proteome, SynthesisQueue};
     MoveInput,
     ThrustEffort,
     ExchangeStats,
-    DamageTaken
+    DamageTaken,
+    GenomeIntegrity,
+    MutationLoad,
+    RepairProgress
 )]
 pub struct Cell;
 
@@ -61,6 +67,8 @@ pub struct Cell;
 pub enum DamageSource {
     /// Heat above `exchange::HEAT_DAMAGE_THRESHOLD`.
     Heat,
+    /// UV light that pigments did not screen.
+    Uv,
 }
 
 /// Membrane damage that a cell took, by source, since it was spawned. It lets
@@ -68,6 +76,7 @@ pub enum DamageSource {
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
 pub struct DamageTaken {
     pub heat: f32,
+    pub uv: f32,
 }
 
 impl DamageTaken {
@@ -75,12 +84,13 @@ impl DamageTaken {
     pub fn add(&mut self, source: DamageSource, amount: f32) {
         match source {
             DamageSource::Heat => self.heat += amount.max(0.0),
+            DamageSource::Uv => self.uv += amount.max(0.0),
         }
     }
 
     /// The source that did the most damage. `None` if there was none.
     pub fn main_source(&self) -> Option<DamageSource> {
-        let all = [(DamageSource::Heat, self.heat)];
+        let all = [(DamageSource::Heat, self.heat), (DamageSource::Uv, self.uv)];
         all.into_iter()
             .filter(|&(_, amount)| amount > 0.0)
             .max_by(|a, b| a.1.total_cmp(&b.1))
@@ -208,6 +218,8 @@ mod tests {
         taken.add(DamageSource::Heat, -5.0);
         assert_eq!(taken.main_source(), Some(DamageSource::Heat));
         assert_eq!(taken.heat, 3.0);
+        taken.add(DamageSource::Uv, 5.0);
+        assert_eq!(taken.main_source(), Some(DamageSource::Uv));
     }
 
     #[test]

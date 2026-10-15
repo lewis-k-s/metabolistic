@@ -1,15 +1,16 @@
 //! # HUD
 //!
-//! Text bars for ATP, membrane integrity and the main pools, in a panel at the
-//! top left of the Run screen. Minerals show the cell's stock. Heat is the
+//! Text bars for ATP, membrane integrity, genome integrity and the main pools,
+//! in a panel at the top left of the Run screen. Minerals show the cell's stock. Heat is the
 //! condition at the cell: the panel warns when it is above the damage
-//! threshold.
+//! threshold. Light shows as UV at the cell, and as the pigment shield.
 
 use bevy::prelude::*;
 
 use crate::cell::Cell;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::exchange::{HEAT_DAMAGE_THRESHOLD, MINERAL_STOCK_CAP};
+use crate::genome_damage::{GenomeIntegrity, UvFraction, is_fragmented, shield, uv_level};
 use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
@@ -29,19 +30,23 @@ const POOL_BAR_MAX: f32 = 50.0;
 enum HudLine {
     Atp,
     Membrane,
+    Genome,
     Minerals,
     Lipids,
     AminoAcids,
     Heat,
+    Uv,
 }
 
-const LINES: [HudLine; 6] = [
+const LINES: [HudLine; 8] = [
     HudLine::Atp,
     HudLine::Membrane,
+    HudLine::Genome,
     HudLine::Minerals,
     HudLine::Lipids,
     HudLine::AminoAcids,
     HudLine::Heat,
+    HudLine::Uv,
 ];
 
 pub fn plugin(app: &mut App) {
@@ -89,10 +94,14 @@ fn bar_line(name: &str, value: f32, max: f32) -> String {
 
 fn update_hud(
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    cells: Query<(&CurrencyPools, &Membrane, &LocalEnvironment), With<Cell>>,
+    cells: Query<
+        (&CurrencyPools, &Membrane, &LocalEnvironment, &GenomeIntegrity),
+        With<Cell>,
+    >,
+    fraction: Res<UvFraction>,
     mut lines: Query<(&HudLine, &mut Text)>,
 ) {
-    let Some((pools, membrane, env)) = players
+    let Some((pools, membrane, env, genome)) = players
         .iter()
         .find_map(|controlled| cells.get(controlled.0).ok())
     else {
@@ -102,6 +111,16 @@ fn update_hud(
         text.0 = match line {
             HudLine::Atp => bar_line("ATP", pools.get(Currency::ATP), ATP_BAR_MAX),
             HudLine::Membrane => bar_line("Membrane", membrane.integrity, membrane.max),
+            HudLine::Genome => {
+                let note = if is_fragmented(genome.0) { "  FRAGMENTED" } else { "" };
+                format!("{}{note}", bar_line("Genome", genome.0, 1.0))
+            }
+            HudLine::Uv => {
+                let uv = uv_level(env.get(Channel::Light), fraction.0);
+                let shield = shield(pools.get(Currency::Pigments));
+                let warning = if uv > 1.0 && shield < 0.5 { "  UV!" } else { "" };
+                format!("UV {uv:6.1}  shield {:3.0}%{warning}", shield * 100.0)
+            }
             HudLine::Minerals => bar_line("Minerals", pools.get(Currency::Minerals), MINERAL_STOCK_CAP),
             HudLine::Lipids => bar_line("Lipids", pools.get(Currency::Lipids), POOL_BAR_MAX),
             HudLine::AminoAcids => {

@@ -338,7 +338,10 @@ pixel (the cell frames are centred on 32.5).
   alarm effects, the complement ring on a target cell, the killed-cell look
   after perforin.
 - Shelter sprites (vent crevice, microbial mat, soil pore).
-- Grid channel visuals: heat glow, mineral plume, light and UV rays.
+- Grid channel visuals: heat glow and mineral plume are in. Light and UV are in
+  as stand-ins (pale yellow `#fff4b4` with a violet edge `#7c52cc`, dithered).
+  The art owner must pick the real light ramp and rays. Also the gene orb in
+  the game is still the plain sheet with no glow.
 - UI frame, icons for the 4 action slots, HUD bars.
 - Shallow-water and land palettes. The water backdrop and the rock ramp are for
   the vent stage only.

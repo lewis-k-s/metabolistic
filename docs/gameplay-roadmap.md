@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). Next: M3.
+merged to `master` (2026-10-15). M3 is done (not committed yet). Next: M4.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -183,14 +183,14 @@ Updated after M2.
 | Area | Now | Still to do |
 |---|---|---|
 | Solver | Enzymes x saturation, proportional sharing, fixed 0.05 s sub-steps (`metabolism/solver.rs`) | - |
-| Pools | The pools above, plus a `StoredLipids` component | Pigments (M3) |
-| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism | Nucleotides, pigments, repair (M3); photosynthesis, catalase, respiration (M7, M8) |
+| Pools | The pools above (with Pigments), plus a `StoredLipids` component | - |
+| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites | photosynthesis, catalase, respiration (M7, M8) |
 | Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size | Editor UI (M4) |
-| Genome | `Silent` / `Expressed` / `Mutated`; random mutation in `MetabolicSet::Genome` | Mutation from UV and ROS, repair, translation efficiency (M3); gene transfer (M5) |
-| Environment | `EnvGrid` with Heat and Minerals: diffusion, drift, sources, decay | Light/UV (M3), OrganicCarbon, O2, Water |
+| Genome | `Silent` / `Expressed` / `Mutated`; UV mutation load, repair, translation efficiency, `GenomeIntegrity` | Mutation from ROS; gene transfer (M5) |
+| Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
 | Run screen | The player is a `Cell` with a body; vent field level; HUD; run-over screen with the cause of death | Shelters, action bar (M4) |
 | Physics | avian2d, 64 Hz, no interpolation | - |
-| Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | Light/UV visuals; overlays for membrane proteins |
+| Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | Overlays for membrane proteins; a final light colour |
 | Manage screen | Placeholder | Editor, synthesis queue, action slots (M4) |
 | Run structure | `InRun` state covers Run and Manage; death and restart | Levels, victory, codex (M6) |
 
@@ -267,7 +267,35 @@ Notes:
 
 Done when: you can play a vent field, find minerals, and starve or burn.
 
-### M3. Genome damage
+### M3. Genome damage - done (not committed yet)
+
+Notes:
+- `Channel::Light` in `EnvGrid`. UV = light x `UvFraction` (1.0 in the
+  vents). Two shafts in the vent field (`level::SHAFTS`): A between the start
+  and the second vent, B east of it. The player goes under A and over B.
+  Core level is about 9-10, the edge fades over about one grid cell.
+- UV damage, both x (1 - shield): membrane 0.8 per UV per second (`DamageTaken`
+  as UV), genome integrity 0.008 per UV per second, mutation load 0.04 per UV
+  per second. Unshielded, a cell dies in the core in about 15 s.
+- Translation efficiency: 0 below integrity 0.25, then 0.2 rising to 1. It
+  multiplies the `Drive` of protein synthesis.
+- Mutation: `MutationLoad` accumulator, seeded `GeneRng`. The old random
+  mutation system and `MutationConfig` are removed. The game seeds the RNG from
+  the system, `new_headless` uses a fixed seed. Mutation runs in
+  `MetabolicSet::Genome`, so a mutation shows one tick after the exposure.
+- Repair: 0.02 work per second (work 1 = integrity 0 to 1). 60 ATP and 30
+  Nucleotides per work. A mutated gene needs 0.1 work. Work splits half and
+  half between integrity and genes. It stops at the gap and when a pool is empty.
+- `NucleotideCofactorSynthesis` (in the starter genome and proteome) and
+  `SecondaryMetabolites` (pigments) are regulated refill blocks (`blocks::refill`):
+  they stop at a target (20 Nucleotides, 40 Pigments) and never overshoot.
+  Pigments decay 0.01 per second. Shield = P / (10 + P), capped at 0.999.
+- Gene orb at `level::GENE_ORB_POSITION`, in the dim edge at the lower end of
+  shaft A. It gives the pigment gene with one enzyme. It is a stand-in for gene
+  transfer (M5).
+- HUD: Genome bar, UV and shield line. Run-over names UV.
+
+Original plan:
 
 1. A Light/UV channel: light shafts from above in the vent level. UV damages
    the membrane and lowers a `GenomeIntegrity` value.

@@ -2,9 +2,10 @@
 //!
 //! Each metabolic tick, a cell and the `EnvGrid` under it swap these:
 //!
-//! 1. **Sense** (start of the tick): the heat of the grid at the cell's
-//!    position becomes `LocalEnvironment` heat. Heat is a condition: nothing
-//!    uses it up.
+//! 1. **Sense** (start of the tick): the heat and light of the grid at the
+//!    cell's position become `LocalEnvironment` heat and light. They are
+//!    conditions: nothing uses them up. UV damage reads the light (see
+//!    `genome_damage`).
 //! 2. **Minerals** (end of the tick): chemosynthesis has already used minerals
 //!    from the `Minerals` pool in the solver, so a short stock limits the
 //!    block. Then the cell's transporters take minerals from the grid into the
@@ -84,7 +85,7 @@ pub fn heat_damage(heat: f32, dt: f32) -> f32 {
 
 // --- Systems ---
 
-/// Sets the heat of each cell from the grid under it.
+/// Sets the heat and light of each cell from the grid under it.
 pub fn sense_environment_system(
     grid: Res<EnvGrid>,
     mut cells: Query<(&Transform, &mut LocalEnvironment), With<Cell>>,
@@ -92,6 +93,8 @@ pub fn sense_environment_system(
     for (transform, mut env) in &mut cells {
         let heat = grid.sample(Channel::Heat, transform.translation.truncate());
         env.set(Channel::Heat, heat);
+        let light = grid.sample(Channel::Light, transform.translation.truncate());
+        env.set(Channel::Light, light);
     }
 }
 

@@ -1,7 +1,7 @@
 //! # Environment grid
 //!
 //! `EnvGrid` is a coarse grid with one `f32` layer for each `Channel`: heat and
-//! minerals now, light and UV in M3. Each channel has sources (emitters),
+//! minerals and light (UV). Each channel has sources (emitters),
 //! diffusion, a drift and a decay. Cells sample the grid at their position and
 //! take minerals from it (see `exchange`).
 //!
@@ -298,6 +298,8 @@ pub struct EnvGrid {
     /// Emission per second for each grid cell and channel.
     emission: [Vec<f32>; Channel::ALL.len()],
     params: [FieldParams; Channel::ALL.len()],
+    /// Channels that are settled: they are static, so `step` skips them.
+    settled: [bool; Channel::ALL.len()],
     scratch: Vec<f32>,
 }
 
@@ -310,9 +312,10 @@ impl EnvGrid {
         Self {
             dims,
             origin,
-            layers: [blank(), blank()],
-            emission: [blank(), blank()],
+            layers: std::array::from_fn(|_| blank()),
+            emission: std::array::from_fn(|_| blank()),
             params: [FieldParams::STILL; Channel::ALL.len()],
+            settled: [false; Channel::ALL.len()],
             scratch: Vec::new(),
         }
     }
@@ -347,6 +350,19 @@ impl EnvGrid {
 
     pub fn set_params(&mut self, channel: Channel, params: FieldParams) {
         self.params[channel.index()] = params;
+        self.settled[channel.index()] = false;
+    }
+
+    /// Marks a channel as settled: it has reached its steady state and has
+    /// no drift, so `step` skips it from now on. Use it for static channels
+    /// such as light shafts, after the warm-up. Adding an emitter or setting
+    /// the params un-settles the channel. `set_level` does not.
+    pub fn settle(&mut self, channel: Channel) {
+        self.settled[channel.index()] = true;
+    }
+
+    pub fn is_settled(&self, channel: Channel) -> bool {
+        self.settled[channel.index()]
     }
 
     /// The levels of one channel, row by row.
@@ -383,6 +399,7 @@ impl EnvGrid {
     /// with distance. If no cell centre is within `radius`, the nearest cell
     /// gets all of it.
     pub fn add_emitter(&mut self, channel: Channel, center: Vec2, radius: f32, rate: f32) {
+        self.settled[channel.index()] = false;
         let mut weights: Vec<(usize, f32)> = Vec::new();
         let mut nearest = (0, f32::INFINITY);
         for y in 0..self.dims.height {
@@ -404,6 +421,22 @@ impl EnvGrid {
         let emission = &mut self.emission[channel.index()];
         for (i, w) in weights {
             emission[i] += rate * w / sum;
+        }
+    }
+
+    /// Adds a rectangular emitter: every grid cell whose centre is inside
+    /// `[min, max]` emits `rate_per_cell` per second. A light shaft is a tall
+    /// rectangle. If no cell centre is inside, nothing is added.
+    pub fn add_rect_emitter(&mut self, channel: Channel, min: Vec2, max: Vec2, rate_per_cell: f32) {
+        self.settled[channel.index()] = false;
+        for y in 0..self.dims.height {
+            for x in 0..self.dims.width {
+                let c = self.cell_center(x, y);
+                if c.x >= min.x && c.x <= max.x && c.y >= min.y && c.y <= max.y {
+                    let i = self.dims.index(x, y);
+                    self.emission[channel.index()][i] += rate_per_cell;
+                }
+            }
         }
     }
 
@@ -433,6 +466,9 @@ impl EnvGrid {
     pub fn step(&mut self, dt: f32) {
         for channel in Channel::ALL {
             let i = channel.index();
+            if self.settled[i] {
+                continue;
+            }
             step_layer(
                 &mut self.layers[i],
                 &mut self.scratch,
@@ -464,6 +500,28 @@ mod tests {
 
     fn sum(layer: &[f32]) -> f32 {
         layer.iter().sum()
+    }
+
+    #[test]
+    fn a_settled_channel_is_skipped_until_an_emitter_is_added() {
+        let mut grid = EnvGrid::centered(6, 6);
+        grid.set_params(
+            Channel::Light,
+            FieldParams { diffusion: 0.5, decay: 0.3, ..FieldParams::STILL },
+        );
+        grid.add_emitter(Channel::Light, Vec2::ZERO, 40.0, 5.0);
+        for _ in 0..100 {
+            grid.step(1.0);
+        }
+        let settled_layer = grid.layer(Channel::Light).to_vec();
+        grid.settle(Channel::Light);
+        assert!(grid.is_settled(Channel::Light));
+        grid.step(1.0);
+        assert_eq!(grid.layer(Channel::Light), settled_layer.as_slice());
+        grid.add_emitter(Channel::Light, Vec2::ZERO, 40.0, 5.0);
+        assert!(!grid.is_settled(Channel::Light));
+        grid.step(1.0);
+        assert_ne!(grid.layer(Channel::Light), settled_layer.as_slice());
     }
 
     #[test]

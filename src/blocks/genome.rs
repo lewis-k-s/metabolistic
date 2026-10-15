@@ -10,7 +10,7 @@
 //! - **Expression**: Paying ATP + nucleotides flips a gene tile to "expressed", making the block appear
 //! - **Maintenance**: Each expressed tile has a flat ATP upkeep cost every tick (protein turnover)
 //! - **Editing**: Swapping gene tiles costs ATP + reducing power (simulating recombination/repair)
-//! - **Mutation**: Random errors can temporarily disable gene tiles until repaired
+//! - **Mutation**: UV can disable gene tiles until repaired (see `genome_damage`)
 //!
 //! ## Usage
 //!
@@ -27,7 +27,6 @@
 //! The system automatically:
 //! - Tracks gene expression changes via `GenomeDiffEvent`
 //! - Syncs each cell's metabolic blocks with its genome (see `blocks`)
-//! - Handles random mutations over time
 //!
 //! ## Controls (Demo)
 //!
@@ -36,7 +35,6 @@
 //! - Press 'J' to add a new Light Capture gene
 
 use bevy::prelude::*;
-use rand::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -215,8 +213,21 @@ impl Genome {
         }
     }
 
-    /// Repair a mutated gene
-    pub fn repair_gene(&mut self, block_kind: BlockKind) -> bool {
+    /// Repair a mutated gene back to expressed. Only expressed genes mutate,
+    /// so this restores what UV damaged.
+    pub fn restore_gene(&mut self, block_kind: BlockKind) -> bool {
+        match self.table.get_mut(&block_kind) {
+            Some(state) if *state == GeneState::Mutated => {
+                *state = GeneState::Expressed;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Turns a mutated gene into a silent one. For editing tools. Repair after
+    /// UV uses `restore_gene`.
+    pub fn silence_mutated_gene(&mut self, block_kind: BlockKind) -> bool {
         if let Some(state) = self.table.get_mut(&block_kind) {
             match state {
                 GeneState::Mutated => {
@@ -325,15 +336,6 @@ pub struct GenomeOperationCosts {
     pub editing_reducing_power_cost: f32,
 }
 
-/// Trait for implementing different mutation strategies
-pub trait MutationStrategy: Send + Sync {
-    /// Determines if a gene should mutate based on the strategy's logic
-    fn should_mutate(&mut self, block_kind: BlockKind, delta_time: f32) -> bool;
-
-    /// Determines what the mutated gene state should be
-    fn get_mutation_target(&mut self, block_kind: BlockKind) -> GeneState;
-}
-
 impl Default for GenomeOperationCosts {
     fn default() -> Self {
         Self {
@@ -346,87 +348,15 @@ impl Default for GenomeOperationCosts {
     }
 }
 
-/// Random mutation strategy that uses thread_rng() for mutations
-/// This preserves the current random mutation behavior for gameplay
-pub struct RandomMutationStrategy {
-    /// Mutation chance per second per gene
-    pub mutation_rate: f32,
-}
-
-impl Default for RandomMutationStrategy {
-    fn default() -> Self {
-        Self {
-            mutation_rate: 0.01, // 1% chance per second per gene
-        }
-    }
-}
-
-impl MutationStrategy for RandomMutationStrategy {
-    fn should_mutate(&mut self, _block_kind: BlockKind, delta_time: f32) -> bool {
-        rand::rng().random::<f32>() < self.mutation_rate * delta_time
-    }
-
-    fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
-        GeneState::Mutated
-    }
-}
-
-/// Deterministic mutation strategy that never mutates genes
-/// This provides predictable behavior for testing
-pub struct DeterministicMutationStrategy;
-
-impl MutationStrategy for DeterministicMutationStrategy {
-    fn should_mutate(&mut self, _block_kind: BlockKind, _delta_time: f32) -> bool {
-        false // Never mutate in deterministic mode
-    }
-
-    fn get_mutation_target(&mut self, _block_kind: BlockKind) -> GeneState {
-        GeneState::Mutated // This shouldn't be called since should_mutate returns false
-    }
-}
-
-/// Resource containing the mutation strategy configuration
-#[derive(Resource)]
-pub struct MutationConfig {
-    pub strategy: Box<dyn MutationStrategy>,
-}
-
-impl MutationConfig {
-    /// Create a new mutation config with a random strategy (default for gameplay)
-    pub fn random() -> Self {
-        Self {
-            strategy: Box::new(RandomMutationStrategy::default()),
-        }
-    }
-
-    /// Create a new mutation config with a deterministic strategy (default for testing)
-    pub fn deterministic() -> Self {
-        Self {
-            strategy: Box::new(DeterministicMutationStrategy),
-        }
-    }
-}
-
-impl Default for MutationConfig {
-    fn default() -> Self {
-        Self::random()
-    }
-}
-
 /// Plugin that manages the genome system
 pub struct GenomePlugin;
 
 impl Plugin for GenomePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GenomeOperationCosts::default())
-            .init_resource::<MutationConfig>()
             .add_message::<GenomeDiffEvent>()
             .add_message::<MetabolicUpdateEvent>()
-            .add_systems(PreUpdate, poll_genome_diff)
-            .add_systems(
-                crate::metabolism::MetabolicSchedule,
-                mutation_system.in_set(crate::metabolism::MetabolicSet::Genome),
-            );
+            .add_systems(PreUpdate, poll_genome_diff);
     }
 }
 
@@ -449,38 +379,10 @@ pub fn poll_genome_diff(
     }
 }
 
-/// Applies random mutations to every cell genome, once per metabolic tick.
-pub fn mutation_system(
-    mut genomes: Query<&mut Genome>,
-    mut mutation_config: ResMut<MutationConfig>,
-    timing: Res<crate::metabolism::FlowmapTimingConfig>,
-) {
-    let dt = timing.target_delta();
-    for mut genome in &mut genomes {
-        let kinds: Vec<BlockKind> = genome.table.keys().copied().collect();
-        for block_kind in kinds {
-            if !mutation_config.strategy.should_mutate(block_kind, dt) {
-                continue;
-            }
-            match mutation_config.strategy.get_mutation_target(block_kind) {
-                GeneState::Mutated => {
-                    genome.mutate_gene(block_kind);
-                }
-                GeneState::Silent => {
-                    genome.silence_gene(block_kind);
-                }
-                GeneState::Expressed => {
-                    genome.express_gene(block_kind);
-                }
-            }
-            debug!("Gene {block_kind:?} changed by mutation");
-        }
-    }
-}
-
 /// The starter genome of a vent cell: chemosynthesis for energy and carbon,
-/// biosynthesis of amino acids and lipids, and protein synthesis. Fermentation
-/// is present but silent.
+/// biosynthesis of amino acids and lipids, protein synthesis, and nucleotide
+/// synthesis for genome repair. Fermentation is present but silent. There is no
+/// pigment gene: the cell must find it.
 pub fn create_starter_genome() -> Genome {
     let mut genome = Genome::default();
     for kind in [
@@ -488,6 +390,7 @@ pub fn create_starter_genome() -> Genome {
         BlockKind::AminoAcidBiosynthesis,
         BlockKind::LipidMetabolism,
         BlockKind::ProteinSynthesis,
+        BlockKind::NucleotideCofactorSynthesis,
     ] {
         genome.add_gene(kind);
         genome.express_gene(kind);

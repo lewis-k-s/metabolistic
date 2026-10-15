@@ -10,31 +10,35 @@
 //!
 //! - Heat is a condition. It is the grid level under the body, and nothing
 //!   uses it up.
+//! - Light is a condition, like heat. In the vents, all light is UV hazard.
 //! - Minerals are a stock in the cell. Transporters take them from the grid,
 //!   and chemosynthesis uses them up.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-/// An outside channel. M3 adds Light/UV, and later stages add OrganicCarbon,
-/// O2 and Water.
+/// An outside channel. Later stages add OrganicCarbon, O2 and Water.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Channel {
     /// Heat from a vent.
     Heat,
     /// Reduced minerals (for example H2S) from a vent.
     Minerals,
+    /// Light from above, in shafts. UV is the light level times a per-level
+    /// fraction (see `genome_damage`).
+    Light,
 }
 
 impl Channel {
     /// All channels, in a fixed order. `index` is the position in this list.
-    pub const ALL: [Channel; 2] = [Channel::Heat, Channel::Minerals];
+    pub const ALL: [Channel; 3] = [Channel::Heat, Channel::Minerals, Channel::Light];
 
     /// Position of the channel in `ALL`. Layers of the grid use it.
     pub const fn index(self) -> usize {
         match self {
             Channel::Heat => 0,
             Channel::Minerals => 1,
+            Channel::Light => 2,
         }
     }
 }

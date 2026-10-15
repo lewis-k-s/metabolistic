@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::GameState;
 use crate::cell::Cell;
 use crate::environment::{Channel, LocalEnvironment};
+use crate::genome_damage::GenomeIntegrity;
 use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
@@ -88,7 +89,10 @@ fn drive_smoke_test(
     mut next_state: ResMut<NextState<GameState>>,
     mut next_page: ResMut<NextState<MenuPage>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    cells: Query<(&Transform, &CurrencyPools, &Membrane, &LocalEnvironment), With<Cell>>,
+    cells: Query<
+        (&Transform, &CurrencyPools, &Membrane, &LocalEnvironment, &GenomeIntegrity),
+        With<Cell>,
+    >,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -150,17 +154,19 @@ fn drive_smoke_test(
 
     match smoke.screenshot_requested_at {
         None => {
-            for (transform, pools, membrane, env) in players
+            for (transform, pools, membrane, env, genome) in players
                 .iter()
                 .filter_map(|controlled| cells.get(controlled.0).ok())
             {
                 info!(
-                    "smoke test: {name} player at {:.1?} ATP {:.1} membrane {:.1} minerals {:.1} heat {:.1}",
+                    "smoke test: {name} player at {:.1?} ATP {:.1} membrane {:.1} minerals {:.1} heat {:.1} light {:.1} genome {:.2}",
                     transform.translation.truncate(),
                     pools.get(Currency::ATP),
                     membrane.integrity,
                     pools.get(Currency::Minerals),
                     env.get(Channel::Heat),
+                    env.get(Channel::Light),
+                    genome.0,
                 );
                 if target == GameState::Run {
                     let start = smoke.run_start.expect("smoke test: no player cell on the Run screen");

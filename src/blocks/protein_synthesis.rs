@@ -2,13 +2,16 @@
 //!
 //! AminoAcids + ATP -> protein units. The block's enzymes are its ribosomes.
 //! It runs only while the cell's synthesis queue has orders: a regulator sets
-//! its `Drive` to 0 when the queue is empty. Its turnovers in a tick are the
+//! its `Drive` to 0 when the queue is empty. Genome damage slows it:
+//! the drive is multiplied by the translation efficiency, which is 0 for a
+//! fragmented genome (see `genome_damage`). Its turnovers in a tick are the
 //! protein units that `advance_protein_queue_system` spends on the queue.
 
 use bevy::prelude::*;
 
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellBlocks, OwnedBy};
+use crate::genome_damage::{GenomeIntegrity, translation_efficiency};
 use crate::metabolism::{BlockTurnover, Drive, FluxProfile};
 use crate::molecules::Currency;
 use crate::proteins::{
@@ -32,14 +35,21 @@ pub fn synthesis_drive(queue: &SynthesisQueue) -> f32 {
     if queue.is_empty() { 0.0 } else { 1.0 }
 }
 
-/// Turns protein synthesis on or off from each cell's queue.
+/// Drive of the block with genome damage: the queue drive times the
+/// translation efficiency.
+pub fn damaged_synthesis_drive(queue: &SynthesisQueue, genome_integrity: f32) -> f32 {
+    synthesis_drive(queue) * translation_efficiency(genome_integrity)
+}
+
+/// Turns protein synthesis on or off from each cell's queue, and slows it down
+/// when the genome is damaged.
 pub fn regulate_protein_synthesis_system(
-    cells: Query<&SynthesisQueue, With<Cell>>,
+    cells: Query<(&SynthesisQueue, &GenomeIntegrity), With<Cell>>,
     mut blocks: Query<(&OwnedBy, &mut Drive), With<ProteinSynthesisBlock>>,
 ) {
     for (owner, mut drive) in &mut blocks {
-        if let Ok(queue) = cells.get(owner.0) {
-            let wanted = synthesis_drive(queue);
+        if let Ok((queue, integrity)) = cells.get(owner.0) {
+            let wanted = damaged_synthesis_drive(queue, integrity.0);
             if drive.0 != wanted {
                 drive.0 = wanted;
             }

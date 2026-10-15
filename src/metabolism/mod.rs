@@ -8,15 +8,17 @@
 //! The engine runs in `MetabolicSchedule`, one fixed tick at a time. A tick:
 //!
 //! 1. `MetabolicSet::Sense`: the cell reads the heat of the grid under it.
-//! 2. `MetabolicSet::Genome`: random mutations.
+//! 2. `MetabolicSet::Genome`: whole units of UV mutation load turn into
+//!    mutated genes (see `genome_damage`).
 //! 3. `MetabolicSet::Regulate`: regulated blocks set their drive or move pools
 //!    (for example fat storage and protein synthesis).
 //! 4. `MetabolicSet::Solve`: for each cell, `solve_tick` runs all blocks and
 //!    the cell's maintenance cost together.
 //! 5. `MetabolicSet::Build`: the cell uses the products of the tick. Protein
-//!    synthesis advances the synthesis queue, and lipids repair the membrane.
+//!    synthesis advances the synthesis queue, lipids repair the membrane, genome
+//!    repair runs, and pigments decay.
 //! 6. `MetabolicSet::Exchange`: the cell and the `EnvGrid` swap minerals, heat
-//!    hurts the membrane, movement costs ATP, and the grid runs a step (see
+//!    hurts the membrane, UV hurts the membrane and the genome, movement costs ATP, and the grid runs a step (see
 //!    `exchange`).
 //!
 //! In the game, `run_metabolic_schedule_timed` runs ticks from real time. Tests

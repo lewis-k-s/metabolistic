@@ -27,6 +27,10 @@
 //! - **Fermentation** (`FermentationBlock`): Pyruvate + ReducingPower -> ATP + Waste
 //! - **Fat storage** (`FatStorageBlock`): regulated. Stores Lipids as
 //!   StoredLipids above the lipid toxicity threshold and releases them below it.
+//! - **Nucleotide synthesis** (`nucleotides`): CarbonSkeletons + ATP +
+//!   ReducingPower -> Nucleotides, up to a target. Genome repair uses them.
+//! - **Pigments** (`secondary_metabolites`): CarbonSkeletons + ATP -> Pigments,
+//!   up to a target. They screen UV.
 //! - **Vesicle export** (`VesicleExportBlock`): removes Waste from the cell.
 
 pub mod biosynthesis;
@@ -34,7 +38,10 @@ pub mod chemosynthesis;
 pub mod fat_storage;
 pub mod fermentation;
 pub mod genome;
+pub mod nucleotides;
 pub mod protein_synthesis;
+pub mod refill;
+pub mod secondary_metabolites;
 pub mod vesicle_export;
 
 use bevy::prelude::*;
@@ -60,6 +67,8 @@ impl Plugin for MetabolicBlocksPlugin {
                     (
                         fat_storage::regulate_fat_storage_system,
                         protein_synthesis::regulate_protein_synthesis_system,
+                        refill::regulate_refill_system::<nucleotides::NucleotideSynthesisBlock>,
+                        refill::regulate_refill_system::<secondary_metabolites::PigmentBlock>,
                     )
                         .in_set(MetabolicSet::Regulate),
                     (
@@ -104,6 +113,12 @@ pub fn block_spec(kind: BlockKind) -> Option<BlockSpec> {
         BlockKind::Fermentation => Some(BlockSpec::new(fermentation::flux_profile())),
         BlockKind::VesicleExport => Some(BlockSpec::new(vesicle_export::flux_profile())),
         BlockKind::FatStorage => Some(BlockSpec::new(FluxProfile::default())),
+        BlockKind::NucleotideCofactorSynthesis => {
+            Some(BlockSpec::new(nucleotides::flux_profile()))
+        }
+        BlockKind::SecondaryMetabolites => {
+            Some(BlockSpec::new(secondary_metabolites::flux_profile()))
+        }
         _ => None,
     }
 }
@@ -182,6 +197,12 @@ pub fn spawn_block(
         }
         BlockKind::VesicleExport => {
             entity.insert(vesicle_export::VesicleExportBlock);
+        }
+        BlockKind::NucleotideCofactorSynthesis => {
+            entity.insert(nucleotides::NucleotideSynthesisBlock);
+        }
+        BlockKind::SecondaryMetabolites => {
+            entity.insert(secondary_metabolites::PigmentBlock);
         }
         _ => {}
     }

@@ -18,6 +18,7 @@ pub fn starter_proteome() -> Proteome {
         (BlockKind::AminoAcidBiosynthesis, 1),
         (BlockKind::LipidMetabolism, 1),
         (BlockKind::ProteinSynthesis, 1),
+        (BlockKind::NucleotideCofactorSynthesis, 1),
     ])
 }
 

@@ -10,12 +10,14 @@
 //!   mineral particles.
 //! - `player_body`: the physics body, thrust, camera and blob look of the
 //!   player's cell. The cell plays baked sprite sheets.
-//! - `hud`: ATP, membrane and pool bars.
+//! - `hud`: ATP, membrane, genome, UV and pool bars.
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
+use crate::genome_damage::UvFraction;
 use crate::level::{self, VENTS};
+use crate::pickups::GeneOrb;
 use crate::shared::spawn_starter_cell_at_start;
 use crate::sprites::Sheets;
 use crate::InRun;
@@ -51,10 +53,30 @@ fn spawn_world(mut commands: Commands, asset_server: Res<AssetServer>, sheets: R
     grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);
     commands.insert_resource(grid);
+    commands.insert_resource(UvFraction(level::UV_FRACTION));
+    spawn_gene_orb(&mut commands, &sheets);
 
     let (player, cell) = spawn_starter_cell_at_start(&mut commands);
     commands.entity(player).insert(DespawnOnExit(InRun));
     player_body::attach_body(&mut commands, &sheets, cell);
+}
+
+/// The gene orb: a stand-in for horizontal gene transfer (M5). It gives the
+/// pigment gene when the player touches it.
+fn spawn_gene_orb(commands: &mut Commands, sheets: &Sheets) {
+    let Some(sprite) = sheets.bundle("gene_orb", "loop") else {
+        warn!("the manifest has no gene_orb sheet");
+        return;
+    };
+    commands.spawn((
+        Name::new("Gene Orb"),
+        GeneOrb {
+            gene: level::GENE_ORB_GENE,
+        },
+        sprite,
+        Transform::from_translation(level::GENE_ORB_POSITION.round().extend(1.0)),
+        DespawnOnExit(InRun),
+    ));
 }
 
 fn remove_grid(mut commands: Commands) {

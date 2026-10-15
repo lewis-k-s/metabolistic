@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin};
 use metabolistic3d::metabolism::{FlowmapTimingConfig, MetabolicFlowPlugin, run_metabolic_tick};
 use metabolistic3d::molecules::{Currency, CurrencyPools};
 use metabolistic3d::player::spawn_local_player_cell;
@@ -12,7 +12,6 @@ fn app_with_cell(genes: &[BlockKind]) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins((GenomePlugin, MetabolicBlocksPlugin, MetabolicFlowPlugin))
-        .insert_resource(MutationConfig::deterministic())
         .insert_resource(FlowmapTimingConfig::manual());
 
     let mut genome = Genome::default();

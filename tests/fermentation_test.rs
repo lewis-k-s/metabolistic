@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use metabolistic3d::blocks::MetabolicBlocksPlugin;
 use metabolistic3d::blocks::fermentation;
-use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin, MutationConfig};
+use metabolistic3d::blocks::genome::{BlockKind, Genome, GenomePlugin};
 use metabolistic3d::cell::CellSize;
 use metabolistic3d::metabolism::{
     DEFAULT_K_HALF, FlowmapTimingConfig, MetabolicFlowPlugin, run_metabolic_tick,
@@ -18,7 +18,6 @@ fn app_with_cell(genes: &[BlockKind], enzymes: u32) -> (App, Entity) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .add_plugins((GenomePlugin, MetabolicBlocksPlugin, MetabolicFlowPlugin))
-        .insert_resource(MutationConfig::deterministic())
         .insert_resource(FlowmapTimingConfig::manual());
 
     let mut genome = Genome::default();
