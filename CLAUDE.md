@@ -40,20 +40,26 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Development build**: `cargo run` (includes hot reloading, debug tools)
 - **Optimized build**: `cargo run --profile release-native`
 - **Web-optimized build**: `cargo build --release`
-- **Headless build**: `cargo build --features headless` (no graphics/audio)
+- **Headless build**: `cargo build --no-default-features --features headless` (no graphics/audio)
+- **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 
 ### Testing
-- **Run all tests**: `cargo test`
+- **Run all tests**: `cargo test` (full build, about 10 s after an edit)
+- **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
-- **Headless tests**: `cargo test --features headless`
-- **Property-based tests**: Uses `proptest` for invariant testing (see tests/currency_invariants.rs)
+- **Quarantined tests**: `cargo tq` runs the tests marked `#[ignore = "pre-pivot Cell model: ..."]`. They fail because `Cell` holds `CurrencyPools` as a field, not as a component. Remove the `#[ignore]` when the Cell model is fixed.
+- **TUI tests**: `cargo test --features tui` (the `tui_*` tests need the `tui` feature)
+- **Property-based tests**: Uses `proptest` for invariant testing. Shared strategies are in `tests/common/mod.rs`. Do not set `timeout` in `ProptestConfig`: it forks one process per case and makes tests very slow.
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
-- `full` (default): Complete build with graphics, audio, and UI
-- `headless`: Minimal build for testing/CI (no graphics, audio, UI)
+- `full` (default): Complete build with graphics, audio, physics, and egui inspector
+- `headless`: Simulation only (no graphics, audio, UI, physics). Always use with `--no-default-features`.
+- `tui`: Opt-in terminal monitor for cell state. Not in `full`, because it takes over the terminal. It turns itself off when stdout is not a terminal.
 - `dev`: Development features with dynamic linking and dev tools
 - `dev_native`: Development features plus file watching for hot reload
+
+Graphical modules (`camera`, `scenes`, `dev_tools`, `debug`, `inspector`, and the physics player in `player`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
 
 ### Development Tools (In-Game)
 - **Inspector**: F12 to open runtime debugging and inspection tools

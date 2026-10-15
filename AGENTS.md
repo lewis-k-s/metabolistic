@@ -31,7 +31,8 @@ This file provides essential context for cloud-based LLM agents working on the M
 
 ### Feature Flags
 - `full`: Graphics, audio, UI dependencies (default for development)
-- `headless`: Minimal features, no graphics/audio (for testing/simulation)
+- `headless`: Simulation only, no graphics/audio/physics. Use with `--no-default-features`.
+- `tui`: Opt-in terminal monitor for cell state (not part of `full`)
 - `dev_native`: Development with file watchers and hot reloading
 
 ### Directory Structure
@@ -150,8 +151,9 @@ Core metabolic currencies that flow between blocks:
 - **Native release**: `cargo run --profile release-native`
 - **Single test**: `cargo test test_name`
 - **All tests**: `cargo test`
-- **Headless tests**: `cargo test --features headless`
-- **Lint**: `cargo clippy`
+- **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`)
+- **Quarantined tests**: `cargo tq` (tests ignored until the Cell model is fixed)
+- **Lint**: `cargo lint` (alias for `cargo clippy --all-targets`)
 - **Format**: `cargo fmt`
 
 ## Code Style Guidelines

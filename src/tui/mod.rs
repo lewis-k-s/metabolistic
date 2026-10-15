@@ -51,6 +51,12 @@ impl Plugin for CellTuiPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "tui")]
         {
+            use std::io::IsTerminal;
+            // Without a real terminal (tests, CI, IDE runners) the TUI cannot start.
+            if !stdout().is_terminal() {
+                warn!("stdout is not a terminal; CellTuiPlugin is disabled");
+                return;
+            }
             app.init_resource::<TuiState>()
                 .add_event::<TuiUpdateEvent>()
                 .add_systems(Update, (

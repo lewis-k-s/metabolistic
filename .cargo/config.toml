@@ -1,0 +1,10 @@
+# Short commands for the dev loop. See CLAUDE.md "Development Commands".
+[alias]
+# Simulation tests without graphics. Fastest loop for metabolism and genome work.
+th = "test --no-default-features --features headless"
+# Check the simulation code without graphics.
+ch = "check --no-default-features --features headless --all-targets"
+# Run the quarantined tests (pre-pivot Cell model) to see what still fails.
+tq = "test -- --ignored"
+# Lint everything in the full build.
+lint = "clippy --all-targets"

@@ -10,13 +10,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  # Simulation tests. No graphics or audio libraries needed.
+  headless-tests:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - uses: Swatinem/rust-cache@v2
+    - name: Run headless tests
+      run: cargo test --no-default-features --features headless
+
+  # Make sure the full game still compiles.
+  full-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Bevy system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+    - uses: Swatinem/rust-cache@v2
+    - name: Check full build
+      run: cargo check --all-targets

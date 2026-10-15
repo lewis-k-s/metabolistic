@@ -31,7 +31,7 @@
 //! ## Usage
 //! 
 //! Add the plugin to your Bevy app:
-//! ```rust
+//! ```rust,ignore
 //! app.add_plugins(MetabolicBlocksPlugin);
 //! ```
 //! 

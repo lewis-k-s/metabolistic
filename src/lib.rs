@@ -3,19 +3,27 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 
+// Simulation modules: always compiled, no graphics dependencies.
 pub mod blocks;
-pub mod camera;
-pub mod debug;
-pub mod dev_tools;
-pub mod inspector;
-
 pub mod cell;
 pub mod metabolism;
 pub mod molecules;
 pub mod player;
-pub mod scenes;
 pub mod shared;
+#[cfg(feature = "tui")]
 pub mod tui;
+
+// Graphical modules: only in `full` builds.
+#[cfg(feature = "full")]
+pub mod camera;
+#[cfg(feature = "full")]
+pub mod debug;
+#[cfg(feature = "full")]
+pub mod dev_tools;
+#[cfg(feature = "full")]
+pub mod inspector;
+#[cfg(feature = "full")]
+pub mod scenes;
 
 /// Game states for scene management
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -47,8 +55,10 @@ impl MetabolisticApp {
             .add_plugins(molecules::CurrencyPlugin)
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::MetabolicBlocksPlugin)
-            .add_plugins(metabolism::MetabolicFlowPlugin)
-            .add_plugins(tui::CellTuiPlugin);
+            .add_plugins(metabolism::MetabolicFlowPlugin);
+
+        #[cfg(feature = "tui")]
+        app.add_plugins(tui::CellTuiPlugin);
 
         #[cfg(feature = "full")]
         {
@@ -80,7 +90,6 @@ impl MetabolisticApp {
         app
             // Use minimal plugins for testing - no windowing, no graphics
             .add_plugins(MinimalPlugins)
-            .add_plugins(AssetPlugin::default())
             .add_plugins(StatesPlugin)
             // State management
             .init_state::<GameState>()
@@ -89,7 +98,6 @@ impl MetabolisticApp {
             .add_plugins(blocks::genome::GenomePlugin)
             .add_plugins(blocks::MetabolicBlocksPlugin)
             .add_plugins(metabolism::MetabolicFlowPlugin)
-            .add_plugins(tui::CellTuiPlugin)
             // Override with deterministic mutations for testing
             .insert_resource(blocks::genome::MutationConfig::deterministic())
             // Only add shared systems that don't require input

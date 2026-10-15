@@ -1,6 +1,9 @@
+#[cfg(feature = "full")]
 use avian3d::prelude::*;
 use bevy::prelude::*;
+#[cfg(feature = "full")]
 use leafwing_input_manager::prelude::*;
+#[cfg(feature = "full")]
 use std::f32::consts::PI;
 
 use crate::blocks::genome::Genome;
@@ -8,6 +11,7 @@ use crate::cell::Cell;
 use crate::metabolism::{CurrencyPools, MetabolicGraph};
 use std::collections::HashMap;
 
+#[cfg(feature = "full")]
 pub mod controller;
 
 /// Core player component with network identifier
@@ -25,8 +29,10 @@ pub struct LocalPlayer;
 #[derive(Component)]
 pub struct ControlledCell(pub Entity);
 
+#[cfg(feature = "full")]
 pub struct PlayerPlugin;
 
+#[cfg(feature = "full")]
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(controller::CharacterControllerPlugin)
@@ -34,6 +40,7 @@ impl Plugin for PlayerPlugin {
     }
 }
 
+#[cfg(feature = "full")]
 pub fn spawn_player(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
