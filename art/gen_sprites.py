@@ -78,6 +78,7 @@ RAMPS = {
     "lytic": ramp("#10141c", "#3a4660", "#7a8aa8", "#b8c8e0", "#f0f8ff"),  # steel
     "fusion": ramp("#3a3224", "#8a7a5a", "#c8b890", "#ecdcb8", "#fffaee"),  # ivory
     "receptor": ramp("#0e3050", "#2670b0", "#4aa4e8", "#92d0ff", "#e4f6ff"),  # sky
+    "immune": ramp("#2a2630", "#6c6676", "#b8b2c0", "#e8e4ee", "#ffffff"),  # pearl: the colour is in the antigen
 }
 
 # Deep-water backdrop, dark to light.
@@ -1679,6 +1680,319 @@ def overlay_receptor(d: int = 0, i: int = 0, mode: str = "idle") -> Canvas:
     return c
 
 
+# -- immune proteins: MHC I and II, T cell receptor, antibody, perforin --------
+#
+# The body of every immune protein is pearl, a neutral grey-white (white blood
+# cell). The colour is in the cargo, the antigen: a piece of something, in the
+# colour of where it comes from (rule 5). self = player mint, viral = virus
+# lilac, prey = prey periwinkle. The same pearl body then shows what the cell
+# presents, what its receptor looks for, or what its antibody tags.
+
+IMMUNE = "immune"
+ANTIGENS = {"self": "player", "viral": "virus", "prey": "prey"}  # antigen -> ramp of its origin
+
+
+def _rbox(u, v, uc, vc, hu, hv, r) -> np.ndarray:
+    """Distance to a rounded box, in the local (u, v) axes of an overlay."""
+    dx, dy = np.abs(u - uc) - (hu - r), np.abs(v - vc) - (hv - r)
+    return np.hypot(np.maximum(dx, 0), np.maximum(dy, 0)) + np.minimum(np.maximum(dx, dy), 0) - r
+
+
+def _part(c: Canvas, sdf, tones, band=None, width=None) -> np.ndarray:
+    """A lit part with a dark edge where it lies on top of what is already drawn."""
+    before = c.filled.copy()
+    mask = c.lit_body(sdf, tones, band=band, width=width)
+    c.paint(c.dilate(mask) & ~mask & before, tones[0])
+    return mask
+
+
+def _chain(c: Canvas, xy, uvs, pep, bright=()) -> None:
+    """A short chain of beads: a peptide (a piece of a protein)."""
+    pts = [xy(*p) for p in uvs]
+    for x, y in pts:
+        c.paint(np.hypot(c.X - x, c.Y - y) < 1.45, pep[1])
+    for j, (x, y) in enumerate(pts):
+        c.paint(np.hypot(c.X - x, c.Y - y) < 0.95, pep[4] if j in bright else pep[3])
+
+
+def _line_uv(u0: float, step: float, n: int, vamp: float = 0.45, vofs: float = 0.0):
+    """n bead positions along u with a small zigzag across."""
+    return [(u0 + step * j, vofs + (vamp if j % 2 else -vamp)) for j in range(n)]
+
+
+MHC1_USE = [  # (bead on the stalk, beads in the groove, ridge flash, glow)
+    (2.5, 0, 0, 0.0), (5.5, 0, 0, 0.0), (8.5, 0, 0, 0.0), (11.2, 0, 0, 0.0),
+    (None, 2, 0, 0.0), (None, 4, 0, 0.0), (None, 6, 1, 0.3), (None, 6, 0, 0.55),
+]
+
+
+def overlay_mhc1(d: int = 0, i: int = 0, mode: str = "idle", antigen: str = "viral") -> Canvas:
+    """MHC class I: a stalk with a flat head, a groove and a small ball (beta-2 microglobulin).
+
+    It shows a piece of what is made inside the cell, so others can check it.
+    The peptide colour says what it is: self (mint) or viral (lilac).
+    idle: the head sways, the groove is empty. use (plays once): a peptide
+    climbs the stalk, slides into the groove, the ridges flash. hold (loops):
+    the peptide is on show, a bright bead runs along it, the head glows.
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    t, pep = RAMPS[IMMUNE], RAMPS[ANTIGENS[antigen]]
+    floor = [t[0], t[0], t[1], t[2], t[3]]  # a darker tone set: the floor of the groove
+    sway = 0.5 * np.sin(ph) if mode == "idle" else 0.0
+    bead, n, flash, glow = MHC1_USE[i] if mode == "use" else (None, 0 if mode == "idle" else 6, 0, 0.0)
+    if mode == "hold":
+        glow = 0.3 + 0.25 * (0.5 + 0.5 * np.sin(ph))
+    _socket(c, *xy(0, 0), t)
+    c.disc(*xy(8.6, 3.6), 2.1, t)  # beta-2 microglobulin
+    _part(c, capsule_sdf(c, *xy(1.5, 0), *xy(10.5, sway), 1.5), t, width=1.5)
+    _part(c, _rbox(u, v, 15.5, sway, 5.2, 5.4, 1.6), floor, width=3.0)
+    for s in (-1, 1):  # the two helices of the groove
+        _part(c, capsule_sdf(c, *xy(12.0, s * 3.5 + sway), *xy(19.0, s * 3.5 + sway), 1.3), t, width=1.3)
+        if flash:
+            c.line(*xy(12.4, s * 3.5 + sway), *xy(18.6, s * 3.5 + sway), t[4], 0.45)
+    if n:
+        bright = (i % 8,) if mode == "hold" else ()
+        _chain(c, xy, _line_uv(12.2, 1.4, 6, vofs=sway)[:n], pep, bright)
+    c.outline(t[0])
+    if bead is not None:  # the peptide climbs the stalk
+        _chain(c, xy, [(bead, 0.0)], pep, (0,))
+    if glow > 0:
+        c.halo(*xy(15.5, sway), 6.0, 11.5, [pep[1], pep[2], pep[3]], glow)
+    return c
+
+
+MHC2_USE = [  # (placeholder lift, antigen slide in px, ridge flash, glow)
+    (1.5, None, 0, 0.0), (3.5, None, 0, 0.0), (None, None, 0, 0.0), (None, 9.0, 0, 0.0),
+    (None, 6.0, 0, 0.0), (None, 3.0, 0, 0.0), (None, 0.0, 1, 0.3), (None, 0.0, 0, 0.55),
+]
+
+
+def overlay_mhc2(d: int = 0, i: int = 0, mode: str = "idle", antigen: str = "prey") -> Canvas:
+    """MHC class II: two stalks, a wide head and an open groove.
+
+    It shows a piece of what the cell ate (see the engulf animation), so
+    prey (periwinkle) is its usual cargo. The long peptide sticks out of both
+    ends of the groove. idle: a grey placeholder sits in the groove. use
+    (plays once): the placeholder is thrown out and the real peptide slides
+    in from the outside. hold (loops): the peptide on show.
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    t, pep = RAMPS[IMMUNE], RAMPS[ANTIGENS[antigen]]
+    floor = [t[0], t[0], t[1], t[2], t[3]]
+    sway = 0.5 * np.sin(ph) if mode == "idle" else 0.0
+    lift, slide, flash, glow = MHC2_USE[i] if mode == "use" else (None, None, 0, 0.0)
+    if mode == "hold":
+        slide, glow = 0.0, 0.3 + 0.25 * (0.5 + 0.5 * np.sin(ph))
+    _socket(c, *xy(0, 0), t)
+    for s in (-1, 1):
+        _part(c, capsule_sdf(c, *xy(1.5, s * 1.9), *xy(10.0, s * 2.4 + sway), 1.05), t, width=1.05)
+    _part(c, _rbox(u, v, 15.8, sway, 6.0, 6.3, 1.7), floor, width=3.0)
+    for s in (-1, 1):
+        _part(c, capsule_sdf(c, *xy(12.0, s * 4.4 + sway), *xy(19.6, s * 4.4 + sway), 1.3), t, width=1.3)
+        if flash:
+            c.line(*xy(12.4, s * 4.4 + sway), *xy(19.2, s * 4.4 + sway), t[4], 0.45)
+    if mode == "idle" or (mode == "use" and slide is None):
+        # The grey placeholder (CLIP). In `use` it lifts away and breaks up.
+        up = 0.0 if lift is None else lift
+        if lift is None and mode == "use":  # frame 2: only bits are left
+            for k in range(4):
+                c.plot(*xy(13.0 + 2.0 * k, 6.5 + 0.8 * (k % 2)), t[3])
+            c.plot(*xy(15.8, 0), FLASH)
+        else:
+            beads = _line_uv(12.6, 1.5, 5, vofs=sway + up)
+            if lift is not None and lift > 2.0:
+                beads = beads[::2]
+            _chain(c, xy, beads, t)
+    else:
+        off = 0.0 if slide is None else slide
+        beads = [(uu + off, vv + sway) for uu, vv in _line_uv(10.0, 1.65, 9)]
+        beads = [b for b in beads if b[0] < 26.5]
+        bright = (i % 8,) if mode == "hold" else ()
+        _chain(c, xy, beads, pep, bright)
+    c.outline(t[0])
+    if glow > 0:
+        c.halo(*xy(15.8, sway), 6.5, 12.0, [pep[1], pep[2], pep[3]], glow)
+    return c
+
+
+TCR_PARTNER = [(27.0, 7.0), (24.0, 4.5), (21.0, 2.0), (18.8, 0.6), (17.8, 0.0), (17.8, 0.0), (17.8, 0.0), (17.8, 0.0)]
+
+
+def overlay_tcr(d: int = 0, i: int = 0, mode: str = "idle", antigen: str = "viral") -> Canvas:
+    """T cell receptor: a stalk with a cup at the tip, and two signal knobs (CD3).
+
+    It looks for one antigen, so the inner rim of the cup has the colour of the
+    antigen it matches. idle: the cup sways and waits. use (plays once): a
+    small MHC head with that antigen drifts in, the cup clamps on it, the knobs
+    light up, and a signal runs down the stalk into the cell. hold (loops):
+    still clamped, the knobs light in turn, a pulse runs down the stalk.
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    t, pep = RAMPS[IMMUNE], RAMPS[ANTIGENS[antigen]]
+    floor = [t[0], t[0], t[1], t[2], t[3]]
+    swing = round(0.10 * np.sin(ph), 9) if mode == "idle" else 0.0  # rounded: sin(2 pi) must be exactly 0
+    ca, sa = np.cos(swing), np.sin(swing)
+
+    def rot(uu, vv):
+        return uu * ca - vv * sa, uu * sa + vv * ca
+
+    _socket(c, *xy(0, 0), t)
+    knobs = {1: i >= 5 if mode == "use" else mode == "hold" and (i // 2) % 2 == 0,
+             -1: i >= 5 if mode == "use" else mode == "hold" and (i // 2) % 2 == 1}
+    for s in (-1, 1):
+        kx, ky = xy(4.6, s * 3.3)
+        c.disc(kx, ky, 1.5, t)
+        if knobs[s]:
+            c.paint(np.hypot(c.X - kx, c.Y - ky) < 1.0, t[4])
+    hc, pc = xy(*rot(13.5, 0)), xy(*rot(16.6, 0))
+    _part(c, capsule_sdf(c, *xy(1.5, 0), *hc, 1.5), t, width=1.5)
+    if mode != "idle":  # the partner: a small MHC head with the antigen
+        pu, pv = TCR_PARTNER[i] if mode == "use" else TCR_PARTNER[-1]
+        _part(c, _rbox(u, v, pu, pv, 2.3, 2.6, 1.2), floor, width=2.3)
+        _chain(c, xy, [(pu - 0.8, pv), (pu + 0.8, pv)], pep)
+    d_hc = np.hypot(c.X - hc[0], c.Y - hc[1])
+    d_pc = np.hypot(c.X - pc[0], c.Y - pc[1])
+    cup = _part(c, np.maximum(d_hc - 4.3, -(d_pc - 3.0)), t, width=3.0)
+    c.paint(cup & (d_pc >= 3.0) & (d_pc < 4.1) & ((c.X - hc[0]) * (pc[0] - hc[0]) + (c.Y - hc[1]) * (pc[1] - hc[1]) > -0.5), pep[3])
+    c.plot(*xy(*rot(14.2, 0)), pep[4])
+    c.outline(t[0])
+    if mode == "use" and i == 4:  # the clamp: a flash at the contact
+        px_, py_ = xy(17.8, 0)
+        for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            c.plot(px_ + ox * 3.8, py_ + oy * 3.8, FLASH)
+    if mode == "use" and 4 <= i <= 6 or mode == "hold":
+        c.halo(*xy(17.8, 0), 3.0, 7.0, [pep[1], pep[2], pep[3]], 0.6 if mode == "use" else 0.35)
+    if mode == "use" and i >= 5:
+        su = {5: 7.5, 6: 4.5, 7: 1.5}[i]  # the signal runs down the stalk
+        for step, tone in enumerate((t[4], t[3], t[2])):
+            sx, sy = xy(su + 2.2 * step, 0)
+            c.paint(np.hypot(c.X - sx, c.Y - sy) < (1.5 - 0.3 * step), tone)
+    if mode == "hold":
+        sx, sy = xy(8.4 - 1.0 * (i % 8), 0)
+        c.paint(np.hypot(c.X - sx, c.Y - sy) < 1.2, t[4])
+    return c
+
+
+AB_THETA = [0.72, 0.90, 1.00, 0.85, 0.50, 0.38, 0.38, 0.38]  # antibody use: angle of the arms
+AB_BLOB = [28.0, 25.0, 22.0, 19.6, 18.6, 18.6, 18.6, 18.6]  # antibody use: where the antigen is
+
+
+def overlay_antibody(d: int = 0, i: int = 0, mode: str = "idle", antigen: str = "viral") -> Canvas:
+    """Antibody: a Y with a stem in the membrane and two arms.
+
+    The tip of each arm has the colour of the antigen it fits. idle: the arms
+    flex. use (plays once): the arms open, a piece of the antigen drifts in
+    between them, the arms close on it and it is tagged. hold (loops): the
+    tagged antigen stays in the grip, pulsing.
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    t, pep = RAMPS[IMMUNE], RAMPS[ANTIGENS[antigen]]
+    blob_r, blob_u, glow = 2.5, None, 0.0
+    if mode == "use":
+        thetas = [AB_THETA[i]] * 2
+        blob_u = AB_BLOB[i]
+        glow = {6: 0.45, 7: 0.6}.get(i, 0.0)
+    elif mode == "hold":
+        thetas = [0.38, 0.38]
+        blob_u, blob_r = 18.6, 2.5 + 0.25 * np.sin(ph)
+        glow = 0.3 + 0.25 * (0.5 + 0.5 * np.sin(ph))
+    else:
+        thetas = [0.62 + 0.10 * np.sin(ph), 0.62 + 0.10 * np.sin(ph + 1.2)]
+    _socket(c, *xy(0, 0), t)
+    if blob_u is not None:  # the antigen: a ball with spikes
+        bx, by = xy(blob_u, 0)
+        for k in range(6):
+            ang = a + k * np.pi / 3 + 0.26
+            c.line(bx, by, bx + (blob_r + 1.5) * np.cos(ang), by + (blob_r + 1.5) * np.sin(ang), pep[2], 0.55)
+        c.lit_body(np.hypot(c.X - bx, c.Y - by) - blob_r, pep, width=blob_r)
+        c.paint(c.dilate(np.hypot(c.X - bx, c.Y - by) < blob_r) & (np.hypot(c.X - bx, c.Y - by) >= blob_r), pep[0])
+        c.plot(bx - blob_r * 0.35, by - blob_r * 0.4, pep[4])
+    _part(c, capsule_sdf(c, *xy(1.5, 0), *xy(9.5, 0), 1.35), t, width=1.35)
+    _part(c, capsule_sdf(c, *xy(4.5, 0), *xy(8.0, 0), 1.9), t, width=1.9)
+    tips = []
+    for s, th in zip((-1, 1), thetas):
+        end = xy(9.5 + 8.5 * np.cos(th), s * 8.5 * np.sin(th))
+        _part(c, capsule_sdf(c, *xy(9.5, 0), *end, 1.2), t, width=1.2)
+        tips.append(end)
+    c.disc(*xy(9.5, 0), 1.8, t)
+    for ex, ey in tips:  # the antigen-binding tips
+        c.paint(np.hypot(c.X - ex, c.Y - ey) < 1.4, pep[3])
+        c.plot(ex, ey, pep[4])
+    c.outline(t[0])
+    if glow > 0 and blob_u is not None:
+        c.halo(*xy(blob_u, 0), blob_r + 0.5, blob_r + 5.5, [pep[1], pep[2], pep[3]], glow)
+    return c
+
+
+PERFORIN_ARRIVE = {2: 2, 6: 2, 1: 4, 7: 4, 0: 6}  # ring part -> frame in which it clicks into the ring
+PERFORIN_RING = (14.5, 5.0)  # centre u, radius
+
+
+def overlay_perforin(d: int = 0, i: int = 0, mode: str = "idle") -> Canvas:
+    """Perforin: a short stalk and a ring made of eight parts.
+
+    It punches a hole in a membrane. idle: three parts of the ring (a C) rock
+    gently, and small dots mark the places of the others. use (plays once): the
+    other five parts fly in, two, then two, then one, and click into the ring.
+    The ring closes with a flash, and a dark pore with a red rim opens in the
+    middle. hold (loops): the closed ring, a bright part runs round it, and a
+    red glow breathes.
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    t, red = RAMPS[IMMUNE], RAMPS["predator"]
+    cu, R = PERFORIN_RING
+    _socket(c, *xy(0, 0), t)
+    _part(c, capsule_sdf(c, *xy(1.5, 0), *xy(cu - R, 0), 1.4), t, width=1.4)
+    closed = mode == "hold" or (mode == "use" and i >= 6)
+    for k in range(8):
+        th = k * np.pi / 4
+        r = R
+        if mode == "idle":
+            if k not in (3, 4, 5):
+                c.plot(*xy(cu + R * np.cos(th), R * np.sin(th)), t[1])
+                continue
+            r = R + 0.35 * np.sin(ph + 0.8 * k)
+        elif mode == "use" and k in PERFORIN_ARRIVE:
+            p = (i - (PERFORIN_ARRIVE[k] - 2)) / 2.0
+            if p < 0:
+                continue
+            p = min(p, 1.0)
+            r = R + 7.0 * (1 - p) ** 2  # fast at first, then it settles
+        c.disc(*xy(cu + r * np.cos(th), r * np.sin(th)), 2.0, t)
+    if closed:
+        cx_, cy_ = xy(cu, 0)
+        dist = np.hypot(c.X - cx_, c.Y - cy_)
+        c.paint(dist < 2.6, red[0])
+        c.paint((dist >= 1.5) & (dist < 2.6), red[2] if (mode == "use" or i % 2 == 0) else red[1])
+        if mode == "hold":
+            bx, by = xy(cu + R * np.cos(i * np.pi / 4), R * np.sin(i * np.pi / 4))
+            c.paint(np.hypot(c.X - bx, c.Y - by) < 1.1, t[4])
+    c.outline(t[0])
+    if mode == "use" and i == 6:  # the ring closes: a flash
+        fx, fy = xy(cu, 0)
+        for ox, oy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+            c.plot(fx + ox * 6.3, fy + oy * 6.3, FLASH)
+    if closed:
+        glow = 0.55 if mode == "use" else 0.25 + 0.2 * (0.5 + 0.5 * np.sin(ph))
+        c.halo(*xy(cu, 0), R + 2.0, R + 7.5, [red[1], red[2], red[3]], glow)
+    return c
+
+
+IMMUNE_KINDS = {"idle": dict(fps=6, loop=True), "use": dict(fps=12, loop=False), "hold": dict(fps=8, loop=True)}
+IMMUNE_NOTES = {
+    "mhc1": "use = a peptide from inside loads into the groove (plays once). hold = on show, until it is withdrawn.",
+    "mhc2": "use = the placeholder is thrown out and a peptide from an eaten cell slides in (plays once). hold = on show.",
+    "tcr": "The cup rim shows the antigen it matches. use = clamps on an MHC with that antigen (plays once). hold = signalling.",
+    "antibody": "The arm tips show the antigen it fits. use = catches and tags the antigen (plays once). hold = tagged, in the grip.",
+    "perforin": "use = the ring closes and a pore opens (plays once). hold = the closed ring, active.",
+}
+
+
 # name -> what to draw and how it plays
 OVERLAYS = {
     "overlay_flagellum": dict(
@@ -1713,6 +2027,17 @@ OVERLAYS = {
         make=overlay_receptor, layer="above", sheet=2,
         kinds={"idle": dict(fps=6, loop=True), "use": dict(fps=12, loop=False)},
         note="use = a molecule binds and the signal runs into the cell (plays once)."),
+    **{
+        f"overlay_{kind}_{ag}": dict(
+            make=(lambda d, i, mode, fn=fn, ag=ag: fn(d, i, mode, ag)), layer="above", sheet=3,
+            preview=(ag == "viral"),
+            kinds=IMMUNE_KINDS, note=f"{IMMUNE_NOTES[kind]} Antigen: {ag}.")
+        for kind, fn in (("mhc1", overlay_mhc1), ("mhc2", overlay_mhc2), ("tcr", overlay_tcr),
+                         ("antibody", overlay_antibody))
+        for ag in ANTIGENS
+    },
+    "overlay_perforin": dict(
+        make=overlay_perforin, layer="above", sheet=3, kinds=IMMUNE_KINDS, note=IMMUNE_NOTES["perforin"]),
 }
 
 
@@ -1776,19 +2101,32 @@ OVERLAY_DEMOS = {
             dict(overlay_transporter_mineral="use", overlay_lytic="use", overlay_fusion="use", overlay_receptor="use"),
             dict(overlay_transporter_mineral="use", overlay_lytic="idle", overlay_fusion="hold", overlay_receptor="idle"),
         ]),
+    # The immune proteins. Phases are all idle, all use, all hold (see write_overlay_previews).
+    "overlay_demo_3": dict(
+        mounts={"overlay_mhc1_viral": 0, "overlay_mhc2_prey": 2, "overlay_mhc1_self": 4, "overlay_antibody_viral": 6}),
+    "overlay_demo_4": dict(
+        mounts={"overlay_tcr_viral": 0, "overlay_perforin": 2, "overlay_antibody_prey": 4, "overlay_tcr_prey": 6}),
 }
 
 
 def write_overlay_previews(frames: dict, cell_frames: list[Canvas]) -> None:
     prev = PREVIEW_DIR / "anim"
     # Sheets: one row for each overlay and kind, pointing east. Group 2 has its own files.
-    for sheet, suffix in ((1, ""), (2, "_2")):
-        names = [n for n in frames if OVERLAYS[n].get("sheet", 1) == sheet]
+    for sheet, suffix in ((1, ""), (2, "_2"), (3, "_3")):
+        names = [n for n in frames if OVERLAYS[n].get("sheet", 1) == sheet and OVERLAYS[n].get("preview", True)]
         rows = [np.concatenate([f.px for f in grid[0]], axis=1) for n in names for grid in frames[n].values()]
         write_png(prev / f"overlays{suffix}.png", on_water(np.concatenate(rows, axis=0), 3))
         # Eight directions of one use frame, to check the rotation.
         rows = [np.concatenate([frames[n]["use"][d][3].px for d in range(8)], axis=1) for n in names]
         write_png(prev / f"overlay_directions{suffix}.png", on_water(np.concatenate(rows, axis=0), 3))
+
+    # The immune proteins with each antigen: rows are the proteins, columns the
+    # antigens. Frame 5 of `hold` pointing east, and frame 5 of `use`.
+    rows = []
+    for kind in ("mhc1", "mhc2", "tcr", "antibody"):
+        rows.append(np.concatenate(
+            [frames[f"overlay_{kind}_{ag}"][k][0][5].px for k in ("use", "hold") for ag in ANTIGENS], axis=1))
+    write_png(prev / "overlay_antigens_3.png", on_water(np.concatenate(rows, axis=0), 3))
 
     # The overlays on the player.
     size, scale = 160, 3
@@ -1822,7 +2160,8 @@ def write_overlay_previews(frames: dict, cell_frames: list[Canvas]) -> None:
         return px
 
     for file, demo in OVERLAY_DEMOS.items():
-        mounts, phases = demo["mounts"], demo["phases"]
+        mounts = demo["mounts"]
+        phases = demo.get("phases") or [{n: k for n in mounts} for k in ("idle", "use", "hold")]
         write_png(prev / f"{file}.png", on_water(np.concatenate(
             [board(3, mounts, phases[0]), board(3, mounts, phases[1]), board(5, mounts, phases[2])], axis=1), 3, 1))
         if shutil.which("magick") is None:

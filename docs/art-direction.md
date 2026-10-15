@@ -215,6 +215,47 @@ east), `overlay_directions.png` (all 8 directions), `overlay_demo.png` and
 The second set has the same files with a `_2` suffix: `overlays_2.png`,
 `overlay_directions_2.png`, `overlay_demo_2.png` and `overlay_demo_2.gif`.
 
+### Immune proteins
+
+The third set. Same rules as the first two (56x56 frame, anchor at the centre,
+8 directions, drawn above the cell). Every sheet has `idle`, `use` and `hold`.
+
+The body of every immune protein is **pearl**, a neutral grey-white. The colour
+is in the **antigen**, the piece of something that the protein shows, looks
+for or tags. An antigen has the colour of where it comes from (rule 5): `self`
+is player mint, `viral` is virus lilac, `prey` is prey periwinkle. For a new
+origin, add a line to `ANTIGENS`.
+
+| Overlay | Looks like | Idle | Use (plays once) | Hold (loops) |
+|---|---|---|---|---|
+| `overlay_mhc1_self`, `_viral`, `_prey` | MHC class I: a stalk, a small ball (beta-2 microglobulin), a flat head with two ridges and a groove | the head sways, the groove is empty | a peptide climbs the stalk, slides into the groove, the ridges flash | the peptide is on show. A bright bead runs along it, the head glows in the antigen colour |
+| `overlay_mhc2_self`, `_viral`, `_prey` | MHC class II: two stalks, a wider head, an open groove. The long peptide sticks out of both ends | a grey placeholder sits in the groove | the placeholder is thrown out and breaks up. The real peptide slides in from the outside | the peptide is on show, same glow |
+| `overlay_tcr_self`, `_viral`, `_prey` | T cell receptor: a stalk with a cup at the tip, two signal knobs at the base. The inner rim of the cup has the colour of the antigen it matches | the cup sways and waits | a small MHC head with that antigen drifts in, the cup clamps on it with a flash, the knobs light up, a signal runs down the stalk into the cell | still clamped, the knobs light in turn, a pulse runs down the stalk |
+| `overlay_antibody_self`, `_viral`, `_prey` | antibody: a Y with a stem in the membrane. The arm tips have the antigen colour | the arms flex | the arms open, an antigen ball drifts in, the arms close on it, it glows (tagged) | the tagged antigen stays in the grip and pulses |
+| `overlay_perforin` | a stalk and a ring of eight parts | three parts of the ring (a C) rock, dots mark the other places | the other five parts fly in and click into the ring. A flash, then a dark pore with a red rim opens | the closed ring. A bright part runs round it, a red glow breathes |
+
+- **What each one means in play** (for the design, the art does not decide
+  it): MHC I shows what the cell makes inside, so a cell with a viral peptide
+  gives itself away. MHC II shows what the cell ate, which fits the engulf and
+  digest steps. The TCR reads a shown antigen on another cell. The antibody
+  tags a free antigen. Perforin punches a pore in a membrane.
+- **Red is only on perforin.** The red pore rim and glow say "this kills", as
+  the predator colour does. It is the only place an immune protein uses it.
+- **Idle has no antigen.** MHC shows an empty groove, the TCR and antibody
+  show only their matching colour. `use` and `hold` are the states with
+  cargo. The sheets for the three antigens of one protein have the same idle
+  frames, so the game can swap by name.
+- Colour on the cell: pearl reads on all the cell colours, and the antigen
+  colour is small, so check lilac on the virus cell and periwinkle on the prey
+  cell in game (not done yet, see below).
+
+Previews in `docs/art/anim/`: `overlays_3.png` (one antigen, every kind),
+`overlay_antigens_3.png` (the three antigens, `use` frame 5 then `hold`
+frame 5, one row for each protein), `overlay_directions_3.png`,
+`overlay_demo_3.png` and `.gif` (a cell that shows MHC and an antibody), and
+`overlay_demo_4.png` and `.gif` (a cell with two TCRs, an antibody and
+perforin).
+
 ## Engulf, digest and gene gain
 
 A cell eats a smaller cell in three steps. Each step has its own sheet, and all
@@ -268,12 +309,14 @@ both pairs in two directions), `engulf_<pair>.png` and `engulf_<pair>_digest.png
 - Animation for the pickups (a twinkle) and for the vent (a pulse).
 - A speed-dependent stretch for move (now there is one amount).
 - Contact and hit frames for the virus.
-- Membrane protein overlays for the player: flagellum, adhesin, toxin.
 - Wall pieces that turn corners, and a vertical wall.
 - Wall pores for carbon and metal (now the wall pore is mineral-blue only, and
   does not show the substrate). Specific receptors (light, chemical) and an
   alternative look for a protein that is broken or switched off.
 - Check the overlays on NPC cells. They use the same sprites.
+- More immune parts: a free antibody (the projectile), cytokine and interferon
+  alarm effects, the complement ring on a target cell, the killed-cell look
+  after perforin.
 - Shelter sprites (vent crevice, microbial mat, soil pore).
 - Grid channel visuals: heat glow, mineral plume, light and UV rays.
 - UI frame, icons for the 4 action slots, HUD bars.
