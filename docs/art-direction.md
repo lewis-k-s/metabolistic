@@ -327,11 +327,10 @@ left, a 1 px outline, no anti-aliasing, dithered glow. All files are in
 
 ### Pool icons (`mol_<pool>`, 10x10)
 
-`Currency` has ten variants, so there are ten icons. (The design table says 13
-by mistake: three reuse a shape, seven are new.) The file name is the variant
+`Currency` has 13 variants, so there are 13 icons. The file name is the variant
 in snake_case: `mol_atp`, `mol_reducing_power`, `mol_pyruvate`,
 `mol_carbon_skeletons`, `mol_amino_acids`, `mol_nucleotides`, `mol_lipids`,
-`mol_metals`, `mol_waste`, `mol_minerals`.
+`mol_metals`, `mol_waste`, `mol_minerals`, `mol_pigments`, `mol_o2`, `mol_ros`.
 
 | Pool | Ramp | Shape |
 |---|---|---|
@@ -345,6 +344,9 @@ in snake_case: `mol_atp`, `mol_reducing_power`, `mol_pyruvate`,
 | Metals | `metal` (rule 5) | the cube of `pickup_metal_fes` |
 | Waste | `waste`, murky olive-grey | a lumpy blob with dark flecks |
 | Minerals | `mineral` (rule 5) | the shard of `pickup_mineral` |
+| Pigments | `pigment` (the carotenoid orange) | a drop |
+| O2 | `o2`, sea green (the colour of O2 on the grid) | a dumbbell of two atoms |
+| ROS | `ros`, hot magenta | a spiky star. It is a hazard, and it does not use the red of perforin or the predator |
 
 The new hues are kept away from the cell role colours (rule 4). Lime, electric
 blue and sage are the nearest to the toxin green, the protein blue and the
@@ -359,7 +361,7 @@ used: it stays for the gene reward (rule 5).
 | `ribosome` (`anim/ribosome_loop.png`) | 24x24, 8 frames, 8 fps | a large and a small subunit (orchid, the small one a step lighter). The small one ratchets, the mRNA thread slides left, and sage beads of chain grow out of the large subunit |
 | `pathway_plate` | 24x24 | nine-slice, **border 8 px**. The middle of every edge is the same along its length, so it stretches without a seam |
 | `pathway_plate_ghost` | 24x24 | the same slices, dithered (ordered 4x4, folded so that the stretch stays clean). For a pathway the cell does not have yet |
-| `pathway_icon_<block>` | 16x16 | one for each `BlockKind` with a `block_spec`: `chemosynthesis`, `amino_acid_biosynthesis`, `lipid_metabolism`, `protein_synthesis`, `fermentation`, `vesicle_export`, `fat_storage` |
+| `pathway_icon_<block>` | 16x16 | one for each of the 13 `BlockKind`s with a `block_spec`: `chemosynthesis`, `light_capture`, `respiration`, `catalase`, `cuticle`, `amino_acid_biosynthesis`, `lipid_metabolism`, `protein_synthesis`, `fermentation`, `vesicle_export`, `fat_storage`, `nucleotide_cofactor_synthesis`, `secondary_metabolites` |
 | `slot_socket` | 24x26 | an empty socket: a bilayer cut with a protein-blue collar round a dark pit. Tiles like `wall_membrane` (the bilayer is 24 px wide here) |
 | `badge_limit` | 12x12 | a bar over a down arrow in a steel disc: the pathway is at its cap |
 | `valve_off`, `valve_low`, `valve_high` | 12x12 | a pipe with a gate: shut, nearly shut, lifted out (with a mint flow mark) |
