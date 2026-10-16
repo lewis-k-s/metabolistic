@@ -11,8 +11,7 @@ use metabolistic3d::metabolism::{BlockStatus, MetabolicNode};
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// Blocks of a cell that runs on fermentation.
 const FERMENTER: [BlockKind; 3] = [

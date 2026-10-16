@@ -7,8 +7,7 @@ use metabolistic3d::MetabolisticApp;
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 proptest! {
     #![proptest_config(ProptestConfig {

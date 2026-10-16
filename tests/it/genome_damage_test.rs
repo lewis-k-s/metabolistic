@@ -18,8 +18,7 @@ use metabolistic3d::molecules::Currency;
 use metabolistic3d::proteins::{ProteinTarget, Proteome, SynthesisQueue};
 use metabolistic3d::shared::spawn_starter_cell;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// Genes of the mutation tests. None of them needs an outside supply.
 const GENES: [BlockKind; 5] = [

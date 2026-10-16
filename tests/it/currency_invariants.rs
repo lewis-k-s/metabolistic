@@ -12,8 +12,7 @@ use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::*;
 use proptest::prelude::*;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// Removes the maintenance cost, so that only the blocks change the pools.
 fn no_maintenance(app: &mut bevy::prelude::App, cell: bevy::prelude::Entity) {

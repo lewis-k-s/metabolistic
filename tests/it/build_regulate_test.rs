@@ -23,8 +23,7 @@ use metabolistic3d::proteins::{
 use metabolistic3d::shelter::{Shelter, Shelters};
 use metabolistic3d::{GameState, MetabolisticApp};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 fn throttle_of(app: &App, cell: Entity, kind: BlockKind) -> f32 {
     let block = app

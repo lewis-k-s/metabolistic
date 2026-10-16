@@ -401,7 +401,7 @@ Notes:
   (pores at y 384 and 544); a short line south of the core (y -256). 15 creatures,
   5 viruses, food and metal zones. Vertical wall pieces are the horizontal sprite
   turned 90 degrees (art owner: draw vertical pieces).
-- **CPU** (headless, `tests/npc_benchmark.rs`, ignored): per metabolic tick
+- **CPU** (headless, `tests/it/npc_benchmark.rs`, ignored): per metabolic tick
   (averaged over the 4-tick cycle, includes the grid step): 20 NPCs 0.25 ms, 50
   NPCs 0.30-0.41 ms, 100 NPCs 0.43-0.54 ms. One frame of behaviour: 0.14, 0.15,
   0.15-0.23 ms. Cost per game frame (5 ticks per second): 0.16 / 0.17-0.19 /

@@ -12,8 +12,7 @@ use metabolistic3d::molecules::*;
 use metabolistic3d::player::spawn_local_player_cell;
 use proptest::prelude::*;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 // --- Floating-Point Precision Constants ---
 

@@ -59,9 +59,10 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
-- **Simulation tests**: use `MetabolisticApp::new_headless()` (manual ticks, no random mutations). Advance with `app.update()` (genome -> block sync) and `metabolism::run_metabolic_tick(app.world_mut())`. `tests/common/mod.rs` has `sim_step` and `express_blocks`.
+- **Integration test layout**: all integration tests are modules of one binary, `tests/it/main.rs` (one link step instead of one per file). Add a new test file to `tests/it/` and a `mod` line to `main.rs`. Only the `tui_*` tests stay separate binaries. Run one file with `cargo test --test it <module>::`. Proptest seeds are in `tests/proptest-regressions/`.
+- **Simulation tests**: use `MetabolisticApp::new_headless()` (manual ticks, no random mutations). Advance with `app.update()` (genome -> block sync) and `metabolism::run_metabolic_tick(app.world_mut())`. `tests/it/common/mod.rs` has `sim_step` and `express_blocks`.
 - **TUI tests**: `cargo test --features tui` (the `tui_*` tests need the `tui` feature)
-- **Property-based tests**: Uses `proptest` for invariant testing. Shared strategies are in `tests/common/mod.rs`. Do not set `timeout` in `ProptestConfig`: it forks one process per case and makes tests very slow.
+- **Property-based tests**: Uses `proptest` for invariant testing. Shared strategies are in `tests/it/common/mod.rs`. Do not set `timeout` in `ProptestConfig`: it forks one process per case and makes tests very slow.
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
@@ -159,9 +160,9 @@ The game implements a sparse metabolic network with:
 
 The codebase includes comprehensive testing with multiple categories:
 - **Unit tests**: Individual components and systems (embedded in module files)
-- **Integration tests**: Cross-plugin interactions (tests/integration_test.rs)
-- **Property-based tests**: Invariant testing using proptest (tests/*_invariants.rs)
-- **Metabolic tests**: Currency flows, genome manipulation, fermentation (tests/metabolic_*.rs)
+- **Integration tests**: Cross-plugin interactions (tests/it/integration_test.rs)
+- **Property-based tests**: Invariant testing using proptest (tests/it/*_invariants.rs)
+- **Metabolic tests**: Currency flows, genome manipulation, fermentation (tests/it/metabolic_*.rs)
 - **Precision tests**: Numerical accuracy and temporal consistency
 - **Headless testing**: All tests run without graphics dependencies using MetabolisticApp::new_headless()
 

@@ -19,8 +19,7 @@ use metabolistic3d::proteins::{
 };
 use metabolistic3d::shared::{STARTER_VENT_LEVEL, starter_proteome};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// A vent cell with the starter genome and proteome and small pools. The app
 /// has no grid, so the constant supply in `env` is the only food.

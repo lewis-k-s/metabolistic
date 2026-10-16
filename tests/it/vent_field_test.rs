@@ -23,8 +23,7 @@ use metabolistic3d::run::RunSummary;
 use metabolistic3d::shared::{spawn_starter_cell, starter_proteome};
 use metabolistic3d::{GameState, InRun, MetabolisticApp};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// Ticks per simulated second (default timing).
 const TICKS_PER_SEC: usize = 5;

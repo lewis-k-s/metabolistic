@@ -29,8 +29,7 @@ use metabolistic3d::shared::spawn_starter_cell;
 use metabolistic3d::walls::{LYSE_ATP, WallKind, WallMap};
 use metabolistic3d::{GameState, MetabolisticApp};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 /// A headless app whose frames last 0.1 s.
 fn app() -> App {

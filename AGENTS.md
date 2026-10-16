@@ -96,7 +96,7 @@ Core metabolic currencies that flow between blocks:
 
 ### Testing Strategy
 - Unit tests for pure functions and calculations
-- Integration tests in `tests/` directory
+- Integration tests in `tests/it/` (one binary, `tests/it/main.rs`)
 - Use headless feature for automated testing
 - Test metabolic pathway calculations separately from rendering
 
