@@ -317,6 +317,57 @@ cell moves. It is a placeholder until the proteome says which overlays to draw.
 `anchor_px` is rounded down to a whole pixel, so a sprite never sits on a half
 pixel (the cell frames are centred on 32.5).
 
+## Metabolism view
+
+The Manage screen shows a cross-section of the cell (see `metabolism-view.md`).
+Its art follows the same rules as above: 5-tone ramps, light from the upper
+left, a 1 px outline, no anti-aliasing, dithered glow. All files are in
+`assets/sprites/`; the animated sheets are also in `assets/sprites/anim/` and
+`manifest.json`.
+
+### Pool icons (`mol_<pool>`, 10x10)
+
+`Currency` has ten variants, so there are ten icons. (The design table says 13
+by mistake: three reuse a shape, seven are new.) The file name is the variant
+in snake_case: `mol_atp`, `mol_reducing_power`, `mol_pyruvate`,
+`mol_carbon_skeletons`, `mol_amino_acids`, `mol_nucleotides`, `mol_lipids`,
+`mol_metals`, `mol_waste`, `mol_minerals`.
+
+| Pool | Ramp | Shape |
+|---|---|---|
+| ATP | `atp`, lime | a coin with a ring |
+| ReducingPower | `reducing`, electric blue | a bolt |
+| Pyruvate | `pyruvate`, muted aqua | a small tilted pill |
+| CarbonSkeletons | `carbon` (rule 5) | the flake of `food_carbon` |
+| AminoAcids | `amino`, sage | a block with a side group |
+| Nucleotides | `nucleotide`, orchid | a hexagonal base ring with a hole |
+| Lipids | `head` and `tail` (the bilayer colours) | a head with two tails |
+| Metals | `metal` (rule 5) | the cube of `pickup_metal_fes` |
+| Waste | `waste`, murky olive-grey | a lumpy blob with dark flecks |
+| Minerals | `mineral` (rule 5) | the shard of `pickup_mineral` |
+
+The new hues are kept away from the cell role colours (rule 4). Lime, electric
+blue and sage are the nearest to the toxin green, the protein blue and the
+symbiont gold, so the silhouette also carries the meaning. Gold-white is not
+used: it stays for the gene reward (rule 5).
+
+### Proteins, plates and icons
+
+| File | Size | Notes |
+|---|---|---|
+| `enzyme` (`anim/enzyme_idle.png`) | 16x16, 8 frames, 8 fps | protein blue, a notch for the active site. Bobs by 1 px. Tint with the pathway accent at run time |
+| `ribosome` (`anim/ribosome_loop.png`) | 24x24, 8 frames, 8 fps | a large and a small subunit (orchid, the small one a step lighter). The small one ratchets, the mRNA thread slides left, and sage beads of chain grow out of the large subunit |
+| `pathway_plate` | 24x24 | nine-slice, **border 8 px**. The middle of every edge is the same along its length, so it stretches without a seam |
+| `pathway_plate_ghost` | 24x24 | the same slices, dithered (ordered 4x4, folded so that the stretch stays clean). For a pathway the cell does not have yet |
+| `pathway_icon_<block>` | 16x16 | one for each `BlockKind` with a `block_spec`: `chemosynthesis`, `amino_acid_biosynthesis`, `lipid_metabolism`, `protein_synthesis`, `fermentation`, `vesicle_export`, `fat_storage` |
+| `slot_socket` | 24x26 | an empty socket: a bilayer cut with a protein-blue collar round a dark pit. Tiles like `wall_membrane` (the bilayer is 24 px wide here) |
+| `badge_limit` | 12x12 | a bar over a down arrow in a steel disc: the pathway is at its cap |
+| `valve_off`, `valve_low`, `valve_high` | 12x12 | a pipe with a gate: shut, nearly shut, lifted out (with a mint flow mark) |
+
+The plate, the badge and the valves are steel (`lytic`) on dark rock, so the
+screen can tint them. Previews of the new sprites are in
+`docs/art/contact_sheet.png`.
+
 ## Not done yet
 
 - In the game: death, contact and hit clips, the other overlays, NPC cells, the
