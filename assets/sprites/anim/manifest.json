@@ -723,6 +723,122 @@
       "direction_meaning": "direction the protein points, away from the cell"
     }
   },
+  "overlay_pilus": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Point it along the aim. use = the fibre shoots out (plays once). hold = taut, retracting (loops until released). Draw the line to the target with pilus_line.png.",
+    "idle": {
+      "file": "overlay_pilus_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_pilus_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "hold": {
+      "file": "overlay_pilus_hold.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 10,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
+  "overlay_injector": {
+    "frame_size": [
+      56,
+      56
+    ],
+    "anchor_px": [
+      28,
+      28
+    ],
+    "layer": "above",
+    "mount": "Put anchor_px on the membrane, 0.95 x the cell radius from the cell centre, in the direction of the row.",
+    "note": "Point it along the aim. use = the sheath contracts and the spear fires (plays once).",
+    "idle": {
+      "file": "overlay_injector_idle.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 6,
+      "loop": true,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    },
+    "use": {
+      "file": "overlay_injector_use.png",
+      "columns": 8,
+      "rows": 8,
+      "fps": 14,
+      "loop": false,
+      "directions": [
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "N",
+        "NE"
+      ],
+      "direction_meaning": "direction the protein points, away from the cell"
+    }
+  },
   "overlay_lytic": {
     "frame_size": [
       56,

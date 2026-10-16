@@ -10,6 +10,7 @@ mod fermentation_test;
 mod flux_profile_test;
 mod genome_damage_test;
 mod genome_test;
+mod grapple_test;
 mod integration_test;
 mod land_test;
 mod living_world_test;

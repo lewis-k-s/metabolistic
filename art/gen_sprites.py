@@ -1927,6 +1927,104 @@ def toxin_droplet(i: int = 0) -> Canvas:
     return c
 
 
+PILUS_REACH = [8, 12, 17, 22, 26, 26, 25, 24]  # pilus: length of the fibre in each use frame
+
+
+def overlay_pilus(d: int = 0, i: int = 0, mode: str = "idle") -> Canvas:
+    """Type IV pilus: a motor in the membrane and a thin, long fibre with a sticky tip.
+
+    idle: a short fibre sways. use (extend, PilB adds subunits): the fibre shoots
+    out to full length and the tip flashes. hold (retract, PilT removes
+    subunits): the fibre is taut and straight, and bright beads run in towards
+    the motor. The game draws the long line to the target as a separate sprite
+    (pilus_line).
+    """
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    tones = RAMPS["protein"]
+    bx, by = xy(1.5, 0)
+    _socket(c, bx, by, tones, spin=(-2 if mode == "hold" else 1) * ph)
+    if mode == "use":
+        length, sway = PILUS_REACH[i], 0.5 * (1 - i / 7)
+    elif mode == "hold":
+        length, sway = 26.0, 0.0
+    else:
+        length, sway = 13.0 + 0.6 * np.sin(ph), 1.4
+    n = 20
+    pts = []
+    for j in range(n + 1):
+        s_ = 2 + (length - 2) * j / n
+        env = min(1.0, (s_ - 2) / 6.0)
+        pts.append(xy(s_, sway * env * np.sin(0.5 * s_ - ph)))
+    _strand(c, pts, tones, 1.0)
+    if mode == "hold":  # beads run in: PilT pulls the fibre back
+        for j in range(n + 1):
+            if (j + i) % 5 == 0 and j > 1:
+                c.plot(*pts[j], tones[4])
+    tx, ty = pts[-1]
+    if mode == "use" and i in (3, 4, 5):  # the tip flashes as it shoots out
+        c.halo(tx, ty, 1.5, 4.5, [tones[2], tones[3], tones[4]], 0.8)
+    c.disc(tx, ty, 1.3, tones)
+    return c
+
+
+def pilus_line_tile() -> np.ndarray:
+    """A tile of the long pilus line: 8 x 3 px, a thin fibre with one bright bead.
+    The game tiles it along the line from the mount point to the target."""
+    tones = RAMPS["protein"]
+    px = np.zeros((3, 8, 4), dtype=np.uint8)
+    for x in range(8):
+        px[0, x] = (*tones[1], 255)
+        px[1, x] = (*tones[3], 255)
+        px[2, x] = (*tones[1], 255)
+    px[1, 0] = (*tones[4], 255)
+    px[1, 1] = (*tones[4], 255)
+    return px
+
+
+SHEATH = [12.0, 12.0, 7.0, 5.0, 5.0, 6.0, 8.0, 11.0]  # injector: sheath length in each use frame
+SPEAR = [17.0, 17.0, 20.0, 27.0, 25.0, 22.0, 19.0, 17.0]  # injector: reach of the spear tip
+
+
+def overlay_injector(d: int = 0, i: int = 0, mode: str = "idle") -> Canvas:
+    """Contractile injection (type VI secretion): a striped sheath round a spear.
+
+    idle: the sheath is cocked (long and thin) and the spear tip waits just
+    outside, with a pulse of the toxic effector. use (fire): the sheath
+    contracts at once (short and wide), the spear shoots out and the tip
+    flashes, then the system resets. The game stuns the cell in contact.
+    """
+    use = mode == "use"
+    c, u, v, xy, a = _overlay_canvas(d)
+    ph = 2 * np.pi * i / FRAMES
+    tones = RAMPS["protein"]
+    fx = RAMPS["toxin"]
+    length = SHEATH[i] if use else 12.0 + 0.4 * np.sin(ph)
+    reach = SPEAR[i] if use else 17.0
+    half = 2.0 + (12.0 - length) * 0.22  # a contracted sheath is wider
+    _socket(c, *xy(1.5, 0), tones)
+    # The sheath: a rounded bar from the base plate, striped like a helix.
+    centre = 2.0 + length / 2
+    sdf = np.maximum(np.abs(u - centre) - length / 2, np.abs(v) - half)
+    c.lit_body(sdf, tones, band=1.4, width=3.0)
+    stripes = (np.floor((u - 2.0) / 2.5) % 2 == 0) & (sdf < -0.5)
+    c.paint(stripes, tones[3])
+    c.outline(tones[0])
+    # The spear: a thin tube from the sheath to the tip, with a sharp point.
+    base = 2.0 + length
+    c.line(*xy(base, 0), *xy(reach, 0), fx[2], 1.1)
+    c.line(*xy(base, 0), *xy(reach, 0), fx[3], 0.5)
+    c.plot(*xy(reach + 1, 0), fx[4])
+    if not use:  # the effector pulses at the tip
+        r = 0.6 + 0.6 * (0.5 + 0.5 * np.sin(ph))
+        px_, py_ = xy(reach + 1.5, 0)
+        c.paint(np.hypot(c.X - px_, c.Y - py_) < r, fx[3])
+    elif i in (3, 4):  # a flash at the tip as the spear fires
+        tx, ty = xy(reach, 0)
+        c.halo(tx, ty, 1.5, 5.0, [fx[2], fx[3], fx[4]], 0.9)
+    return c
+
+
 # -- exchange and sensing proteins: transporter, lytic enzyme, fusion, receptor --
 
 SUBSTRATES = {"carbon": "carbon", "mineral": "mineral", "metal": "metal"}  # name -> ramp
@@ -2468,6 +2566,16 @@ OVERLAYS = {
             note=f"Takes {sub}. Match it to a wall pore of the same substrate. use loops while it takes up.")
         for sub in SUBSTRATES
     },
+    "overlay_pilus": dict(
+        make=overlay_pilus, layer="above", sheet=4,
+        kinds={"idle": dict(fps=6, loop=True), "use": dict(fps=14, loop=False),
+               "hold": dict(fps=10, loop=True)},
+        note="Point it along the aim. use = the fibre shoots out (plays once). hold = taut, "
+             "retracting (loops until released). Draw the line to the target with pilus_line.png."),
+    "overlay_injector": dict(
+        make=overlay_injector, layer="above", sheet=4,
+        kinds={"idle": dict(fps=6, loop=True), "use": dict(fps=14, loop=False)},
+        note="Point it along the aim. use = the sheath contracts and the spear fires (plays once)."),
     "overlay_lytic": dict(
         make=overlay_lytic, layer="above", sheet=2,
         kinds={"idle": dict(fps=6, loop=True), "use": dict(fps=14, loop=True)},
@@ -2528,6 +2636,7 @@ def write_overlays(frames: dict) -> None:
                 "direction_meaning": "direction the protein points, away from the cell",
             }
         manifest[name] = info
+    write_png(SPRITE_DIR / "pilus_line.png", pilus_line_tile())
     # The projectile: 8 frames, no directions.
     drop = [toxin_droplet(i) for i in range(FRAMES)]
     write_png(ANIM_DIR / "toxin_droplet.png", np.concatenate([f.px for f in drop], axis=1))
@@ -2554,6 +2663,13 @@ OVERLAY_DEMOS = {
             dict(overlay_transporter_mineral="use", overlay_lytic="use", overlay_fusion="use", overlay_receptor="use"),
             dict(overlay_transporter_mineral="use", overlay_lytic="idle", overlay_fusion="hold", overlay_receptor="idle"),
         ]),
+    "overlay_demo_5": dict(
+        mounts={"overlay_pilus": 0, "overlay_injector": 2, "overlay_flagellum": 4},
+        phases=[
+            dict(overlay_pilus="idle", overlay_injector="idle", overlay_flagellum="idle"),
+            dict(overlay_pilus="use", overlay_injector="use", overlay_flagellum="use"),
+            dict(overlay_pilus="hold", overlay_injector="idle", overlay_flagellum="idle"),
+        ]),
     # The immune proteins. Phases are all idle, all use, all hold (see write_overlay_previews).
     "overlay_demo_3": dict(
         mounts={"overlay_mhc1_viral": 0, "overlay_mhc2_prey": 2, "overlay_mhc1_self": 4, "overlay_antibody_viral": 6}),
@@ -2565,7 +2681,7 @@ OVERLAY_DEMOS = {
 def write_overlay_previews(frames: dict, cell_frames: list[Canvas]) -> None:
     prev = PREVIEW_DIR / "anim"
     # Sheets: one row for each overlay and kind, pointing east. Group 2 has its own files.
-    for sheet, suffix in ((1, ""), (2, "_2"), (3, "_3")):
+    for sheet, suffix in ((1, ""), (2, "_2"), (3, "_3"), (4, "_4")):
         names = [n for n in frames if OVERLAYS[n].get("sheet", 1) == sheet and OVERLAYS[n].get("preview", True)]
         rows = [np.concatenate([f.px for f in grid[0]], axis=1) for n in names for grid in frames[n].values()]
         write_png(prev / f"overlays{suffix}.png", on_water(np.concatenate(rows, axis=0), 3))

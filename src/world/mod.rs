@@ -12,6 +12,7 @@
 //!   player's cell. The cell plays baked sprite sheets.
 //! - `actions_view`: slot hotkeys, toxin droplets, membrane protein overlays,
 //!   shelter discs.
+//! - `pilus_view`: the pilus joint and its line sprite.
 //! - `walls_view`: tissue tile bodies and sprites.
 //! - `interior_view`: interior pieces of a cell (genome and pathways), display mode key.
 //! - `npc_view`: NPC bodies, particle sprites, death, engulf and victory clips.
@@ -41,6 +42,7 @@ pub mod grid_view;
 pub mod hud;
 pub mod interior_view;
 pub mod npc_view;
+pub mod pilus_view;
 pub mod player_body;
 pub mod walls_view;
 
@@ -82,6 +84,7 @@ pub fn plugin(app: &mut App) {
         .add_plugins((
             grid_view::plugin,
             player_body::plugin,
+            pilus_view::plugin,
             hud::plugin,
             actions_view::plugin,
             interior_view::plugin,

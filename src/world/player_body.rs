@@ -32,6 +32,7 @@ use crate::player::{ControlledCell, LocalPlayer};
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
 use crate::proteins::Proteome;
+use crate::stun::{Stunned, stun_tint, stunned_thrust};
 use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row};
 use crate::{GameState, InRun};
 
@@ -137,7 +138,7 @@ pub fn attach_body_for(
 /// WASD sets the wanted direction on the Run screen, and the aim of the actions.
 /// In Manage, time may run but the keys are for the editor, so the cell stops
 /// pushing.
-fn read_move_input(
+pub fn read_move_input(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
@@ -176,6 +177,7 @@ fn apply_thrust(
             &CellSize,
             &ActionState,
             &CuticleShield,
+            Has<Stunned>,
             &mut ConstantForce,
             &mut LinearDamping,
             &mut ThrustEffort,
@@ -184,7 +186,7 @@ fn apply_thrust(
     >,
 ) {
     let field = level.as_ref().map(|l| l.0.field);
-    for (transform, input, proteome, size, actions, shield, mut force, mut damping, mut effort) in &mut cells {
+    for (transform, input, proteome, size, actions, shield, stunned, mut force, mut damping, mut effort) in &mut cells {
         // The field sets the drag at the cell's position (dry ground on land is
         // much heavier than water); a cuticle adds a little.
         let water = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Water, transform.translation.truncate()));
@@ -202,6 +204,8 @@ fn apply_thrust(
         } else {
             action_thrust(input.0, thrust_capacity(proteome), actions)
         };
+        // A stunned cell has no thrust (a pilus or a current may still move it).
+        let thrust = stunned_thrust(thrust, stunned);
         force.0 = thrust;
         damping.0 = drag;
         effort.0 += thrust.length() * time.delta_secs();
@@ -231,16 +235,27 @@ pub fn ros_tint_color(tint: f32) -> Color {
     Color::srgb(1.0 - 0.35 * t, 1.0 - 0.05 * t, 1.0 - 0.55 * t)
 }
 
+/// The colour multiplier of a stunned cell sprite at a stun strength (0 to 1,
+/// see `stun_tint`): a cold blue-violet. A flat colour only. **Art owner:** may
+/// bake a "stunned" clip later.
+pub fn stun_tint_color(strength: f32) -> Color {
+    let t = strength.clamp(0.0, 1.0);
+    Color::srgb(1.0 - 0.45 * t, 1.0 - 0.4 * t, 1.0)
+}
+
 /// Tints the sprite of each cell with its ROS: the body-horror look.
 fn ros_tint_system(
-    cells: Query<&CurrencyPools, With<Cell>>,
+    cells: Query<(&CurrencyPools, Option<&Stunned>), With<Cell>>,
     mut sprites: Query<(&BlobSprite, &mut Sprite)>,
 ) {
     for (blob, mut sprite) in &mut sprites {
-        let Ok(pools) = cells.get(blob.cell) else {
+        let Ok((pools, stun)) = cells.get(blob.cell) else {
             continue;
         };
-        let color = ros_tint_color(crate::oxygen::ros_tint(pools.get(Currency::ROS)));
+        let color = match stun {
+            Some(stun) => stun_tint_color(stun_tint(stun.left)),
+            None => ros_tint_color(crate::oxygen::ros_tint(pools.get(Currency::ROS))),
+        };
         if sprite.color != color {
             sprite.color = color;
         }

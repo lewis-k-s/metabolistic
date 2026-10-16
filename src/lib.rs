@@ -25,6 +25,7 @@ pub mod movement;
 pub mod npc;
 pub mod oxygen;
 pub mod particles;
+pub mod pilus;
 pub mod player;
 pub mod prepare;
 pub mod proteins;
@@ -34,6 +35,7 @@ pub mod shallow;
 pub mod shelter;
 pub mod shared;
 pub mod stage;
+pub mod stun;
 pub mod walls;
 #[cfg(feature = "tui")]
 pub mod tui;
@@ -138,6 +140,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
             // The game picks mutated genes at random; tests use a fixed seed.
             .insert_resource(genome_damage::GeneRng::from_entropy())
             .insert_resource(npc::NpcRng::from_entropy());
@@ -196,6 +199,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
             // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not
             // from real time.
             .insert_resource(metabolism::FlowmapTimingConfig::manual());

@@ -2,7 +2,12 @@
 //!
 //! The parts of the action bar that need graphics:
 //!
-//! - **Hotkeys** 1-4 use the slots on the Run screen.
+//! - **Hotkeys** 1-4 use the slots on the Run screen. `SlotHeld` follows the
+//!   keys, for actions that need a hold (the pilus).
+//! - **Mouse aim**: the aim of the player's `ActionState` points from the cell
+//!   to the cursor (`aim_toward`). Without a cursor in the window, the old aim
+//!   (the last move direction) stays: the fallback for keyboard and gamepad.
+//! - **Aim line**: a thin line along the aim while a slot that needs aim is held.
 //! - **Membrane protein overlays** (`docs/art-direction.md`): one 56x56 sprite
 //!   for each protein, up to the caps of the display mode (`CellDisplay`), mounted on the rim at 0.95 x the radius and drawn above the cell. The
 //!   baked rows give the direction, so the game never turns or scales them.
@@ -20,6 +25,7 @@ use crate::cell::{Cell, CellSize};
 use crate::interior::{CellDisplay, OverlayCaps};
 use crate::movement::world_radius;
 use crate::player::{ControlledCell, LocalPlayer};
+use crate::pilus::PILUS_RANGE;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 use crate::shelter::Shelter;
 use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row, opposite_row, row_direction};
@@ -37,7 +43,11 @@ pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         (
-            slot_hotkeys.run_if(in_state(GameState::Run)),
+            slot_hotkeys,
+            mouse_aim
+                .after(crate::world::player_body::read_move_input)
+                .run_if(in_state(GameState::Run)),
+            draw_aim_line.run_if(in_state(GameState::Run)),
             (sync_overlays, drive_overlays)
                 .chain()
                 .before(SpriteSystems::Animate),
@@ -55,20 +65,100 @@ const SLOT_KEYS: [KeyCode; SLOT_COUNT] = [
     KeyCode::Digit4,
 ];
 
+/// Presses and holds of the slot keys. Only the Run screen takes them: in
+/// Manage the keys are for the editor, so nothing is held.
 fn slot_hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
+    state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut held: Query<&mut SlotHeld, With<Cell>>,
     mut orders: MessageWriter<UseSlot>,
 ) {
+    let on_run = *state.get() == GameState::Run;
     for controlled in &players {
+        let mut now = [false; SLOT_COUNT];
         for (slot, key) in SLOT_KEYS.iter().enumerate() {
-            if keys.just_pressed(*key) {
+            now[slot] = on_run && keys.pressed(*key);
+            if on_run && keys.just_pressed(*key) {
                 orders.write(UseSlot {
                     cell: controlled.0,
                     slot,
                 });
             }
         }
+        if let Ok(mut held) = held.get_mut(controlled.0)
+            && held.0 != now
+        {
+            held.0 = now;
+        }
+    }
+}
+
+// --- Mouse aim and the aim line ---
+
+/// The cursor in world space, if the window has a cursor and the camera sees it.
+fn cursor_world(
+    windows: &Query<&Window>,
+    cameras: &Query<(&Camera, &GlobalTransform), With<crate::screens::RunCamera>>,
+) -> Option<Vec2> {
+    let cursor = windows.single().ok()?.cursor_position()?;
+    let (camera, transform) = cameras.single().ok()?;
+    camera.viewport_to_world_2d(transform, cursor).ok()
+}
+
+/// Points the aim of the player's cell at the cursor.
+fn mouse_aim(
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<crate::screens::RunCamera>>,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut cells: Query<(&Transform, &mut ActionState), With<Cell>>,
+) {
+    let Some(cursor) = cursor_world(&windows, &cameras) else {
+        return;
+    };
+    for controlled in &players {
+        if let Ok((transform, mut state)) = cells.get_mut(controlled.0) {
+            state.aim_toward(transform.translation.truncate(), cursor);
+        }
+    }
+}
+
+/// Colour of the aim line.
+const AIM_LINE_COLOR: Color = Color::srgba(0.85, 1.0, 0.85, 0.55);
+/// Length of the aim line for an action with no range of its own, in pixels.
+const AIM_LINE_LENGTH: f32 = 70.0;
+
+/// The length of the aim line for a held action.
+pub fn aim_line_length(kind: ActionKind) -> f32 {
+    match kind {
+        ActionKind::Pilus => PILUS_RANGE,
+        _ => AIM_LINE_LENGTH,
+    }
+}
+
+/// Draws a thin line from the rim along the aim while a slot that needs aim is
+/// held. The line has the length of the longest held action.
+fn draw_aim_line(
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    cells: Query<(&Transform, &CellSize, &ActionState, &ActionBar, &SlotHeld), With<Cell>>,
+    mut gizmos: Gizmos,
+) {
+    for controlled in &players {
+        let Ok((transform, size, state, bar, held)) = cells.get(controlled.0) else {
+            continue;
+        };
+        let length = bar
+            .slots
+            .iter()
+            .zip(held.0)
+            .filter_map(|(kind, held)| kind.filter(|k| held && k.needs_aim()))
+            .map(aim_line_length)
+            .fold(0.0_f32, f32::max);
+        if length <= 0.0 {
+            continue;
+        }
+        let start = transform.translation.truncate() + state.aim * world_radius(size);
+        gizmos.line_2d(start, start + state.aim * length, AIM_LINE_COLOR);
     }
 }
 
@@ -83,21 +173,33 @@ pub fn overlay_sprite(protein: MembraneProtein) -> Option<&'static str> {
     }
 }
 
+/// Most overlays of one protein on a cell, under the caps of the display mode.
+/// The pilus and the injector point along the aim, so a second one would lie on
+/// the first.
+pub fn max_overlays_of(protein: MembraneProtein, caps: OverlayCaps) -> u32 {
+    match protein {
+        MembraneProtein::Pilus | MembraneProtein::Injector => caps.per_protein.min(1),
+        _ => caps.per_protein,
+    }
+}
+
 /// The overlays a proteome shows, in a fixed order: up to `caps.per_protein` of
-/// each protein that has art, and `caps.total` in all. A new protein is one
-/// more entry in the list.
+/// each protein that has art (`max_overlays_of`), and `caps.total` in all. A new
+/// protein is one more entry in the list.
 pub fn overlay_plan(proteome: &Proteome, caps: OverlayCaps) -> Vec<MembraneProtein> {
     let mut plan = Vec::new();
     for protein in [
         MembraneProtein::Flagellum,
         MembraneProtein::Adhesin,
         MembraneProtein::Toxin,
+        MembraneProtein::Pilus,
+        MembraneProtein::Injector,
         MembraneProtein::Lytic,
         MembraneProtein::Transporter,
     ] {
         let count = proteome
             .count(ProteinTarget::Membrane(protein))
-            .min(caps.per_protein);
+            .min(max_overlays_of(protein, caps));
         for _ in 0..count {
             if plan.len() < caps.total {
                 plan.push(protein);
@@ -128,14 +230,20 @@ pub fn overlay_clip(protein: MembraneProtein, state: &ActionState) -> &'static s
             }
         }
         MembraneProtein::Toxin if state.toxin_flash > 0.0 => clip::USE,
+        // The pilus extends once, then pulls taut while it reels.
+        MembraneProtein::Pilus if state.pilus_flash > 0.0 => clip::USE,
+        MembraneProtein::Pilus if state.pilus_taut => clip::HOLD,
+        MembraneProtein::Injector if state.injector_flash > 0.0 => clip::USE,
         _ => clip::IDLE,
     }
 }
 
-/// The row of an overlay. A flagellum points away from where the cell goes.
+/// The row of an overlay. A flagellum points away from where the cell goes. A
+/// pilus and an injector point along the aim.
 pub fn overlay_row(protein: MembraneProtein, index: usize, count: usize, aim: Vec2) -> usize {
     match protein {
         MembraneProtein::Flagellum => opposite_row(direction_row(aim)),
+        MembraneProtein::Pilus | MembraneProtein::Injector => direction_row(aim),
         _ => spaced_row(index, count),
     }
 }
@@ -351,5 +459,33 @@ mod tests {
         assert_eq!(alpha(0, 0), 0);
         assert_eq!(alpha(48, 48), SHELTER_FILL[3]);
         assert_eq!(alpha(48, 0), SHELTER_RIM[3]);
+    }
+
+    #[test]
+    fn the_pilus_overlay_extends_then_pulls_taut() {
+        let mut state = ActionState::default();
+        assert_eq!(overlay_clip(MembraneProtein::Pilus, &state), clip::IDLE);
+        state.pilus_flash = 0.3;
+        state.pilus_taut = true;
+        assert_eq!(overlay_clip(MembraneProtein::Pilus, &state), clip::USE);
+        state.pilus_flash = 0.0;
+        assert_eq!(overlay_clip(MembraneProtein::Pilus, &state), clip::HOLD);
+        state.pilus_taut = false;
+        state.injector_flash = 0.3;
+        assert_eq!(overlay_clip(MembraneProtein::Injector, &state), clip::USE);
+    }
+
+    #[test]
+    fn a_pilus_and_an_injector_point_along_the_aim_with_one_overlay_each() {
+        assert_eq!(overlay_row(MembraneProtein::Pilus, 0, 3, Vec2::Y), direction_row(Vec2::Y));
+        assert_eq!(overlay_row(MembraneProtein::Injector, 2, 3, Vec2::NEG_X), direction_row(Vec2::NEG_X));
+        let plan = overlay_plan(&proteome(&[
+            (MembraneProtein::Pilus, 3),
+            (MembraneProtein::Injector, 2),
+        ]), DisplayMode::Full.overlay_caps());
+        assert_eq!(plan, vec![MembraneProtein::Pilus, MembraneProtein::Injector]);
+        assert!(overlay_sprite(MembraneProtein::Pilus).is_some());
+        assert_eq!(aim_line_length(ActionKind::Pilus), PILUS_RANGE);
+        assert!(aim_line_length(ActionKind::Injector) < PILUS_RANGE);
     }
 }
