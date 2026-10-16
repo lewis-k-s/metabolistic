@@ -12,6 +12,7 @@ pub mod envgrid;
 pub mod environment;
 pub mod exchange;
 pub mod gate;
+pub mod interior;
 pub mod genome_damage;
 pub mod land;
 pub mod layout;

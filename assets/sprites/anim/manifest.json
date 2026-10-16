@@ -1776,6 +1776,214 @@
       "loop": true
     }
   },
+  "interior_sulfur": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "Chemosynthesis: sulfur granules. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_sulfur_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_sulfur_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_thylakoid": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "LightCapture: thylakoid stack. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_thylakoid_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_thylakoid_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_lipid": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "FatStorage: lipid droplets. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_lipid_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_lipid_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_ribosome": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "ProteinSynthesis: ribosome speckle. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_ribosome_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_ribosome_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_peroxisome": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "Catalase: peroxisomes. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_peroxisome_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_peroxisome_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_cristae": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8.0,
+      8.0
+    ],
+    "layer": "interior",
+    "note": "Respiration: folded inner membrane. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_cristae_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_cristae_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_pigment": {
+    "frame_size": [
+      64,
+      64
+    ],
+    "anchor_px": [
+      32.0,
+      32.5
+    ],
+    "layer": "interior",
+    "note": "SecondaryMetabolites: pigment ring. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_pigment_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_pigment_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "interior_cuticle": {
+    "frame_size": [
+      64,
+      64
+    ],
+    "anchor_px": [
+      32.0,
+      32.5
+    ],
+    "layer": "interior",
+    "note": "Cuticle: thick outer rim. Child of the body pivot, under the membrane overlays. idle = the gene works. glitch = the gene is mutated.",
+    "idle": {
+      "file": "interior_cuticle_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 5,
+      "loop": true
+    },
+    "glitch": {
+      "file": "interior_cuticle_glitch.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
   "engulf_player_prey": {
     "engulfer": "player_cell",
     "target": "prey_bacillus",
