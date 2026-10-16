@@ -33,8 +33,7 @@ use metabolistic3d::walls::{
 };
 use proptest::prelude::*;
 
-mod common;
-use common::*;
+use crate::common::*;
 
 // --- Helpers ---
 

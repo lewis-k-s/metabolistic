@@ -518,7 +518,7 @@ Notes:
   3 photosynthesis enzymes and no catalase die in about 57 s (ROS about 22); with
   1 catalase enzyme ROS stays near 3, with 2 near 1.2, and the cell lives; 1
   photosynthesis enzyme and no catalase dies after about 2 minutes (the lipids run
-  out first). Tests: `tests/shallow_water_test.rs`.
+  out first). Tests: `tests/it/shallow_water_test.rs`.
 - **Gate reward**: `run::grant_gate_enzyme`: a gate gene with a block gives the
   carry one free enzyme, and its pathway goes into the first empty action slot (if any), so the player can turn photosynthesis Off or Low at once. `LightCapture` now costs 1 point in Prepare. NPCs with
   `LightCapture` also get `Catalase` (like cyanobacteria), so they live with their
@@ -633,7 +633,7 @@ Notes:
 - **Smoke test**: after the shallow gate step it passes a second StageComplete and
   enters land: the start (W held), a dry stretch with hydration 0.2, and the waxy gate
   chamber. 17 steps in all.
-- **Tests**: `tests/land_test.rs` (respiration stoichiometry and O2 dependence, O2
+- **Tests**: `tests/it/land_test.rs` (respiration stoichiometry and O2 dependence, O2
   uptake and mass, desiccation and the tick length, the cuticle, drag, the waxy wall,
   200 land seeds, the key-gene top-up, the whole chain Vents -> Shallow water -> Land
   -> run complete) and unit tests in `layout`, `desiccation`, `land`, `oxygen`,

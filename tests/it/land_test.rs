@@ -40,8 +40,7 @@ use metabolistic3d::stage::Stage;
 use metabolistic3d::walls::{WallKind, WallMap, solid_for};
 use metabolistic3d::{GameState, MetabolisticApp};
 
-mod common;
-use common::*;
+use crate::common::*;
 
 // --- Helpers ---
 

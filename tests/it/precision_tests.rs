@@ -154,7 +154,14 @@ proptest! {
             let first_half_avg: f32 = precision_errors[..half].iter().sum::<f32>() / half as f32;
             let second_half_avg: f32 = precision_errors[half..].iter().sum::<f32>()
                 / (precision_errors.len() - half) as f32;
-            let rounding_bound = f32::EPSILON * initial_inputs * long_simulation_steps as f32;
+            // f32 rounding grows with each solver sub-step, not each tick.
+            let dt = app
+                .world()
+                .resource::<metabolistic3d::metabolism::FlowmapTimingConfig>()
+                .target_delta();
+            let substeps = (dt / metabolistic3d::metabolism::MAX_SUBSTEP).ceil().max(1.0);
+            let rounding_bound =
+                f32::EPSILON * initial_inputs * long_simulation_steps as f32 * substeps;
             prop_assert!(
                 second_half_avg <= first_half_avg * 2.0 || second_half_avg <= rounding_bound,
                 "Precision degradation detected: early avg {}, late avg {}",
