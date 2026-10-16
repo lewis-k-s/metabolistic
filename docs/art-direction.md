@@ -347,3 +347,13 @@ pixel (the cell frames are centred on 32.5).
 - UI frame, icons for the 4 action slots, HUD bars.
 - Shallow-water and land palettes. The water backdrop and the rock ramp are for
   the vent stage only.
+- M8 stand-ins (land): the ground is a flat dark earth colour (`FieldKind::background`,
+  `#2a2017`); water on the grid is a dithered blue (`#1d5aa8` edge, `#7ac4f4` core);
+  the waxy wall is `wall_membrane` with a yellow-green tint; the moss crust (a mat)
+  and the tough wall keep their M7 tints. **Land palette for the art owner:** an
+  earth ramp for the ground (the `rock` ramp warmed to brown), a leaf green and an
+  ochre for plant-like tissue (waxy walls, the gate room), a pale blue for water and
+  puddles. Creatures reuse the vent sheets. The land gate cell (a multicellular
+  colony, `Multicellularity`) reuses `gate_cell_phototroph`: it should become a
+  cluster of three or four small cells in one halo, with no victory clip of its own yet.
+  A cell with low hydration needs a look too (now only the HUD bar).

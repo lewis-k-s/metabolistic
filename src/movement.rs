@@ -69,6 +69,21 @@ pub fn body_drag(size: &CellSize) -> f32 {
     DRAG_PER_RADIUS * size.radius.max(0.0)
 }
 
+/// Extra drag for a full cuticle shield (shield 1). A cuticle adds a little
+/// drag: the factor is `1 + CUTICLE_DRAG x shield`. **Playtest.**
+pub const CUTICLE_DRAG: f32 = 0.25;
+
+/// Factor on the drag from the cuticle shield (0 to below 1): 1 without a cuticle.
+pub fn cuticle_drag_factor(shield: f32) -> f32 {
+    1.0 + CUTICLE_DRAG * shield.clamp(0.0, 1.0)
+}
+
+/// Drag with the multiplier of the field at the cell's position (`FieldKind::
+/// drag_multiplier`: water is 1, dry ground is more) and the cuticle factor.
+pub fn drag_in_field(base: f32, field_multiplier: f32, shield: f32) -> f32 {
+    base * field_multiplier.max(0.0) * cuticle_drag_factor(shield)
+}
+
 /// The most thrust the cell can give: the base thrust plus each flagellum.
 pub fn thrust_capacity(proteome: &Proteome) -> f32 {
     let flagella = proteome.count(ProteinTarget::Membrane(MembraneProtein::Flagellum));
@@ -138,6 +153,19 @@ mod tests {
         assert!(body_mass(&big) > body_mass(&small));
         assert!(body_drag(&big) > body_drag(&small));
         assert!(terminal_speed(BASE_THRUST, &big) < terminal_speed(BASE_THRUST, &small));
+    }
+
+    #[test]
+    fn the_field_multiplier_and_the_cuticle_raise_the_drag_and_lower_the_speed() {
+        let size = CellSize::default();
+        let base = body_drag(&size);
+        assert_eq!(drag_in_field(base, 1.0, 0.0), base);
+        assert!(drag_in_field(base, 3.0, 0.0) > 2.9 * base);
+        let with_cuticle = drag_in_field(base, 1.0, 0.9);
+        assert!(with_cuticle > base && with_cuticle < 1.3 * base, "a little drag");
+        // The terminal speed is the thrust over mass and drag.
+        let speed = |drag: f32| BASE_THRUST / (body_mass(&size) * drag);
+        assert!(speed(drag_in_field(base, 3.0, 0.0)) < speed(base) / 2.9);
     }
 
     #[test]

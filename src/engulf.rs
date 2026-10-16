@@ -404,9 +404,9 @@ mod tests {
         let proteome = Proteome::with_enzymes(&[(BlockKind::FatStorage, 1)]);
         take_gene(&mut genome, &proteome, &mut queue, BlockKind::FatStorage);
         assert_eq!(queue.orders.len(), 1);
-        // A gene with no block (the shallow gate cell's, until M8) has nothing to build.
-        take_gene(&mut genome, &proteome, &mut queue, BlockKind::Respiration);
-        assert_eq!(genome.get_gene_state(&BlockKind::Respiration), Some(&GeneState::Expressed));
+        // A gene with no block (the land gate cell's) has nothing to build.
+        take_gene(&mut genome, &proteome, &mut queue, BlockKind::Multicellularity);
+        assert_eq!(genome.get_gene_state(&BlockKind::Multicellularity), Some(&GeneState::Expressed));
         assert_eq!(queue.orders.len(), 1);
     }
 

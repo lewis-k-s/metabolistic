@@ -1,7 +1,7 @@
 //! # Environment grid
 //!
 //! `EnvGrid` is a coarse grid with one `f32` layer for each `Channel`: heat,
-//! minerals, light (UV) and O2. Each channel has sources (emitters),
+//! minerals, light (UV), O2 and water. Each channel has sources (emitters),
 //! diffusion, a drift and a decay. Cells sample the grid at their position and
 //! take minerals from it (see `exchange`).
 //!
@@ -38,6 +38,9 @@
 //! diffusion across its edges is multiplied by a factor below 1 (the lower of
 //! the two cells at an edge). The flow between two cells stays equal and
 //! opposite, so the total is still conserved.
+//!
+//! A cell can also be leaky for one channel only (`set_channel_leak`): the waxy
+//! wall of the land level stops water and lets O2 through.
 //!
 //! Ticks of 0.1 s, 0.2 s or 0.8 s all use sub-steps of 0.05 s, so the tick
 //! length does not change the result.
@@ -445,6 +448,10 @@ pub struct EnvGrid {
     /// Diffusion factor of each grid cell (1 is open). See "Leaky cells".
     leak: Vec<f32>,
     leak_count: usize,
+    /// Extra diffusion factor of one channel only (a waxy wall stops water but
+    /// not O2). Combined with `leak` by the lower factor. See "Leaky cells".
+    channel_leak: [Option<Vec<f32>>; Channel::ALL.len()],
+    leak_scratch: Vec<f32>,
 }
 
 impl EnvGrid {
@@ -465,6 +472,8 @@ impl EnvGrid {
             wall_count: 0,
             leak: vec![1.0; dims.len()],
             leak_count: 0,
+            channel_leak: std::array::from_fn(|_| None),
+            leak_scratch: Vec::new(),
         }
     }
 
@@ -501,6 +510,24 @@ impl EnvGrid {
             (true, false) => self.leak_count -= 1,
             _ => {}
         }
+    }
+
+    /// Sets the diffusion factor of grid cell `(x, y)` for one channel only, from
+    /// 0 to 1. The cell stays open to the other channels (unless it is also
+    /// leaky for all of them). A waxy wall uses it for `Channel::Water`.
+    pub fn set_channel_leak(&mut self, channel: Channel, x: usize, y: usize, factor: f32) {
+        let i = self.dims.index(x, y);
+        let len = self.dims.len();
+        let layer = self.channel_leak[channel.index()].get_or_insert_with(|| vec![1.0; len]);
+        layer[i] = factor.clamp(0.0, 1.0);
+    }
+
+    /// The diffusion factor of one channel in grid cell `(x, y)`: the lower of
+    /// the cell's own factor and the factor of the channel.
+    pub fn channel_leak(&self, channel: Channel, x: usize, y: usize) -> f32 {
+        let i = self.dims.index(x, y);
+        let own = self.channel_leak[channel.index()].as_ref().map_or(1.0, |l| l[i]);
+        own.min(self.leak[i])
     }
 
     /// The diffusion factor of grid cell `(x, y)`.
@@ -652,6 +679,31 @@ impl EnvGrid {
         }
     }
 
+    /// Adds a disc emitter: every grid cell whose centre is within `radius` of
+    /// `center` emits `rate_per_cell` per second. If no cell centre is inside,
+    /// the nearest cell emits.
+    pub fn add_disc_emitter(&mut self, channel: Channel, center: Vec2, radius: f32, rate_per_cell: f32) {
+        self.settled[channel.index()] = false;
+        let mut nearest = (0, f32::INFINITY);
+        let mut any = false;
+        for y in 0..self.dims.height {
+            for x in 0..self.dims.width {
+                let distance = self.cell_center(x, y).distance(center);
+                let i = self.dims.index(x, y);
+                if distance < nearest.1 {
+                    nearest = (i, distance);
+                }
+                if distance <= radius {
+                    self.emission[channel.index()][i] += rate_per_cell;
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            self.emission[channel.index()][nearest.0] += rate_per_cell;
+        }
+    }
+
     /// Total emission per second of one channel.
     pub fn emission_total(&self, channel: Channel) -> f32 {
         self.emission[channel.index()].iter().sum()
@@ -697,7 +749,15 @@ impl EnvGrid {
                 continue;
             }
             let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
-            let leak = (self.leak_count > 0).then_some(self.leak.as_slice());
+            let leak = match &self.channel_leak[i] {
+                Some(over) => {
+                    self.leak_scratch.clear();
+                    self.leak_scratch
+                        .extend(over.iter().zip(&self.leak).map(|(a, b)| a.min(*b)));
+                    Some(self.leak_scratch.as_slice())
+                }
+                None => (self.leak_count > 0).then_some(self.leak.as_slice()),
+            };
             step_layer_leaky(
                 &mut self.layers[i],
                 &mut self.scratch,

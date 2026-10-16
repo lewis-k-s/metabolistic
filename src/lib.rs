@@ -6,12 +6,14 @@ pub mod actions;
 pub mod blocks;
 pub mod cell;
 pub mod codex;
+pub mod desiccation;
 pub mod engulf;
 pub mod envgrid;
 pub mod environment;
 pub mod exchange;
 pub mod gate;
 pub mod genome_damage;
+pub mod land;
 pub mod layout;
 pub mod level;
 pub mod membrane;
@@ -120,6 +122,7 @@ impl MetabolisticApp {
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
             .add_plugins(oxygen::OxygenPlugin)
+            .add_plugins(desiccation::DesiccationPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,
@@ -173,6 +176,7 @@ impl MetabolisticApp {
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
             .add_plugins(oxygen::OxygenPlugin)
+            .add_plugins(desiccation::DesiccationPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,

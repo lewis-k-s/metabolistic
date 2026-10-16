@@ -3,12 +3,15 @@
 //! Text bars for ATP, membrane integrity, genome integrity and the main pools,
 //! in a panel at the top left of the Run screen. Minerals show the cell's stock. Heat is the
 //! condition at the cell: the panel warns when it is above the damage
-//! threshold. Light shows as UV at the cell, and as the pigment shield.
+//! threshold. Light shows as UV at the cell, and as the pigment shield. On land,
+//! the panel also shows the hydration bar and the cuticle shield.
 
 use bevy::prelude::*;
 
 use crate::actions::{ActionBar, ActionState, PathwayLevels, SLOT_COUNT, slot_status};
 use crate::cell::Cell;
+use crate::desiccation::{CuticleShield, Hydration};
+use crate::level::CurrentLevel;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::exchange::{HEAT_DAMAGE_THRESHOLD, MINERAL_STOCK_CAP};
 use crate::gate::{GATE_SECONDS, GateProgress};
@@ -47,6 +50,8 @@ enum HudLine {
     Uv,
     O2,
     Ros,
+    Hydration,
+    Cuticle,
     Shelter,
 }
 
@@ -64,11 +69,27 @@ pub fn ros_warning(ros: f32) -> &'static str {
     }
 }
 
+/// A warning after the hydration bar when the cell is dry.
+pub fn hydration_warning(hydration: f32) -> &'static str {
+    if hydration < crate::desiccation::DAMAGE_THRESHOLD {
+        "  DRYING OUT! Find water"
+    } else if hydration < 0.6 {
+        "  getting dry"
+    } else {
+        ""
+    }
+}
+
+/// The cuticle line: the shield as a percentage of the water loss it removes.
+pub fn cuticle_line(shield: f32) -> String {
+    format!("Cuticle    shield {:3.0}%", shield * 100.0)
+}
+
 /// One slot of the action bar (0-based).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct HudSlot(usize);
 
-const LINES: [HudLine; 14] = [
+const LINES: [HudLine; 16] = [
     HudLine::Stage,
     HudLine::Atp,
     HudLine::Membrane,
@@ -82,6 +103,8 @@ const LINES: [HudLine; 14] = [
     HudLine::Uv,
     HudLine::O2,
     HudLine::Ros,
+    HudLine::Hydration,
+    HudLine::Cuticle,
     HudLine::Shelter,
 ];
 
@@ -170,16 +193,19 @@ fn update_hud(
             &PathwayLevels,
             &ActionState,
             &Proteome,
+            &Hydration,
+            &CuticleShield,
         ),
         With<Cell>,
     >,
+    level: Option<Res<CurrentLevel>>,
     fraction: Res<UvFraction>,
     run: Res<RunState>,
     gate: Query<&GateProgress>,
     mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
     mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
 ) {
-    let Some((pools, membrane, env, genome, shelter, bar, levels, actions, proteome)) = players
+    let Some((pools, membrane, env, genome, shelter, bar, levels, actions, proteome, hydration, cuticle)) = players
         .iter()
         .find_map(|controlled| cells.get(controlled.0).ok())
     else {
@@ -229,6 +255,24 @@ fn update_hud(
                     String::new()
                 }
             }
+            HudLine::Hydration => {
+                if level.as_ref().is_some_and(|l| l.0.field.dries()) {
+                    format!(
+                        "{}{}",
+                        bar_line("Hydration", hydration.0, 1.0),
+                        hydration_warning(hydration.0)
+                    )
+                } else {
+                    String::new()
+                }
+            }
+            HudLine::Cuticle => {
+                if level.as_ref().is_some_and(|l| l.0.field.dries()) {
+                    cuticle_line(cuticle.0)
+                } else {
+                    String::new()
+                }
+            }
             HudLine::Metals => format!("Metals {:6.1}", pools.get(Currency::Metals)),
             HudLine::Gate => match gate.iter().find(|p| p.held > 0.0) {
                 Some(progress) => format!(
@@ -266,6 +310,15 @@ mod tests {
         let run = RunState::begin(1234, Default::default());
         let line = stage_line(&run);
         assert!(line.contains("Deep-sea vents") && line.contains("1234") && line.contains("1/3"), "{line}");
+    }
+
+    #[test]
+    fn the_hydration_warning_and_the_cuticle_line() {
+        assert_eq!(hydration_warning(1.0), "");
+        assert!(hydration_warning(0.5).contains("dry"));
+        assert!(hydration_warning(0.1).contains("DRYING"));
+        assert!(cuticle_line(0.0).contains("0%"));
+        assert!(cuticle_line(0.5).contains("50%"));
     }
 
     #[test]

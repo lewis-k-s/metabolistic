@@ -40,6 +40,8 @@ use crate::molecules::Currency;
 /// Share of the difference between the O2 pool and the grid level that moves
 /// per second.
 pub const O2_EXCHANGE_RATE: f32 = 0.15;
+/// The same in air (land): gas moves faster in air than in water. **Playtest.**
+pub const AIR_EXCHANGE_RATE: f32 = 0.6;
 /// Share of the internal O2 that turns into ROS per second.
 pub const ROS_FROM_O2_RATE: f32 = 0.02;
 /// Decay of ROS per second from the cell's own antioxidants.
@@ -59,7 +61,13 @@ pub const ROS_TINT_FULL: f32 = 25.0;
 /// in the grid under it. Negative if the grid has more: the cell takes in that
 /// much. It is a fraction of the difference, so it never passes the grid level.
 pub fn o2_exchange(pool: f32, level: f32, dt: f32) -> f32 {
-    (pool.max(0.0) - level.max(0.0)) * decay_fraction(O2_EXCHANGE_RATE, dt.max(0.0))
+    o2_exchange_at(pool, level, O2_EXCHANGE_RATE, dt)
+}
+
+/// `o2_exchange` with the exchange rate of the field (`FieldKind::o2_exchange_rate`:
+/// water or air).
+pub fn o2_exchange_at(pool: f32, level: f32, rate: f32, dt: f32) -> f32 {
+    (pool.max(0.0) - level.max(0.0)) * decay_fraction(rate.max(0.0), dt.max(0.0))
 }
 
 /// ROS made from the internal O2 in `dt` seconds. It is also the O2 that is lost.
@@ -121,9 +129,11 @@ pub fn ros_chemistry_system(
 /// holds no O2 and the cell's O2 just leaves.
 pub fn o2_exchange_system(
     timing: Res<FlowmapTimingConfig>,
+    level: Option<Res<crate::level::CurrentLevel>>,
     mut grid: Option<ResMut<EnvGrid>>,
     mut cells: Query<(&Transform, &mut CurrencyPools, &CellTick), With<Cell>>,
 ) {
+    let rate = level.map_or(O2_EXCHANGE_RATE, |l| l.0.field.o2_exchange_rate());
     for (transform, mut pools, tick) in &mut cells {
         if !tick.due {
             continue;
@@ -133,12 +143,12 @@ pub fn o2_exchange_system(
         let pool = pools.get(Currency::O2);
         let Some(grid) = grid.as_deref_mut() else {
             if pool > 0.0 {
-                pools.set(Currency::O2, pool - o2_exchange(pool, 0.0, dt));
+                pools.set(Currency::O2, pool - o2_exchange_at(pool, 0.0, rate, dt));
             }
             continue;
         };
         let level = grid.sample(Channel::O2, position);
-        let flow = o2_exchange(pool, level, dt);
+        let flow = o2_exchange_at(pool, level, rate, dt);
         if flow > 0.0 {
             // The grid gets exactly what the cell loses.
             let given = grid.deposit(Channel::O2, position, flow);
@@ -221,6 +231,15 @@ mod tests {
             assert!(left >= 2.0 - 1e-4, "dt {dt}: {left}");
         }
         assert_abs_diff_eq!(10.0 - o2_exchange(10.0, 2.0, 1e4), 2.0, epsilon = 1e-3);
+    }
+
+    #[test]
+    fn air_exchanges_faster_than_water_and_is_exact_too() {
+        assert!(o2_exchange_at(0.0, 4.0, AIR_EXCHANGE_RATE, 0.2).abs() > 3.0 * o2_exchange(0.0, 4.0, 0.2).abs());
+        let one = o2_exchange_at(0.0, 4.0, AIR_EXCHANGE_RATE, 0.4);
+        let first = o2_exchange_at(0.0, 4.0, AIR_EXCHANGE_RATE, 0.2);
+        let second = o2_exchange_at(-first, 4.0, AIR_EXCHANGE_RATE, 0.2);
+        assert_abs_diff_eq!(one, first + second, epsilon = 1e-4);
     }
 
     #[test]

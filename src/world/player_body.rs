@@ -15,12 +15,15 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::actions::{ActionState, action_damping, action_thrust};
+use crate::desiccation::CuticleShield;
 use crate::envgrid::EnvGrid;
+use crate::environment::Channel;
+use crate::level::CurrentLevel;
 use crate::walls::{MAT_CRAWL_SPEED, WallMap, crawl_force, crawl_force_at, in_mat};
 use crate::world::cell_layers;
 use crate::cell::{Cell, CellSize};
 use crate::movement::{
-    MoveInput, ThrustEffort, body_drag, body_mass, thrust_capacity, wasd_direction, world_radius,
+    MoveInput, ThrustEffort, body_drag, drag_in_field, body_mass, thrust_capacity, wasd_direction, world_radius,
 };
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::metabolism::CurrencyPools;
@@ -137,6 +140,7 @@ fn apply_thrust(
     time: Res<Time>,
     walls: Res<WallMap>,
     grid: Option<Res<EnvGrid>>,
+    level: Option<Res<CurrentLevel>>,
     mut cells: Query<
         (
             &Transform,
@@ -144,6 +148,7 @@ fn apply_thrust(
             &Proteome,
             &CellSize,
             &ActionState,
+            &CuticleShield,
             &mut ConstantForce,
             &mut LinearDamping,
             &mut ThrustEffort,
@@ -151,8 +156,13 @@ fn apply_thrust(
         With<Cell>,
     >,
 ) {
-    for (transform, input, proteome, size, actions, mut force, mut damping, mut effort) in &mut cells {
-        let drag = action_damping(body_drag(size), actions);
+    let field = level.as_ref().map(|l| l.0.field);
+    for (transform, input, proteome, size, actions, shield, mut force, mut damping, mut effort) in &mut cells {
+        // The field sets the drag at the cell's position (dry ground on land is
+        // much heavier than water); a cuticle adds a little.
+        let water = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Water, transform.translation.truncate()));
+        let multiplier = field.map_or(1.0, |f| f.drag_multiplier(water));
+        let drag = drag_in_field(action_damping(body_drag(size), actions), multiplier, shield.0);
         let on_mat = grid
             .as_deref()
             .is_some_and(|g| in_mat(&walls, g.origin(), transform.translation.truncate()));

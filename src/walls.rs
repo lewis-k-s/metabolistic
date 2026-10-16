@@ -5,7 +5,7 @@
 //! world (see `world::walls_view`), and a wall cell in the grid, so it blocks
 //! movement, drift and diffusion (see `envgrid`).
 //!
-//! Four kinds of tile:
+//! Five kinds of tile:
 //!
 //! - **Wall** (`wall_membrane`): solid.
 //! - **Pore** (`wall_membrane_pore`): a wall with a transporter. A cell passes
@@ -16,6 +16,9 @@
 //!   (`MAT_CRAWL_SPEED`), with no adhesin. The grid is not blocked either: it
 //!   diffuses through at a reduced rate (`MAT_DIFFUSION_FACTOR`, see `envgrid`).
 //!   A mat is not cut: it has no body, so a lysis ignores it.
+//! - **Waxy** (M8, a plant-like wall): solid like a wall (lysis costs the plain
+//!   price). In the grid it is open, except to water: it blocks `Channel::Water`
+//!   and lets O2 and the other channels through (`WAXY_WATER_FACTOR`).
 //! - **Tough** (M7): a solid wall that fights back. A lysis costs `TOUGH_LYSE_METALS`
 //!   Metals more, and the attacker's membrane takes `TOUGH_RECOIL` damage.
 //!
@@ -53,6 +56,9 @@ pub const CONTACT_MARGIN: f32 = 3.0;
 pub const MAT_CRAWL_SPEED: f32 = 30.0;
 /// Diffusion across a mat cell, as a share of open water. **Playtest.**
 pub const MAT_DIFFUSION_FACTOR: f32 = 0.3;
+/// Diffusion of water across a waxy wall, as a share of open ground. 0 is a
+/// full block. **Playtest.**
+pub const WAXY_WATER_FACTOR: f32 = 0.0;
 /// Metals that lysis of a tough wall costs, besides the ATP. **Playtest.**
 pub const TOUGH_LYSE_METALS: f32 = 1.0;
 /// Membrane integrity that the attacker loses when it cuts a tough wall.
@@ -68,13 +74,16 @@ pub enum WallKind {
     Mat,
     /// A solid wall that costs more to cut and hurts the attacker.
     Tough,
+    /// A solid, waxy wall (plant-like). It blocks water in the grid, not O2.
+    Waxy,
 }
 
 impl WallKind {
     /// True if the tile blocks the grid (diffusion and drift): every kind except
-    /// the mat, which only slows diffusion.
+    /// the mat, which only slows diffusion, and the waxy wall, which only blocks
+    /// water.
     pub fn blocks_grid(self) -> bool {
-        !matches!(self, WallKind::Mat)
+        !matches!(self, WallKind::Mat | WallKind::Waxy)
     }
 
     /// The Metals and the membrane integrity that a lysis of this kind costs
@@ -132,7 +141,7 @@ pub fn pore_passable(proteome: &Proteome) -> bool {
 /// or ghosts.
 pub fn solid_for(kind: WallKind, proteome: &Proteome, ghosting: bool) -> bool {
     match kind {
-        WallKind::Wall | WallKind::Tough => !ghosting,
+        WallKind::Wall | WallKind::Tough | WallKind::Waxy => !ghosting,
         WallKind::Pore => !ghosting && !pore_passable(proteome),
         WallKind::Mat => false,
     }

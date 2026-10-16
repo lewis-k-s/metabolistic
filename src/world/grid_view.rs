@@ -81,18 +81,37 @@ const SURFACE_LIGHT_BANDS: [Band; 2] = [
     Band { lo: 5.5, hi: 9.5, color: [0xff, 0xf4, 0xb4] },
 ];
 
+/// Water bands (M8): a deep blue edge, then a pale blue. The art doc has no
+/// water-on-land colour yet: a stand-in for the **art owner**.
+const WATER_BANDS: [Band; 2] = [
+    Band { lo: 0.4, hi: 3.0, color: [0x1d, 0x5a, 0xa8] },
+    Band { lo: 2.5, hi: 8.0, color: [0x7a, 0xc4, 0xf4] },
+];
+
 /// How a level draws its grid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridStyle {
     light_bands: &'static [Band],
+    /// Draw the O2 layer. On land the air holds O2 everywhere, so it is not drawn.
+    draw_o2: bool,
+    /// Draw the water layer (land only).
+    draw_water: bool,
 }
 
 impl GridStyle {
     /// The style of a field.
     pub fn for_field(field: crate::level::FieldKind) -> Self {
         match field {
-            crate::level::FieldKind::Vents => Self { light_bands: &LIGHT_BANDS },
-            crate::level::FieldKind::Shallow => Self { light_bands: &SURFACE_LIGHT_BANDS },
+            crate::level::FieldKind::Vents => {
+                Self { light_bands: &LIGHT_BANDS, draw_o2: true, draw_water: false }
+            }
+            crate::level::FieldKind::Shallow => {
+                Self { light_bands: &SURFACE_LIGHT_BANDS, draw_o2: true, draw_water: false }
+            }
+            // Light is the same everywhere on land, so it is not drawn.
+            crate::level::FieldKind::Land => {
+                Self { light_bands: &[], draw_o2: false, draw_water: true }
+            }
         }
     }
 }
@@ -157,8 +176,19 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
             // cannot draw anything here, so it is not interpolated.
             let taps = bilinear_taps(dims, origin, pos);
             let heat = level_at(&taps, grid.layer(Channel::Heat), HEAT_BANDS[0].lo);
-            let light = level_at(&taps, grid.layer(Channel::Light), style.light_bands[0].lo);
-            let o2 = level_at(&taps, grid.layer(Channel::O2), O2_BANDS[0].lo);
+            let light = style.light_bands.first().map_or(0.0, |band| {
+                level_at(&taps, grid.layer(Channel::Light), band.lo)
+            });
+            let o2 = if style.draw_o2 {
+                level_at(&taps, grid.layer(Channel::O2), O2_BANDS[0].lo)
+            } else {
+                0.0
+            };
+            let water = if style.draw_water {
+                level_at(&taps, grid.layer(Channel::Water), WATER_BANDS[0].lo)
+            } else {
+                0.0
+            };
             let minerals = level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo);
             // Strong heat is drawn over light. Weak heat is not, so the faint
             // halo of a vent does not hide a shaft.
@@ -169,6 +199,7 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
             }
             .or_else(|| band_color(style.light_bands, light, threshold))
             .or_else(|| band_color(&HEAT_BANDS, heat, threshold))
+            .or_else(|| band_color(&WATER_BANDS, water, threshold))
             .or_else(|| band_color(&O2_BANDS, o2, threshold))
             .or_else(|| band_color(&MINERAL_BANDS, minerals, threshold));
             if let Some([r, g, b]) = color {

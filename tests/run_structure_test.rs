@@ -146,10 +146,14 @@ fn the_vents_lead_to_shallow_water_and_the_run_is_complete_when_no_next_stage_ha
     assert_eq!(run.stage(), Stage::ShallowWater);
     assert!(run.level_def().is_some());
     assert!(run.carry.is_some());
-    // ... and land has no level yet, so shallow water ends the run.
+    // ... shallow water to land (M8) ...
+    assert_eq!(run.complete_stage(starter_carry(&BTreeSet::new()), Stage::is_playable), StageOutcome::NextStage);
+    assert_eq!(run.stage(), Stage::Land);
+    assert!(run.level_def().is_some());
+    // ... and land is the last stage, so winning it ends the run.
     let outcome = run.complete_stage(starter_carry(&BTreeSet::new()), Stage::is_playable);
     assert_eq!(outcome, StageOutcome::RunComplete);
-    assert_eq!(run.stage(), Stage::ShallowWater);
+    assert_eq!(run.stage(), Stage::Land);
 }
 
 #[test]
@@ -174,9 +178,12 @@ fn the_gate_gene_comes_with_one_free_enzyme_if_it_has_a_block() {
     grant_gate_enzyme(&mut full, BlockKind::LightCapture);
     assert!(!full.action_bar.slots.contains(&Some(action)));
     assert_eq!(full.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1);
-    // A gene with no block (Respiration, until M8) gets nothing.
+    // A gene with no block (Multicellularity) gets nothing.
+    grant_gate_enzyme(&mut carry, BlockKind::Multicellularity);
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::Multicellularity)), 0);
+    // Respiration has a block since M8: it gets a free enzyme.
     grant_gate_enzyme(&mut carry, BlockKind::Respiration);
-    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::Respiration)), 0);
+    assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::Respiration)), 1);
 }
 
 #[test]
@@ -209,15 +216,15 @@ fn winning_the_vents_goes_to_shallow_water_with_the_gate_gene_and_a_free_enzyme(
 }
 
 #[test]
-fn winning_the_last_built_stage_ends_the_run_and_banks_the_gate_gene() {
+fn winning_land_ends_the_run_and_banks_the_gate_gene() {
     let dir = TempDir::new("win");
     let mut app = app(&dir);
-    // The run is in shallow water, the last built stage (M7), and its level
-    // says that the gate gives Respiration.
+    // The run is on land, the last stage (M8), and its level says that the gate
+    // gives Multicellularity.
     let mut run = RunState::begin(4, BTreeSet::new());
-    run.stage_index = 1;
+    run.stage_index = 2;
     *app.world_mut().resource_mut::<RunState>() = run;
-    app.insert_resource(metabolistic3d::level::CurrentLevel(metabolistic3d::level::LevelDef::shallow_base()));
+    app.insert_resource(metabolistic3d::level::CurrentLevel(metabolistic3d::level::LevelDef::land_base()));
     go(&mut app, GameState::Run);
     let player = spawn_player(&mut app, starter_carry(&BTreeSet::new()), Vec2::ZERO);
     app.world_mut().commands().spawn((metabolistic3d::player::Player { client_id: 0 }, metabolistic3d::player::LocalPlayer, ControlledCell(player)));
@@ -232,12 +239,12 @@ fn winning_the_last_built_stage_ends_the_run_and_banks_the_gate_gene() {
     assert_eq!(state(&app), GameState::RunOver);
     let summary = *app.world().resource::<RunSummary>();
     assert!(summary.run_complete);
-    assert_eq!(summary.victory, Some(BlockKind::Respiration));
+    assert_eq!(summary.victory, Some(BlockKind::Multicellularity));
     let run = app.world().resource::<RunState>();
     assert!(!run.active, "the run is finished");
-    assert_eq!(run.new_genes, vec![BlockKind::Respiration]);
-    assert!(app.world().resource::<Codex>().genes.contains(&BlockKind::Respiration));
-    assert!(load(&codex_path(&dir.0)).genes.contains(&BlockKind::Respiration), "saved in the temp dir");
+    assert_eq!(run.new_genes, vec![BlockKind::Multicellularity]);
+    assert!(app.world().resource::<Codex>().genes.contains(&BlockKind::Multicellularity));
+    assert!(load(&codex_path(&dir.0)).genes.contains(&BlockKind::Multicellularity), "saved in the temp dir");
 }
 
 #[test]

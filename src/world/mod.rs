@@ -66,7 +66,8 @@ pub fn cell_layers(proteome: &Proteome, ghosting: bool) -> CollisionLayers {
     CollisionLayers::new(Layer::Cell, LayerMask(filters))
 }
 
-/// Deep-water background colour (the art doc's `WATER` ramp).
+/// Deep-water background colour (the art doc's `WATER` ramp). A level sets its own
+/// at the start (`FieldKind::background`: dry earth on land).
 const WATER_COLOR: Color = Color::srgb(0.039, 0.071, 0.149);
 
 /// Thickness of the invisible walls around the field.
@@ -85,7 +86,7 @@ pub fn plugin(app: &mut App) {
             npc_view::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
-        .add_systems(OnExit(InRun), remove_grid);
+        .add_systems(OnExit(InRun), (remove_grid, reset_background));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -104,6 +105,8 @@ fn spawn_world(
         LevelDef::vents_base()
     });
     let grid = def.grid();
+    let [r, g, b] = def.field.background();
+    commands.insert_resource(ClearColor(Color::srgb(r, g, b)));
     let world_size = grid.world_size();
     let origin = grid.origin();
 
@@ -169,6 +172,10 @@ fn spawn_world(
     commands.entity(player).insert(DespawnOnExit(InRun));
     player_body::attach_body(&mut commands, &sheets, cell);
     commands.insert_resource(CurrentLevel(def));
+}
+
+fn reset_background(mut commands: Commands) {
+    commands.insert_resource(ClearColor(WATER_COLOR));
 }
 
 fn remove_grid(mut commands: Commands) {

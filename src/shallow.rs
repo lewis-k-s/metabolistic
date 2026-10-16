@@ -110,6 +110,7 @@ pub fn field_params(channel: Channel) -> FieldParams {
             drift: Vec2::ZERO,
             open_drift_edges: false,
         },
+        Channel::Water => FieldParams::STILL,
     }
 }
 
@@ -160,6 +161,8 @@ impl LevelDef {
             shaft_level: 0.0,
             surface_light: Some(SurfaceLight { level: SURFACE_LIGHT, depth_scale: DEPTH_SCALE }),
             uv_fraction: UV_FRACTION,
+            wet: Vec::new(),
+            air_o2: 0.0,
             shelters: SHELTERS.to_vec(),
             chamber: Chamber {
                 x: CHAMBER_X,

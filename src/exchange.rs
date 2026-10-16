@@ -100,6 +100,9 @@ pub fn sense_environment_system(
         // again (see `oxygen`).
         let o2 = grid.sample(Channel::O2, transform.translation.truncate());
         env.set(Channel::O2, o2);
+        // The moisture under the cell: hydration reads it (see `desiccation`).
+        let water = grid.sample(Channel::Water, transform.translation.truncate());
+        env.set(Channel::Water, water);
     }
 }
 

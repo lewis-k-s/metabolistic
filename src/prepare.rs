@@ -2,7 +2,7 @@
 //!
 //! Before a run the player picks starting genes from the codex. The starter
 //! genome is free. Each codex gene costs `gene_cost` points; the budget is
-//! `START_BUDGET`. A gene with no block yet (`Respiration`, M8) cannot do
+//! `START_BUDGET`. A gene with no block yet (`Multicellularity`) cannot do
 //! anything, so it costs 0 and cannot be chosen. A chosen gene starts
 //! `Expressed` with one enzyme (`apply_loadout`).
 //!
@@ -102,17 +102,20 @@ mod tests {
     fn genes_with_a_block_cost_one_and_others_nothing() {
         assert_eq!(gene_cost(BlockKind::Fermentation), 1);
         assert_eq!(gene_cost(BlockKind::SecondaryMetabolites), 1);
-        assert_eq!(gene_cost(BlockKind::Respiration), 0, "no block until M8");
-        // M7: photosynthesis and catalase have blocks now.
+        assert_eq!(gene_cost(BlockKind::Multicellularity), 0, "no block");
+        // M7: photosynthesis and catalase have blocks now. M8: respiration and
+        // the cuticle too.
+        assert_eq!(gene_cost(BlockKind::Respiration), 1);
+        assert_eq!(gene_cost(BlockKind::Cuticle), 1);
         assert_eq!(gene_cost(BlockKind::LightCapture), 1);
         assert_eq!(gene_cost(BlockKind::Catalase), 1);
     }
 
     #[test]
     fn only_codex_genes_with_a_block_can_be_chosen() {
-        let codex = codex_of(&[BlockKind::Fermentation, BlockKind::Respiration]);
+        let codex = codex_of(&[BlockKind::Fermentation, BlockKind::Multicellularity]);
         assert!(is_selectable(BlockKind::Fermentation, &codex));
-        assert!(!is_selectable(BlockKind::Respiration, &codex), "no block");
+        assert!(!is_selectable(BlockKind::Multicellularity, &codex), "no block");
         assert!(!is_selectable(BlockKind::FatStorage, &codex), "not in the codex");
         // A starter gene is free already.
         let codex = codex_of(&[BlockKind::Chemosynthesis]);
@@ -133,19 +136,19 @@ mod tests {
         assert!(toggle(&mut chosen, BlockKind::VesicleExport, &codex, START_BUDGET));
         assert!(!chosen.contains(&BlockKind::Fermentation));
         // A gene with no block is refused and costs nothing.
-        let codex = codex_of(&[BlockKind::Respiration]);
-        assert!(!toggle(&mut chosen, BlockKind::Respiration, &codex, START_BUDGET));
+        let codex = codex_of(&[BlockKind::Multicellularity]);
+        assert!(!toggle(&mut chosen, BlockKind::Multicellularity, &codex, START_BUDGET));
     }
 
     #[test]
     fn sanitize_drops_unknown_and_excess_genes() {
         let codex = codex_of(&[BlockKind::Fermentation, BlockKind::FatStorage, BlockKind::VesicleExport]);
-        let want: BTreeSet<_> = [BlockKind::Fermentation, BlockKind::FatStorage, BlockKind::VesicleExport, BlockKind::Respiration]
+        let want: BTreeSet<_> = [BlockKind::Fermentation, BlockKind::FatStorage, BlockKind::VesicleExport, BlockKind::Multicellularity]
             .into_iter()
             .collect();
         let got = sanitize(&want, &codex, START_BUDGET);
         assert_eq!(spent(&got), 2);
-        assert!(!got.contains(&BlockKind::Respiration));
+        assert!(!got.contains(&BlockKind::Multicellularity));
     }
 
     #[test]
@@ -163,10 +166,10 @@ mod tests {
 
     #[test]
     fn the_list_puts_selectable_genes_first() {
-        let codex = codex_of(&[BlockKind::Respiration, BlockKind::Fermentation]);
+        let codex = codex_of(&[BlockKind::Multicellularity, BlockKind::Fermentation]);
         assert_eq!(
             codex_list(&codex),
-            vec![(BlockKind::Fermentation, true), (BlockKind::Respiration, false)]
+            vec![(BlockKind::Fermentation, true), (BlockKind::Multicellularity, false)]
         );
     }
 }

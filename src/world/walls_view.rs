@@ -34,6 +34,8 @@ pub fn tile_tint(kind: WallKind) -> Color {
     match kind {
         WallKind::Mat => Color::srgba(0.55, 0.75, 0.35, 0.8),
         WallKind::Tough => Color::srgb(0.75, 0.35, 0.35),
+        // A waxy, plant-like green-yellow. Stand-in for the **art owner**.
+        WallKind::Waxy => Color::srgb(0.62, 0.78, 0.38),
         WallKind::Wall | WallKind::Pore => Color::WHITE,
     }
 }
@@ -69,7 +71,7 @@ pub fn spawn_walls(
     for (tile, kind) in map.tiles() {
         let centre = tile_center(grid.origin(), tile).round();
         let layer = match kind {
-            WallKind::Wall | WallKind::Tough => Layer::Wall,
+            WallKind::Wall | WallKind::Tough | WallKind::Waxy => Layer::Wall,
             WallKind::Pore => Layer::Pore,
             // A mat has no body: the layer is only a label.
             WallKind::Mat => Layer::Default,
@@ -101,7 +103,7 @@ pub fn spawn_walls(
                     Transform::from_translation(Vec3::new(0.0, 0.0, WALL_Z)).with_rotation(rotation),
                 ));
             }
-            WallKind::Wall | WallKind::Tough | WallKind::Mat => {
+            WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Mat => {
                 for side in [-0.5, 0.5] {
                     // Along the wall: x for a horizontal tile, y for a vertical one.
                     let offset = side * PIECE_WIDTH;
@@ -173,7 +175,7 @@ mod tests {
             Duration::from_secs_f64(1.0 / 64.0),
         ));
         let layer = match kind {
-            WallKind::Wall | WallKind::Tough => Layer::Wall,
+            WallKind::Wall | WallKind::Tough | WallKind::Waxy => Layer::Wall,
             WallKind::Pore => Layer::Pore,
             // A mat has no body: the layer is only a label.
             WallKind::Mat => Layer::Default,

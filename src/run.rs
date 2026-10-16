@@ -95,7 +95,7 @@ pub fn carry_over(genome: &Genome, proteome: &Proteome, action_bar: &ActionBar) 
 
 /// The reward of a gate cell: if its gene has a block, the carry gets one free
 /// enzyme for it, so the next stage starts with the pathway working, slowly.
-/// A gene with no block yet (Respiration until M8) gets nothing. The pathway
+/// A gene with no block (Multicellularity) gets nothing. The pathway
 /// also goes into the first empty action slot (if one is free), so the player
 /// can turn it Off or Low at once: photosynthesis makes ROS.
 pub fn grant_gate_enzyme(carry: &mut Carry, gene: BlockKind) {
@@ -193,9 +193,10 @@ pub fn run_over_title(summary: &RunSummary) -> &'static str {
 /// The line under the title: the cause of death, or the gene that was taken.
 pub fn run_over_message(summary: &RunSummary) -> String {
     match summary.victory {
-        Some(gene) => format!(
-            "You engulfed the gate cell and took its gene: {gene:?}. (More stages coming.)"
+        Some(gene) if summary.run_complete => format!(
+            "You engulfed the last gate cell and took its gene: {gene:?}. You crossed from the vents to the land."
         ),
+        Some(gene) => format!("You engulfed the gate cell and took its gene: {gene:?}."),
         None => death_message(summary.cause, summary.source),
     }
 }
@@ -220,6 +221,9 @@ pub fn death_message(cause: Option<DeathCause>, source: Option<DamageSource>) ->
             Some(DamageSource::Uv) => "Your membrane failed. Main damage: UV light.".to_string(),
             Some(DamageSource::Ros) => {
                 "Your membrane failed. Main damage: reactive oxygen species. You poisoned yourself with your own oxygen.".to_string()
+            }
+            Some(DamageSource::Desiccation) => {
+                "Your membrane failed. Main damage: desiccation. You dried out away from water.".to_string()
             }
             None => "Your membrane failed.".to_string(),
         },
@@ -398,6 +402,8 @@ mod tests {
         assert!(burnt.contains("heat"));
         let ros = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Ros));
         assert!(ros.contains("oxygen") && ros != uv && ros != burnt);
+        let dry = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Desiccation));
+        assert!(dry.contains("desiccation") && dry != ros && dry != uv);
         assert_ne!(starved, death_message(None, None));
     }
 }

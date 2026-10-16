@@ -154,6 +154,8 @@ pub fn field_params(channel: Channel) -> FieldParams {
             drift: Vec2::ZERO,
             open_drift_edges: false,
         },
+        // No water channel in the vents: the sea is not a "wet zone".
+        Channel::Water => FieldParams::STILL,
     }
 }
 
@@ -339,6 +341,11 @@ pub struct LevelDef {
     pub surface_light: Option<SurfaceLight>,
     /// Share of the light that is UV.
     pub uv_fraction: f32,
+    /// Wet zones: where the water channel has a source (land only).
+    pub wet: Vec<WetSpot>,
+    /// O2 level of the air (land only): a uniform source over the whole field.
+    /// 0 is no air.
+    pub air_o2: f32,
     pub shelters: Vec<crate::shelter::Shelter>,
     pub chamber: Chamber,
     pub lines: Vec<WallLine>,
@@ -361,12 +368,42 @@ pub struct LevelDef {
     pub start: Vec2,
 }
 
+/// A wet zone of the land level: a puddle, the shore or a moist soil pore. It is
+/// a source of `Channel::Water`; the steady level inside is about `level`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WetSpot {
+    Disc { centre: Vec2, radius: f32, level: f32 },
+    Rect { min: Vec2, max: Vec2, level: f32 },
+}
+
+impl WetSpot {
+    /// Distance from a point to the zone, 0 inside it.
+    pub fn distance(&self, point: Vec2) -> f32 {
+        match *self {
+            WetSpot::Disc { centre, radius, .. } => (point.distance(centre) - radius).max(0.0),
+            WetSpot::Rect { min, max, .. } => {
+                let outside = (min - point).max(point - max).max(Vec2::ZERO);
+                outside.length()
+            }
+        }
+    }
+
+    pub fn level(&self) -> f32 {
+        match *self {
+            WetSpot::Disc { level, .. } | WetSpot::Rect { level, .. } => level,
+        }
+    }
+}
+
 /// The channel physics of a level. A new stage adds a kind with its own values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     Vents,
     /// Shallow water: light from the surface, calm water, O2.
     Shallow,
+    /// Land: air with O2 everywhere, water only in wet zones, heavy drag on dry
+    /// ground.
+    Land,
 }
 
 impl FieldKind {
@@ -374,6 +411,38 @@ impl FieldKind {
         match self {
             FieldKind::Vents => field_params(channel),
             FieldKind::Shallow => crate::shallow::field_params(channel),
+            FieldKind::Land => crate::land::field_params(channel),
+        }
+    }
+
+    /// The factor on a cell's drag at a water level. Water (and every field but
+    /// land) is 1. Dry ground on land is much more (`land::DRY_DRAG`).
+    pub fn drag_multiplier(self, water: f32) -> f32 {
+        match self {
+            FieldKind::Land => crate::land::drag_multiplier(water),
+            _ => 1.0,
+        }
+    }
+
+    /// Share of the difference between a cell's O2 and the grid that moves per
+    /// second: air is faster than water.
+    pub fn o2_exchange_rate(self) -> f32 {
+        match self {
+            FieldKind::Land => crate::oxygen::AIR_EXCHANGE_RATE,
+            _ => crate::oxygen::O2_EXCHANGE_RATE,
+        }
+    }
+
+    /// True if a cell can dry out here (see `desiccation`).
+    pub fn dries(self) -> bool {
+        matches!(self, FieldKind::Land)
+    }
+
+    /// The background colour of the field: deep water, or dry earth.
+    pub fn background(self) -> [f32; 3] {
+        match self {
+            FieldKind::Land => [0.165, 0.125, 0.09],
+            _ => [0.039, 0.071, 0.149],
         }
     }
 }
@@ -396,6 +465,8 @@ impl LevelDef {
             shaft_level: SHAFT_LEVEL,
             surface_light: None,
             uv_fraction: UV_FRACTION,
+            wet: Vec::new(),
+            air_o2: 0.0,
             shelters: SHELTERS.to_vec(),
             chamber: Chamber {
                 x: CHAMBER_X,
@@ -514,13 +585,32 @@ impl LevelDef {
                 );
             }
         }
+        // Air: O2 everywhere (land).
+        if self.air_o2 > 0.0 {
+            let source = self.air_o2 * grid.params(Channel::O2).decay;
+            let (min, max) = (grid.origin(), grid.origin() + grid.world_size());
+            grid.add_rect_emitter(Channel::O2, min, max, source);
+        }
+        // Wet zones: the steady level inside is `level`.
+        let water_decay = grid.params(Channel::Water).decay;
+        for spot in &self.wet {
+            let source = spot.level() * water_decay;
+            match *spot {
+                WetSpot::Disc { centre, radius, .. } => {
+                    grid.add_disc_emitter(Channel::Water, centre, radius, source)
+                }
+                WetSpot::Rect { min, max, .. } => grid.add_rect_emitter(Channel::Water, min, max, source),
+            }
+        }
         // Walls first, so that nothing flows into them during the warm-up. A
-        // mat is not a wall: it only slows diffusion.
+        // mat is not a wall: it only slows diffusion. A waxy wall only stops water.
         for ((x, y), kind) in self.wall_tiles() {
-            if kind.blocks_grid() {
-                grid.set_wall(x, y, true);
-            } else {
-                grid.set_leak(x, y, crate::walls::MAT_DIFFUSION_FACTOR);
+            match kind {
+                kind if kind.blocks_grid() => grid.set_wall(x, y, true),
+                crate::walls::WallKind::Waxy => {
+                    grid.set_channel_leak(Channel::Water, x, y, crate::walls::WAXY_WATER_FACTOR)
+                }
+                _ => grid.set_leak(x, y, crate::walls::MAT_DIFFUSION_FACTOR),
             }
         }
         grid
@@ -534,6 +624,10 @@ impl LevelDef {
         }
         // Light shafts are static: after the warm-up the grid does not step them.
         grid.settle(Channel::Light);
+        // Wet zones are static too: their steady state does not change.
+        if !self.wet.is_empty() {
+            grid.settle(Channel::Water);
+        }
         grid
     }
 }

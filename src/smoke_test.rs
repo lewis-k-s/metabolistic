@@ -7,6 +7,14 @@
 //! dies, or the player does not move while W is held. Screenshots go to
 //! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
 //!
+//! M8 steps: after the second StageComplete the sequence enters land (the smoke
+//! test sets the run state as a won shallow stage would: a carry with
+//! Respiration and its free enzyme). Three Run steps follow: the start with W
+//! held (the drag on dry ground slows the cell), a dry stretch of the plain with
+//! hydration 0.2 (the HUD warning), and the waxy gate chamber. The test checks
+//! that the stage is land, that the cell has respiration, and that the world has
+//! creatures and a gate cell.
+//!
 //! M7 steps: after StageComplete the sequence enters the shallow-water stage (the
 //! smoke test sets the run state as a won vent stage would: the next stage, and a
 //! carry with the gate gene and its free enzyme). Three Run steps follow: the
@@ -64,12 +72,16 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 13] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 17] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Prepare, None),
     (GameState::Run, None),
     (GameState::Manage, None),
+    (GameState::Run, None),
+    (GameState::Run, None),
+    (GameState::StageComplete, None),
+    (GameState::Run, None),
     (GameState::Run, None),
     (GameState::Run, None),
     (GameState::StageComplete, None),
@@ -92,6 +104,12 @@ const STEP_STAGE_COMPLETE: usize = 7;
 const STEP_SHALLOW: usize = 8;
 const STEP_SHALLOW_CATALASE: usize = 9;
 const STEP_SHALLOW_GATE: usize = 10;
+/// The second stage-complete screen. The run state moves to land here.
+const STEP_STAGE_COMPLETE_2: usize = 11;
+/// The land steps (M8).
+const STEP_LAND: usize = 12;
+const STEP_LAND_DRY: usize = 13;
+const STEP_LAND_GATE: usize = 14;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -130,7 +148,7 @@ pub fn plugin(app: &mut App) {
         screenshot_requested_at: None,
         run_start: None,
     })
-    .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_advance_stage))
+    .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage))
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
 }
@@ -264,7 +282,7 @@ fn drive_smoke_test(
             smoke.screenshot_requested_at = None;
             // A new world follows the stage-complete screen: measure the move from
             // its start.
-            if smoke.step == STEP_SHALLOW {
+            if smoke.step == STEP_SHALLOW || smoke.step == STEP_LAND {
                 smoke.run_start = None;
             }
             if smoke.step == SEQUENCE.len() {
@@ -393,23 +411,39 @@ fn smoke_actions(
     }
 }
 
-/// On the stage-complete screen, the run moves on as it would after a win: the
+/// On a stage-complete screen, the run moves on as it would after a win: the
 /// next stage, and a carry with the gate gene and its free enzyme.
 fn smoke_advance_stage(
     smoke: Res<SmokeTest>,
     state: Res<State<GameState>>,
     mut run: ResMut<crate::run::RunState>,
-    mut done: Local<bool>,
+    mut done: Local<[bool; 2]>,
 ) {
-    if smoke.step != STEP_STAGE_COMPLETE || *state.get() != GameState::StageComplete || *done {
+    if *state.get() != GameState::StageComplete {
+        return;
+    }
+    let (index, gene) = match smoke.step {
+        STEP_STAGE_COMPLETE => (0, BlockKind::LightCapture),
+        STEP_STAGE_COMPLETE_2 => (1, BlockKind::Respiration),
+        _ => return,
+    };
+    if done[index] {
         return;
     }
     let mut carry = crate::run::starter_carry(&run.loadout);
-    carry.genome.table.insert(BlockKind::LightCapture, crate::blocks::genome::GeneState::Expressed);
-    crate::run::grant_gate_enzyme(&mut carry, BlockKind::LightCapture);
+    // The cell that won the stage before: photosynthesis, and on land also
+    // catalase (the shallow key gene) and respiration (the shallow gate gene).
+    let mut genes = vec![BlockKind::LightCapture];
+    if gene == BlockKind::Respiration {
+        genes.extend([BlockKind::Catalase, BlockKind::Respiration]);
+    }
+    for kind in genes {
+        carry.genome.table.insert(kind, crate::blocks::genome::GeneState::Expressed);
+        crate::run::grant_gate_enzyme(&mut carry, kind);
+    }
     let outcome = run.complete_stage(carry, crate::stage::Stage::is_playable);
     assert_eq!(outcome, crate::run::StageOutcome::NextStage, "smoke test: no next stage");
-    *done = true;
+    done[index] = true;
     info!("smoke test: the run moved on to {:?}", run.stage());
 }
 
@@ -487,6 +521,92 @@ fn smoke_shallow(
             info!("smoke test: moved the player below the shallow gate chamber");
         }
         STEP_SHALLOW_GATE if done[2] => {
+            keys.release(KeyCode::KeyW);
+            if smoke.frames_in_step == 100 && !done[3] {
+                assert!(gates.iter().all(|g| g.held == 0.0), "smoke test: the player touched the gate cell");
+                done[3] = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The M8 checks and views on land.
+#[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
+fn smoke_land(
+    smoke: Res<SmokeTest>,
+    state: Res<State<GameState>>,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut cells: Query<
+        (&Proteome, &mut CurrencyPools, &crate::cell::CellBlocks, &mut crate::desiccation::Hydration, &LocalEnvironment),
+        With<Cell>,
+    >,
+    npcs: Query<&Npc>,
+    gates: Query<&GateProgress>,
+    run: Res<crate::run::RunState>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+    mut done: Local<[bool; 5]>,
+) {
+    if *state.get() != GameState::Run || !(STEP_LAND..=STEP_LAND_GATE).contains(&smoke.step) {
+        return;
+    }
+    let Some(cell) = players.iter().next().map(|c| c.0) else {
+        return;
+    };
+    let Ok((proteome, pools, blocks, mut hydration, env)) = cells.get_mut(cell) else {
+        return;
+    };
+    let teleport = |commands: &mut Commands, position: Vec2| {
+        commands.entity(cell).insert((
+            Transform::from_translation(position.extend(0.0)),
+            Position(position),
+            LinearVelocity(Vec2::ZERO),
+        ));
+    };
+    match smoke.step {
+        STEP_LAND if !done[0] && smoke.frames_in_step >= 5 => {
+            assert_eq!(run.stage(), crate::stage::Stage::Land, "smoke test: not on land");
+            assert!(blocks.contains(BlockKind::Respiration), "smoke test: no respiration block");
+            assert!(proteome.enzymes(BlockKind::Respiration) >= 1, "smoke test: no free enzyme for respiration");
+            commands.entity(cell).insert(Invulnerable);
+            let mut count = std::collections::BTreeMap::new();
+            for npc in &npcs {
+                *count.entry(format!("{:?}", npc.archetype)).or_insert(0) += 1;
+            }
+            info!("smoke test: land, NPCs: {count:?}");
+            assert!(
+                npcs.iter().filter(|n| n.archetype != Archetype::Gate).count() >= 8,
+                "smoke test: the land world has too few NPCs"
+            );
+            assert!(gates.iter().count() == 1, "smoke test: the land world has no gate cell");
+            done[0] = true;
+        }
+        STEP_LAND if done[0] && smoke.frames_in_step == 100 => {
+            info!(
+                "smoke test: land start, O2 {:.1} ROS {:.1} ATP {:.1} hydration {:.2} water {:.1}",
+                pools.get(Currency::O2),
+                pools.get(Currency::ROS),
+                pools.get(Currency::ATP),
+                hydration.0,
+                env.get(Channel::Water),
+            );
+        }
+        STEP_LAND_DRY if !done[1] && smoke.frames_in_step >= 2 => {
+            // On the dry plain, with a dry cell: the HUD warns.
+            teleport(&mut commands, Vec2::new(-330.0, -190.0));
+            hydration.0 = 0.2;
+            done[1] = true;
+            info!("smoke test: moved the player to the dry plain, hydration 0.2");
+        }
+        STEP_LAND_DRY if done[1] => keys.release(KeyCode::KeyW),
+        STEP_LAND_GATE if !done[2] && smoke.frames_in_step >= 2 => {
+            // Below the waxy chamber, W released.
+            teleport(&mut commands, Vec2::new(800.0, -110.0));
+            done[2] = true;
+            info!("smoke test: moved the player below the land gate chamber");
+        }
+        STEP_LAND_GATE if done[2] => {
             keys.release(KeyCode::KeyW);
             if smoke.frames_in_step == 100 && !done[3] {
                 assert!(gates.iter().all(|g| g.held == 0.0), "smoke test: the player touched the gate cell");
