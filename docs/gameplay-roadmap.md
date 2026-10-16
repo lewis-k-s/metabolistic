@@ -1,7 +1,8 @@
 # Gameplay core: design and roadmap
 
-Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done. M7 is done. M8 is done (not committed yet): the last milestone of the roadmap. Next: playtest and tune all three stages.
+Status: agreed in a design review on 2026-10-15. M1 to M8 are done (2026-10-16) on
+`core-gameplay-design`; `master` has M1 and M2. Next: playtest and tune all
+three stages.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
