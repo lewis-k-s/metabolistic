@@ -81,13 +81,9 @@ fn slot_hotkeys(
 /// The sprite name of the overlay for a protein, if the art has one.
 pub fn overlay_sprite(protein: MembraneProtein) -> Option<&'static str> {
     match protein {
-        MembraneProtein::Flagellum => Some("overlay_flagellum"),
-        MembraneProtein::Adhesin => Some("overlay_adhesin"),
-        MembraneProtein::Toxin => Some("overlay_toxin"),
-        // The only transporter that exists takes up minerals.
-        MembraneProtein::Transporter => Some("overlay_transporter_mineral"),
-        MembraneProtein::Lytic => Some("overlay_lytic"),
+        // The Run screen does not mount a receptor yet.
         MembraneProtein::Receptor => None,
+        _ => Some(crate::proteins::overlay_sheet(protein)),
     }
 }
 
