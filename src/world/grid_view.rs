@@ -88,6 +88,35 @@ const WATER_BANDS: [Band; 2] = [
     Band { lo: 2.5, hi: 8.0, color: [0x7a, 0xc4, 0xf4] },
 ];
 
+/// How strongly a band shows at `level`: 0 before it starts, 1 at its top.
+fn band_strength(band: &Band, level: f32) -> f32 {
+    let t = ((level - band.lo) / (band.hi - band.lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn glow(bands: &[Band], level: f32) -> Vec<(Color, f32)> {
+    bands
+        .iter()
+        .map(|b| (Color::srgb_u8(b.color[0], b.color[1], b.color[2]), band_strength(b, level)))
+        .collect()
+}
+
+/// The glow of the Run grid at a heat level: a colour and a strength for each
+/// band, outer to inner. The Manage screen draws the outside with it.
+pub fn heat_glow(level: f32) -> Vec<(Color, f32)> {
+    glow(&HEAT_BANDS, level)
+}
+
+/// The same for minerals.
+pub fn mineral_glow(level: f32) -> Vec<(Color, f32)> {
+    glow(&MINERAL_BANDS, level)
+}
+
+/// The same for light.
+pub fn light_glow(level: f32) -> Vec<(Color, f32)> {
+    glow(&LIGHT_BANDS, level)
+}
+
 /// How a level draws its grid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridStyle {

@@ -1,21 +1,24 @@
 //! The metabolic map: pools, pathway plates with enzymes, pipes and the
 //! molecules that flow in them, and the ribosome.
 //!
-//! The pools and plates are spawned once when the screen opens. Pipes are
-//! spawned the first time the view has an edge for them (the map is fixed, so
-//! that is the first frame, and later for flows of the ledger). Each frame the
-//! systems here only change what the sprites show, from `LocalMetabolismView`:
-//! nothing is rebuilt, so hover and animation stay smooth. The screen computes
-//! no flow: it draws the `flux` of each edge.
+//! The pools and plates are spawned once for a map size (`MapLayout`); a new
+//! size (the window changed) spawns them again. Pipes are spawned the first
+//! time the view has an edge for them (the map is fixed, so that is the first
+//! frame, and later for flows of the ledger). Each frame the systems here only
+//! change what the sprites show, from `LocalMetabolismView`: nothing is
+//! rebuilt, so hover and animation stay smooth. The screen computes no flow:
+//! it draws the `flux` of each edge.
+//!
+//! A pathway that the cell does not have (a ghost) is a dim plate with no
+//! pipes. If the player does not know it, the plate shows only a "?".
 
 use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
 
 use bevy::prelude::*;
 use bevy::sprite::{Anchor, BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
 
-use super::layout::{self, Place};
-use super::{BAD, Pick, make_pickable, map_layer};
+use super::layout::{self, Layout, Router};
+use super::{BAD, GOOD, MapEntity, MapLayout, Pick, make_pickable, map_layer};
 use crate::GameState;
 use crate::actions::{HIGH_LEVEL, LOW_LEVEL};
 use crate::blocks::genome::BlockKind;
@@ -23,30 +26,32 @@ use crate::environment::Channel;
 use crate::metabolism::BlockStatus;
 use crate::metabolism::ledger::FlowSource;
 use crate::metabolism::solver::Limit;
-use crate::metabolism::view::{EdgeKind, EdgeView, LocalMetabolismView, MetabolismView, Node, PathwayView};
+use crate::metabolism::view::{
+    EdgeKind, EdgeView, LocalMetabolismView, MetabolismView, Node, PathwayView, net_rate,
+};
 use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{SynthesisQueue, UNITS_PER_PROTEIN, synthesis_eta};
 use crate::sprites::Sheets;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<PipeIndex>()
-        .add_systems(OnEnter(GameState::Manage), spawn_map)
-        .add_systems(OnExit(GameState::Manage), reset_index)
-        .add_systems(
-            Update,
-            (
-                sync_pipes,
-                draw_pipes,
-                emit_specks,
-                move_specks,
-                update_pools,
-                update_plates,
-                update_ribosome_text,
-            )
-                .chain()
-                .run_if(in_state(GameState::Manage)),
-        );
+    app.init_resource::<PipeIndex>().add_systems(
+        Update,
+        (
+            spawn_map.run_if(resource_exists_and_changed::<MapLayout>),
+            sync_pipes,
+            draw_pipes,
+            update_stub_labels,
+            emit_specks,
+            move_specks,
+            update_pools,
+            update_plates,
+            update_ribosome_text,
+        )
+            .chain()
+            .after(super::fit_map)
+            .run_if(in_state(GameState::Manage)),
+    );
 }
 
 // --- Z order (world units, only for the order of drawing) ---
@@ -110,23 +115,42 @@ pub fn spaced_name(kind: BlockKind) -> String {
     out
 }
 
-/// A short name that fits on a plate.
-pub fn short_name(kind: BlockKind) -> &'static str {
+/// The name on a plate, in one or two lines (a line is at most 14 letters).
+pub fn plate_label(kind: BlockKind) -> &'static str {
     match kind {
-        BlockKind::Chemosynthesis => "Chemo",
-        BlockKind::LightCapture => "Light",
-        BlockKind::Respiration => "Respire",
-        BlockKind::Fermentation => "Ferment",
+        BlockKind::Chemosynthesis => "Chemosynthesis",
+        BlockKind::LightCapture => "Light\ncapture",
+        BlockKind::Respiration => "Respiration",
+        BlockKind::Fermentation => "Fermentation",
         BlockKind::Catalase => "Catalase",
-        BlockKind::AminoAcidBiosynthesis => "Amino ac.",
-        BlockKind::LipidMetabolism => "Lipids",
-        BlockKind::NucleotideCofactorSynthesis => "Nucleotid",
-        BlockKind::SecondaryMetabolites => "Pigments",
-        BlockKind::ProteinSynthesis => "Proteins",
-        BlockKind::FatStorage => "Fat store",
+        BlockKind::AminoAcidBiosynthesis => "Amino acid\nbiosynthesis",
+        BlockKind::LipidMetabolism => "Lipid\nmetabolism",
+        BlockKind::NucleotideCofactorSynthesis => "Nucleotide\ncofactors",
+        BlockKind::SecondaryMetabolites => "Secondary\nmetabolites",
+        BlockKind::ProteinSynthesis => "Protein\nsynthesis",
+        BlockKind::FatStorage => "Fat storage",
         BlockKind::Cuticle => "Cuticle",
-        BlockKind::VesicleExport => "Export",
+        BlockKind::VesicleExport => "Vesicle\nexport",
         _ => "?",
+    }
+}
+
+/// The name of a pool, as the player reads it.
+pub fn pool_name(currency: Currency) -> &'static str {
+    match currency {
+        Currency::ATP => "ATP",
+        Currency::ReducingPower => "Reducing power",
+        Currency::Pyruvate => "Pyruvate",
+        Currency::CarbonSkeletons => "Carbon",
+        Currency::AminoAcids => "Amino acids",
+        Currency::Nucleotides => "Nucleotides",
+        Currency::Lipids => "Lipids",
+        Currency::Metals => "Metals",
+        Currency::Waste => "Waste",
+        Currency::Minerals => "Minerals",
+        Currency::Pigments => "Pigments",
+        Currency::O2 => "Oxygen",
+        Currency::ROS => "ROS",
     }
 }
 
@@ -290,10 +314,16 @@ struct PoolGauge(Currency);
 struct PoolIcon(Currency);
 
 #[derive(Component)]
+struct PoolRate(Currency);
+
+#[derive(Component)]
 struct PlateFrame(BlockKind);
 
 #[derive(Component)]
 struct PlateIcon(BlockKind);
+
+#[derive(Component)]
+struct PlateQuestion(BlockKind);
 
 #[derive(Component)]
 struct PlateLabel(BlockKind);
@@ -309,7 +339,7 @@ struct EnzymeSprite {
 struct EnzymeMore(BlockKind);
 
 #[derive(Component)]
-struct Badge(BlockKind);
+pub(super) struct Badge(pub BlockKind);
 
 #[derive(Component)]
 struct Valve(BlockKind);
@@ -319,7 +349,7 @@ struct RibosomeText;
 
 /// A pipe. Its sprites are `segments`.
 #[derive(Component)]
-struct Pipe {
+pub(super) struct Pipe {
     route: Vec<Vec2>,
     length: f32,
     segments: Vec<Entity>,
@@ -329,12 +359,20 @@ struct Pipe {
     speck_image: Option<Handle<Image>>,
     /// What the pipe shows now.
     flux: f32,
-    limiting: bool,
+    pub(super) limiting: bool,
+    /// A ghost pathway has no pipes; a stub with no flow is not drawn.
+    hidden: bool,
     accum: f32,
 }
 
 #[derive(Component)]
 struct PipeSegment;
+
+/// The rate text of a stub, at the far end of its pipe.
+#[derive(Component)]
+struct StubRate {
+    incoming: bool,
+}
 
 #[derive(Component)]
 struct Speck {
@@ -351,10 +389,7 @@ struct PipeIndex {
     pipes: HashMap<EdgeKey, Option<Entity>>,
     /// Stubs on the left of each pool.
     stubs: HashMap<Currency, usize>,
-}
-
-fn reset_index(mut index: ResMut<PipeIndex>) {
-    *index = PipeIndex::default();
+    router: Router,
 }
 
 /// Text in world space. The font is twice the size: the caller sets a
@@ -401,55 +436,86 @@ fn plate_slicer() -> SpriteImageMode {
 const MAX_ENZYME_SPRITES: usize = 6;
 const ENZYME_SIZE: f32 = 9.0;
 const ENZYME_PITCH: f32 = 10.0;
+const LABEL_COLOR: Color = Color::srgb(0.85, 0.88, 0.95);
 
-fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheets>) {
+/// Spawns the pools, plates and the ribosome for the current layout. Called
+/// again when the layout changes (`fit_map` removed the old ones).
+fn spawn_map(
+    mut commands: Commands,
+    server: Res<AssetServer>,
+    sheets: Res<Sheets>,
+    layout: Res<MapLayout>,
+    mut index: ResMut<PipeIndex>,
+) {
+    *index = PipeIndex::default();
     // Pools.
     for currency in Currency::ALL {
-        let place = layout::pool_place(currency);
+        let place = layout.pool_place(currency);
         commands
             .spawn((
                 Name::new(format!("Pool {currency:?}")),
+                MapEntity,
                 Transform::from_translation(place.pos.extend(Z_NODE)),
                 Visibility::default(),
                 map_layer(),
                 DespawnOnExit(GameState::Manage),
             ))
             .with_children(|pool| {
-                let mut icon = pool.spawn((
-                    PoolIcon(currency),
-                    icon_sprite(&server, mol_icon(currency), currency_color(currency), Vec2::splat(12.0)),
-                    Transform::from_xyz(0.0, 3.0, 0.5),
+                let mut frame = pool.spawn((
+                    Sprite {
+                        image: server.load("sprites/pathway_plate.png"),
+                        custom_size: Some(place.size),
+                        image_mode: plate_slicer(),
+                        color: Color::srgb(0.6, 0.65, 0.8),
+                        ..default()
+                    },
                     map_layer(),
                 ));
-                make_pickable(&mut icon, Pick::Pool(currency));
-                // The gauge: a dark track and a fill.
+                make_pickable(&mut frame, Pick::Pool(currency));
                 pool.spawn((
-                    Sprite::from_color(Color::srgb(0.12, 0.13, 0.2), Vec2::new(20.0, 3.0)),
-                    Transform::from_xyz(0.0, -5.0, 0.4),
+                    PoolIcon(currency),
+                    icon_sprite(&server, mol_icon(currency), currency_color(currency), Vec2::splat(12.0)),
+                    Transform::from_xyz(-place.size.x / 2.0 + 11.0, 2.0, Z_ICON - Z_NODE),
+                    map_layer(),
+                ));
+                pool.spawn((
+                    world_text(pool_name(currency), 6.0, LABEL_COLOR),
+                    Anchor::CENTER_LEFT,
+                    text_at(-place.size.x / 2.0 + 20.0, 5.0, Z_TEXT - Z_NODE),
+                ));
+                pool.spawn((
+                    PoolRate(currency),
+                    world_text("", 6.0, GOOD),
+                    Anchor::CENTER_LEFT,
+                    text_at(-place.size.x / 2.0 + 20.0, -3.0, Z_TEXT - Z_NODE),
+                ));
+                // The gauge: a dark track along the bottom, and a fill.
+                let track = place.size.x - 14.0;
+                pool.spawn((
+                    Sprite::from_color(Color::srgb(0.12, 0.13, 0.2), Vec2::new(track, 3.0)),
+                    Transform::from_xyz(0.0, -place.size.y / 2.0 + 4.0, Z_ICON - Z_NODE),
                     map_layer(),
                 ));
                 pool.spawn((
                     PoolGauge(currency),
-                    Sprite::from_color(currency_color(currency), Vec2::new(18.0, 2.0)),
+                    Sprite::from_color(currency_color(currency), Vec2::new(track, 2.0)),
                     Anchor::CENTER_LEFT,
-                    Transform::from_xyz(-9.0, -5.0, 0.5),
+                    Transform::from_xyz(-track / 2.0, -place.size.y / 2.0 + 4.0, Z_ICON - Z_NODE + 0.1),
                     map_layer(),
-                ));
-                pool.spawn((
-                    world_text(layout::pool_label(currency), 6.0, Color::srgb(0.75, 0.78, 0.85)),
-                    text_at(0.0, -10.5, 0.6),
                 ));
             });
     }
 
     // Plates.
     for kind in layout::mapped_kinds() {
-        let Some(place) = layout::plate_place(kind) else {
+        let Some(place) = layout.plate_place(kind) else {
             continue;
         };
+        let left = -place.size.x / 2.0;
         commands
             .spawn((
                 Name::new(format!("Plate {kind:?}")),
+                MapEntity,
                 Transform::from_translation(place.pos.extend(Z_NODE)),
                 Visibility::default(),
                 map_layer(),
@@ -469,15 +535,21 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
                 make_pickable(&mut frame, Pick::Pathway(kind));
                 plate.spawn((
                     PlateIcon(kind),
-                    icon_sprite(&server, pathway_icon(kind), accent(kind), Vec2::splat(14.0)),
-                    Transform::from_xyz(-place.size.x / 2.0 + 12.0, 5.0, Z_ICON - Z_NODE),
+                    icon_sprite(&server, pathway_icon(kind), accent(kind), Vec2::splat(16.0)),
+                    Transform::from_xyz(left + 15.0, 6.0, Z_ICON - Z_NODE),
                     map_layer(),
                 ));
                 plate.spawn((
+                    PlateQuestion(kind),
+                    world_text("?", 14.0, LABEL_COLOR),
+                    text_at(left + 15.0, 6.0, Z_TEXT - Z_NODE),
+                    Visibility::Hidden,
+                ));
+                plate.spawn((
                     PlateLabel(kind),
-                    world_text("", 6.0, Color::srgb(0.85, 0.88, 0.95)),
+                    world_text("", 6.0, LABEL_COLOR),
                     Anchor::CENTER_LEFT,
-                    text_at(-place.size.x / 2.0 + 21.0, 5.0, Z_TEXT - Z_NODE),
+                    text_at(left + 27.0, 6.0, Z_TEXT - Z_NODE),
                 ));
                 for index in 0..MAX_ENZYME_SPRITES {
                     plate.spawn((
@@ -488,15 +560,15 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
                             color: accent(kind),
                             ..default()
                         },
-                        Transform::from_xyz(0.0, -8.0, Z_ICON - Z_NODE),
+                        Transform::from_xyz(0.0, -place.size.y / 2.0 + 7.0, Z_ICON - Z_NODE),
                         Visibility::Hidden,
                         map_layer(),
                     ));
                 }
                 plate.spawn((
                     EnzymeMore(kind),
-                    world_text("", 7.0, Color::srgb(0.85, 0.88, 0.95)),
-                    text_at(14.0, -8.0, Z_TEXT - Z_NODE),
+                    world_text("", 6.0, LABEL_COLOR),
+                    text_at(26.0, -place.size.y / 2.0 + 7.0, Z_TEXT - Z_NODE),
                     Visibility::Hidden,
                 ));
                 plate.spawn((
@@ -506,7 +578,7 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
                         custom_size: Some(Vec2::splat(11.0)),
                         ..default()
                     },
-                    Transform::from_xyz(-place.size.x / 2.0, place.size.y / 2.0, Z_TEXT - Z_NODE),
+                    Transform::from_xyz(left, place.size.y / 2.0, Z_TEXT - Z_NODE),
                     Visibility::Hidden,
                     map_layer(),
                 ));
@@ -517,7 +589,7 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
                         custom_size: Some(Vec2::splat(11.0)),
                         ..default()
                     },
-                    Transform::from_xyz(place.size.x / 2.0 - 2.0, place.size.y / 2.0 - 1.0, Z_TEXT - Z_NODE),
+                    Transform::from_xyz(-left - 2.0, place.size.y / 2.0 - 1.0, Z_TEXT - Z_NODE),
                     Visibility::Hidden,
                     map_layer(),
                 ));
@@ -525,10 +597,11 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
     }
 
     // The ribosome and the text of the queue.
-    let ribosome = layout::ribosome_place();
+    let ribosome = layout.ribosome_place();
     if let Some(bundle) = sheets.bundle("ribosome", "loop") {
         commands.spawn((
             Name::new("Ribosome"),
+            MapEntity,
             bundle,
             Transform::from_translation(ribosome.pos.extend(Z_NODE)),
             map_layer(),
@@ -537,7 +610,8 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
     }
     commands.spawn((
         RibosomeText,
-        world_text("", 7.0, Color::srgb(0.85, 0.88, 0.95)),
+        MapEntity,
+        world_text("", 7.0, LABEL_COLOR),
         Anchor::CENTER_LEFT,
         text_at(ribosome.pos.x + 18.0, ribosome.pos.y, Z_TEXT),
         DespawnOnExit(GameState::Manage),
@@ -546,17 +620,29 @@ fn spawn_map(mut commands: Commands, server: Res<AssetServer>, sheets: Res<Sheet
 
 // --- Pools ---
 
+/// The text of a net rate: "+1.2/s", "-0.4/s", "0.0/s".
+pub fn rate_text(net: f32) -> String {
+    if net.abs() < 0.005 {
+        "0.0/s".to_string()
+    } else {
+        format!("{net:+.1}/s")
+    }
+}
+
+#[allow(clippy::type_complexity)]
 fn update_pools(
     time: Res<Time>,
     view: Res<LocalMetabolismView>,
     mut gauges: Query<(&PoolGauge, &mut Sprite), Without<PoolIcon>>,
     mut icons: Query<(&PoolIcon, &mut Sprite), Without<PoolGauge>>,
+    mut rates: Query<(&PoolRate, &mut Text2d, &mut TextColor)>,
 ) {
     let Some(view) = &view.0 else { return };
     let flash = 0.5 + 0.5 * (time.elapsed_secs() * 8.0).sin();
     for (gauge, mut sprite) in &mut gauges {
         let level = view.pool(gauge.0).map_or(0.0, |p| p.level);
-        sprite.custom_size = Some(Vec2::new(18.0 * gauge_fraction(level), 2.0));
+        let track = layout::POOL_SIZE.x - 14.0;
+        sprite.custom_size = Some(Vec2::new(track * gauge_fraction(level), 2.0));
         let base = currency_color(gauge.0);
         sprite.color = if level < LOW_MARK && gauge.0 != Currency::Waste && gauge.0 != Currency::ROS {
             base.mix(&BAD, flash)
@@ -574,6 +660,25 @@ fn update_pools(
             currency_color(icon.0).with_alpha(alpha)
         };
     }
+    for (rate, mut text, mut color) in &mut rates {
+        let net = net_rate(view, rate.0);
+        let want = rate_text(net);
+        if text.0 != want {
+            text.0 = want;
+        }
+        // Waste and ROS are bad when they rise; the others when they fall.
+        let bad_when_up = matches!(rate.0, Currency::Waste | Currency::ROS);
+        let shown = if net.abs() < 0.005 {
+            Color::srgb(0.5, 0.5, 0.55)
+        } else if (net > 0.0) != bad_when_up {
+            GOOD
+        } else {
+            BAD
+        };
+        if color.0 != shown {
+            color.0 = shown;
+        }
+    }
 }
 
 // --- Plates ---
@@ -584,19 +689,21 @@ fn update_plates(
     server: Res<AssetServer>,
     view: Res<LocalMetabolismView>,
     mut frames: Query<(&PlateFrame, &mut Sprite)>,
-    mut icons: Query<(&PlateIcon, &mut Sprite), Without<PlateFrame>>,
+    mut icons: Query<(&PlateIcon, &mut Sprite, &mut Visibility), Without<PlateFrame>>,
+    mut questions: Query<(&PlateQuestion, &mut Visibility), (Without<PlateIcon>, Without<EnzymeSprite>, Without<EnzymeMore>, Without<Badge>, Without<Valve>)>,
     mut labels: Query<(&PlateLabel, &mut Text2d), Without<EnzymeMore>>,
     mut enzymes: Query<
         (&EnzymeSprite, &mut Transform, &mut Visibility),
-        (Without<EnzymeMore>, Without<Badge>, Without<Valve>),
+        (Without<EnzymeMore>, Without<Badge>, Without<Valve>, Without<PlateIcon>, Without<PlateQuestion>),
     >,
-    mut more: Query<(&EnzymeMore, &mut Text2d, &mut Visibility), (Without<PlateLabel>, Without<EnzymeSprite>, Without<Badge>, Without<Valve>)>,
-    mut badges: Query<(&Badge, &mut Visibility, &mut Sprite), (Without<EnzymeSprite>, Without<EnzymeMore>, Without<Valve>, Without<PlateFrame>, Without<PlateIcon>)>,
-    mut valves: Query<(&Valve, &mut Visibility, &mut Sprite), (Without<EnzymeSprite>, Without<EnzymeMore>, Without<Badge>, Without<PlateFrame>, Without<PlateIcon>)>,
+    mut more: Query<(&EnzymeMore, &mut Text2d, &mut Visibility), (Without<PlateLabel>, Without<EnzymeSprite>, Without<Badge>, Without<Valve>, Without<PlateIcon>, Without<PlateQuestion>)>,
+    mut badges: Query<(&Badge, &mut Visibility, &mut Sprite), (Without<EnzymeSprite>, Without<EnzymeMore>, Without<Valve>, Without<PlateFrame>, Without<PlateIcon>, Without<PlateQuestion>)>,
+    mut valves: Query<(&Valve, &mut Visibility, &mut Sprite), (Without<EnzymeSprite>, Without<EnzymeMore>, Without<Badge>, Without<PlateFrame>, Without<PlateIcon>, Without<PlateQuestion>)>,
 ) {
     let Some(view) = &view.0 else { return };
     let t = time.elapsed_secs();
     let pulse = 0.5 + 0.5 * (t * 6.0).sin();
+    let show = |on: bool| if on { Visibility::Inherited } else { Visibility::Hidden };
     for (frame, mut sprite) in &mut frames {
         let Some(p) = view.pathway(frame.0) else { continue };
         let image = if p.owned {
@@ -610,8 +717,11 @@ fn update_plates(
         }
         sprite.color = plate_tint(p.state, p.owned);
     }
-    for (icon, mut sprite) in &mut icons {
+    for (icon, mut sprite, mut visibility) in &mut icons {
         let Some(p) = view.pathway(icon.0) else { continue };
+        // A pathway that the player does not know shows no icon, so the
+        // picture does not give the gene away.
+        *visibility = show(p.known);
         let alpha = if p.owned { 1.0 } else { 0.4 };
         sprite.color = if pathway_icon(icon.0).is_some() {
             Color::srgba(1.0, 1.0, 1.0, alpha)
@@ -619,9 +729,13 @@ fn update_plates(
             accent(icon.0).with_alpha(alpha)
         };
     }
+    for (question, mut visibility) in &mut questions {
+        let known = view.pathway(question.0).is_none_or(|p| p.known);
+        *visibility = show(!known);
+    }
     for (label, mut text) in &mut labels {
         let Some(p) = view.pathway(label.0) else { continue };
-        let want = if p.known { short_name(label.0) } else { "?" };
+        let want = if p.known { plate_label(label.0) } else { "" };
         if text.0 != want {
             text.0 = want.to_string();
         }
@@ -630,7 +744,7 @@ fn update_plates(
         let Some(p) = view.pathway(enzyme.kind) else { continue };
         let shown = enzymes_shown(p.enzymes);
         let on = p.owned && enzyme.index < shown;
-        *visibility = if on { Visibility::Inherited } else { Visibility::Hidden };
+        *visibility = show(on);
         if on {
             let x = (enzyme.index as f32 - (shown as f32 - 1.0) / 2.0) * ENZYME_PITCH
                 - if p.enzymes as usize > MAX_ENZYME_SPRITES { 8.0 } else { 0.0 };
@@ -639,13 +753,13 @@ fn update_plates(
             let phase = enzyme.index as f32 * 0.9;
             let bob = (t * omega + phase).sin() * 1.6 * p.activity.sqrt();
             transform.translation.x = x;
-            transform.translation.y = (-8.0 + bob).round();
+            transform.translation.y = (-layout::PLATE_SIZE.y / 2.0 + 7.0 + bob).round();
         }
     }
     for (m, mut text, mut visibility) in &mut more {
         let Some(p) = view.pathway(m.0) else { continue };
         let on = p.owned && p.enzymes as usize > MAX_ENZYME_SPRITES;
-        *visibility = if on { Visibility::Inherited } else { Visibility::Hidden };
+        *visibility = show(on);
         let want = format!("x{}", p.enzymes);
         if on && text.0 != want {
             text.0 = want;
@@ -653,13 +767,12 @@ fn update_plates(
     }
     for (badge, mut visibility, mut sprite) in &mut badges {
         let Some(p) = view.pathway(badge.0) else { continue };
-        let on = shows_badge(p);
-        *visibility = if on { Visibility::Inherited } else { Visibility::Hidden };
+        *visibility = show(shows_badge(p));
         sprite.color = Color::WHITE.mix(&BAD, pulse * 0.6);
     }
     for (valve, mut visibility, mut sprite) in &mut valves {
         let Some(p) = view.pathway(valve.0) else { continue };
-        *visibility = if p.owned { Visibility::Inherited } else { Visibility::Hidden };
+        *visibility = show(p.owned);
         let handle = server.load(valve_sprite(p.throttle));
         if sprite.image != handle {
             sprite.image = handle;
@@ -682,49 +795,56 @@ pub fn shows_badge(p: &PathwayView) -> bool {
     p.owned && !matches!(p.limit, Limit::None | Limit::Off)
 }
 
-// --- Pipes ---
+// --- Probe for the smoke test ---
 
-fn key_hash(key: &EdgeKey) -> usize {
-    let mut hasher = DefaultHasher::new();
-    key.hash(&mut hasher);
-    hasher.finish() as usize
+/// The pathways with a visible "!" badge, and the number of visible pipes
+/// that pulse red.
+pub(super) fn probe(world: &mut World) -> (Vec<BlockKind>, usize) {
+    let badges = world
+        .query::<(&Badge, &Visibility)>()
+        .iter(world)
+        .filter(|(_, v)| **v != Visibility::Hidden)
+        .map(|(b, _)| b.0)
+        .collect();
+    let limiting = world
+        .query::<&Pipe>()
+        .iter(world)
+        .filter(|p| p.limiting && !p.hidden)
+        .count();
+    (badges, limiting)
 }
 
-/// The route and look of the pipe of an edge, or `None` if the map has no pipe
-/// for it.
-fn pipe_route(edge: &EdgeView, stubs: &mut HashMap<Currency, usize>) -> Option<Vec<Vec2>> {
-    let key: EdgeKey = (edge.from, edge.to, edge.currency);
-    let slot = key_hash(&key) % 4;
+// --- Pipes ---
+
+/// The route of the pipe of an edge, or `None` if the map has no pipe for it.
+fn pipe_route(edge: &EdgeView, layout: &Layout, index: &mut PipeIndex) -> Option<Vec<Vec2>> {
     match (edge.from, edge.to) {
         (Node::Pool(c), Node::Pathway(k)) => {
-            Some(layout::route(layout::pool_place(c), layout::plate_place(k)?, slot))
+            Some(index.router.route(layout, Some(c), layout.pool_place(c), layout.plate_place(k)?))
         }
         (Node::Pathway(k), Node::Pool(c)) => {
-            Some(layout::route(layout::plate_place(k)?, layout::pool_place(c), slot))
+            Some(index.router.route(layout, Some(c), layout.plate_place(k)?, layout.pool_place(c)))
         }
         (Node::Outside(channel), Node::Pathway(k)) => match channel {
             // Minerals and oxygen come in through the pools.
             Channel::Heat | Channel::Light => {
-                Some(layout::route_from_band(layout::plate_place(k)?, 22.0))
+                let plate = layout.plate_place(k)?;
+                let shift = plate.size.x / 2.0 - 6.0;
+                Some(layout.route_from_band(plate, if channel == Channel::Heat { shift } else { -shift }))
             }
             _ => None,
         },
         (Node::Source(FlowSource::Intake), Node::Pool(c)) => {
-            Some(layout::route_from_band(layout::pool_place(c), -5.0))
+            Some(layout.route_from_band(layout.pool_place(c), -20.0))
         }
         (Node::Pool(c), Node::Source(FlowSource::Export)) => {
-            Some(layout::route_to_band(layout::pool_place(c), 5.0))
+            Some(layout.route_to_band(layout.pool_place(c), 20.0))
         }
-        (Node::Source(_), Node::Pool(c)) => {
-            let index = stubs.entry(c).or_default();
-            let route = layout::stub_route(layout::pool_place(c), *index, true);
-            *index += 1;
-            Some(route)
-        }
-        (Node::Pool(c), Node::Source(_)) => {
-            let index = stubs.entry(c).or_default();
-            let route = layout::stub_route(layout::pool_place(c), *index, false);
-            *index += 1;
+        (Node::Source(_), Node::Pool(c)) | (Node::Pool(c), Node::Source(_)) => {
+            let incoming = matches!(edge.from, Node::Source(_));
+            let n = index.stubs.entry(c).or_default();
+            let route = layout.stub_route(layout.pool_place(c), *n, incoming);
+            *n += 1;
             Some(route)
         }
         _ => None,
@@ -774,6 +894,7 @@ fn spawn_pipe(
     let pipe = commands
         .spawn((
             Name::new("Pipe"),
+            MapEntity,
             Pipe {
                 route: route.clone(),
                 length,
@@ -783,6 +904,7 @@ fn spawn_pipe(
                 speck_image,
                 flux: 0.0,
                 limiting: false,
+                hidden: false,
                 accum: 0.0,
             },
             Transform::default(),
@@ -792,41 +914,40 @@ fn spawn_pipe(
         ))
         .add_children(&segments)
         .id();
-    // The label icon at the far end of a stub.
-    if let (EdgeKind::Other, Some(currency)) = (edge.kind, edge.currency) {
-        if let (Node::Source(s), _) | (_, Node::Source(s)) = (edge.from, edge.to) {
-            let on_band = matches!(s, FlowSource::Intake | FlowSource::Export);
-            if !on_band {
-                let pool = layout::pool_place(currency);
-                let index = route_stub_index(&route, pool);
-                let pos = layout::stub_icon_pos(pool, index);
-                commands.entity(pipe).with_children(|p| {
-                    p.spawn((
-                        Sprite::from_color(source_color(s), Vec2::splat(8.0)),
-                        Transform::from_xyz(pos.x, pos.y, Z_ICON),
-                        map_layer(),
-                    ));
-                    p.spawn((
-                        world_text(source_letter(s), 6.0, Color::srgb(0.05, 0.06, 0.1)),
-                        text_at(pos.x, pos.y, Z_TEXT),
-                    ));
-                });
-            }
-        }
+    // The label of a stub: an icon and the rate, at the far end.
+    if edge.kind == EdgeKind::Other
+        && let (Node::Source(s), _) | (_, Node::Source(s)) = (edge.from, edge.to)
+        && !matches!(s, FlowSource::Intake | FlowSource::Export)
+    {
+        let far = if route[0].x < route[1].x { route[0] } else { route[1] };
+        let icon = far + Vec2::new(-4.0, 0.0);
+        let incoming = matches!(edge.from, Node::Source(_));
+        commands.entity(pipe).with_children(|p| {
+            p.spawn((
+                Sprite::from_color(source_color(s), Vec2::splat(7.0)),
+                Transform::from_xyz(icon.x, icon.y, Z_ICON),
+                map_layer(),
+            ));
+            p.spawn((
+                world_text(source_letter(s), 6.0, Color::srgb(0.05, 0.06, 0.1)),
+                text_at(icon.x, icon.y, Z_TEXT),
+            ));
+            p.spawn((
+                StubRate { incoming },
+                world_text("", 6.0, source_color(s)),
+                Anchor::CENTER_RIGHT,
+                text_at(icon.x - 6.0, icon.y, Z_TEXT),
+            ));
+        });
     }
     pipe
-}
-
-/// The index of a stub from its route (the y offset from the pool).
-fn route_stub_index(route: &[Vec2], pool: Place) -> usize {
-    let y = route[0].y;
-    ((pool.pos.y + 7.0 - y) / 7.0).round().max(0.0) as usize
 }
 
 fn sync_pipes(
     mut commands: Commands,
     server: Res<AssetServer>,
     view: Res<LocalMetabolismView>,
+    layout: Res<MapLayout>,
     mut index: ResMut<PipeIndex>,
     mut pipes: Query<&mut Pipe>,
 ) {
@@ -834,13 +955,22 @@ fn sync_pipes(
     for mut pipe in &mut pipes {
         pipe.flux = 0.0;
         pipe.limiting = false;
+        pipe.hidden = true;
     }
     for edge in &view.edges {
+        // A ghost pathway has no pipes.
+        let pathway = match (edge.from, edge.to) {
+            (Node::Pathway(k), _) | (_, Node::Pathway(k)) => Some(k),
+            _ => None,
+        };
+        if pathway.is_some_and(|k| !view.pathway(k).is_some_and(|p| p.owned)) {
+            continue;
+        }
         let key: EdgeKey = (edge.from, edge.to, edge.currency);
         let entity = match index.pipes.get(&key) {
             Some(entity) => *entity,
             None => {
-                let route = pipe_route(edge, &mut index.stubs);
+                let route = pipe_route(edge, &layout, &mut index);
                 let entity = route.map(|r| spawn_pipe(&mut commands, &server, edge, r));
                 index.pipes.insert(key, entity);
                 entity
@@ -850,6 +980,8 @@ fn sync_pipes(
         if let Ok(mut pipe) = pipes.get_mut(entity) {
             pipe.flux = shown_flux(edge, view);
             pipe.limiting = is_limiting(edge, view);
+            // A stub with no flow is not drawn.
+            pipe.hidden = edge.kind == EdgeKind::Other && edge.flux < 0.005;
         }
     }
 }
@@ -894,11 +1026,18 @@ pub fn is_limiting(edge: &EdgeView, view: &MetabolismView) -> bool {
 
 fn draw_pipes(
     time: Res<Time>,
-    pipes: Query<&Pipe>,
+    mut pipes: Query<(&Pipe, &mut Visibility)>,
     mut segments: Query<(&mut Sprite, &mut Transform), With<PipeSegment>>,
 ) {
     let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 6.0).sin();
-    for pipe in &pipes {
+    for (pipe, mut visibility) in &mut pipes {
+        let want = if pipe.hidden { Visibility::Hidden } else { Visibility::Inherited };
+        if *visibility != want {
+            *visibility = want;
+        }
+        if pipe.hidden {
+            continue;
+        }
         let mut width = match pipe.kind {
             EdgeKind::Cofactor => 1.0,
             _ => width_tier(pipe.flux),
@@ -930,6 +1069,22 @@ fn draw_pipes(
     }
 }
 
+/// The rate text of the stubs: "+0.4/s" into the pool, "-0.8/s" out of it.
+fn update_stub_labels(
+    pipes: Query<&Pipe>,
+    mut labels: Query<(&StubRate, &ChildOf, &mut Text2d)>,
+) {
+    for (stub, parent, mut text) in &mut labels {
+        let Ok(pipe) = pipes.get(parent.parent()) else { continue };
+        let signed = if stub.incoming { pipe.flux } else { -pipe.flux };
+        // Short, so that it fits between two pools: the pool tags say "/s".
+        let want = rate_text(signed).trim_end_matches("/s").to_string();
+        if text.0 != want {
+            text.0 = want;
+        }
+    }
+}
+
 const SPECK_SPEED: f32 = 36.0;
 const MAX_SPECKS: usize = 600;
 
@@ -941,7 +1096,7 @@ fn emit_specks(
 ) {
     let mut count = specks.iter().count();
     for (entity, mut pipe) in &mut pipes {
-        let rate = speck_rate(pipe.flux);
+        let rate = if pipe.hidden { 0.0 } else { speck_rate(pipe.flux) };
         if rate <= 0.0 || pipe.length <= 0.0 {
             pipe.accum = 0.0;
             continue;
@@ -963,6 +1118,7 @@ fn emit_specks(
                     pipe: entity,
                     distance: 0.0,
                 },
+                MapEntity,
                 sprite,
                 Transform::from_translation(pipe.route[0].extend(Z_SPECK)),
                 map_layer(),
@@ -1009,10 +1165,7 @@ fn update_ribosome_text(
         "Ribosome: nothing queued".to_string()
     } else {
         // The synthesis rate comes from the flux of the pathway's edges.
-        let rate = view
-            .0
-            .as_ref()
-            .map_or(0.0, |v| protein_rate(v));
+        let rate = view.0.as_ref().map_or(0.0, protein_rate);
         let first = queue.orders.front().map_or(String::new(), |o| super::panel::protein_name(*o));
         let eta = synthesis_eta(queue, rate).map_or("no synthesis".to_string(), |s| format!("{s:.0}s"));
         format!(
@@ -1064,6 +1217,13 @@ mod tests {
     }
 
     #[test]
+    fn rates_show_a_sign_and_zero_is_plain() {
+        assert_eq!(rate_text(1.24), "+1.2/s");
+        assert_eq!(rate_text(-0.4), "-0.4/s");
+        assert_eq!(rate_text(0.001), "0.0/s");
+    }
+
+    #[test]
     fn the_gauge_is_log_and_bounded() {
         assert_eq!(gauge_fraction(0.0), 0.0);
         assert!(gauge_fraction(10.0) > 0.4, "{}", gauge_fraction(10.0));
@@ -1081,9 +1241,15 @@ mod tests {
     fn names_fit_the_plate_and_are_spaced() {
         assert_eq!(spaced_name(BlockKind::AminoAcidBiosynthesis), "Amino Acid Biosynthesis");
         for kind in layout::mapped_kinds() {
-            assert_ne!(short_name(kind), "?", "{kind:?}");
-            assert!(short_name(kind).len() <= 10, "{kind:?}");
+            assert_ne!(plate_label(kind), "?", "{kind:?}");
+            for line in plate_label(kind).lines() {
+                assert!(line.len() <= 14, "{kind:?}: {line}");
+            }
         }
+        for currency in Currency::ALL {
+            assert!(pool_name(currency).len() <= 14, "{currency:?}");
+        }
+        assert_eq!(pool_name(Currency::CarbonSkeletons), "Carbon");
     }
 
     #[test]

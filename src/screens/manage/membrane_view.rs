@@ -16,7 +16,7 @@
 use bevy::prelude::*;
 
 use super::layout;
-use super::{BAD, Pick, make_pickable, map_layer};
+use super::{BAD, MapEntity, MapLayout, Pick, make_pickable, map_layer};
 use crate::GameState;
 use crate::actions::ActionState;
 use crate::cell::{Cell, CellSize, membrane_slots};
@@ -29,13 +29,18 @@ use crate::sprites::{Animator, Sheets};
 use crate::world::actions_view::overlay_clip;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(GameState::Manage), spawn_band)
-        .add_systems(
-            Update,
-            (sync_slots, update_slots, tint_band)
-                .chain()
-                .run_if(in_state(GameState::Manage)),
-        );
+    app.add_systems(
+        Update,
+        (
+            spawn_band.run_if(resource_exists_and_changed::<MapLayout>),
+            sync_slots,
+            update_slots,
+            tint_band,
+        )
+            .chain()
+            .after(super::fit_map)
+            .run_if(in_state(GameState::Manage)),
+    );
 }
 
 /// The row of an overlay sheet that points up (north), out of the cell.
@@ -115,16 +120,17 @@ struct Slot {
 #[derive(Component)]
 struct SlotBar(usize);
 
-fn spawn_band(mut commands: Commands, server: Res<AssetServer>) {
-    let mut x = layout::MAP_LEFT + layout::BAND_TILE / 2.0;
-    while x < layout::MAP_RIGHT + layout::BAND_TILE / 2.0 {
+fn spawn_band(mut commands: Commands, server: Res<AssetServer>, layout: Res<MapLayout>) {
+    let mut x = layout.left() + layout::BAND_TILE / 2.0;
+    while x < layout.right() + layout::BAND_TILE / 2.0 {
         commands.spawn((
             BandTile,
+            MapEntity,
             Sprite {
                 image: server.load("sprites/wall_membrane.png"),
                 ..default()
             },
-            Transform::from_xyz(x, layout::BAND_Y, Z_BAND),
+            Transform::from_xyz(x, layout.band_y, Z_BAND),
             map_layer(),
             DespawnOnExit(GameState::Manage),
         ));
@@ -160,6 +166,7 @@ fn tint_band(
 fn sync_slots(
     mut commands: Commands,
     server: Res<AssetServer>,
+    layout: Res<MapLayout>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<&CellSize, With<Cell>>,
     slots: Query<(Entity, &Slot)>,
@@ -168,7 +175,7 @@ fn sync_slots(
     let Some(size) = super::local_cell(&players).and_then(|c| cells.get(c).ok()) else {
         return;
     };
-    let wanted = layout::slot_positions(membrane_slots(size) as usize);
+    let wanted = layout.slot_positions(membrane_slots(size) as usize);
     if slots.iter().count() == wanted.len() && !slots.is_empty() {
         return;
     }
@@ -184,6 +191,7 @@ fn sync_slots(
     for (index, pos) in wanted.into_iter().enumerate() {
         let mut socket = commands.spawn((
             Name::new(format!("Slot {index}")),
+            MapEntity,
             Slot {
                 index,
                 shown: SlotContent::Empty,
@@ -201,9 +209,10 @@ fn sync_slots(
         // The progress bar of a queued protein, under the band.
         commands.spawn((
             SlotBar(index),
+            MapEntity,
             Sprite::from_color(Color::srgb(0.45, 0.6, 1.0), Vec2::new(0.0, 2.0)),
             bevy::sprite::Anchor::CENTER_LEFT,
-            Transform::from_xyz(pos.x - 10.0, layout::BAND_BOTTOM - 3.0, Z_OVERLAY),
+            Transform::from_xyz(pos.x - 10.0, layout.band_bottom() - 3.0, Z_OVERLAY),
             Visibility::Hidden,
             map_layer(),
             DespawnOnExit(GameState::Manage),

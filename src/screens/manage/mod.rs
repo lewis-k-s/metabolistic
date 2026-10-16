@@ -20,10 +20,11 @@
 //! rules are in `proteins` and `actions`; this screen only sends messages and
 //! changes the bar.
 
-use bevy::camera::ScalingMode;
+use bevy::camera::{ClearColorConfig, ScalingMode};
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::ui::IsDefaultUiCamera;
+use bevy::window::PrimaryWindow;
 
 use super::label;
 use crate::GameState;
@@ -39,6 +40,7 @@ mod diagram;
 mod inset;
 pub mod layout;
 mod membrane_view;
+mod outside;
 mod panel;
 
 const GOOD: Color = Color::srgb(0.45, 0.9, 0.5);
@@ -59,6 +61,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_plugins((
             diagram::plugin,
             membrane_view::plugin,
+            outside::plugin,
             panel::plugin,
             inset::plugin,
         ))
@@ -66,7 +69,11 @@ pub(super) fn plugin(app: &mut App) {
             OnEnter(GameState::Manage),
             (spawn_map_camera, spawn_header_and_bar),
         )
-        .add_systems(OnExit(GameState::Manage), clear_picks)
+        .add_systems(OnExit(GameState::Manage), (clear_picks, forget_layout))
+        .add_systems(
+            Update,
+            fit_map.run_if(in_state(GameState::Manage)),
+        )
         .add_systems(
             Update,
             (manage_buttons, manage_keys, update_header, update_action_bar)
@@ -121,7 +128,7 @@ pub(super) fn make_pickable(entity: &mut EntityCommands, pick: Pick) {
 }
 
 /// The camera of the map. It draws first, on the whole window; the run camera
-/// draws the inset above it (see `inset`).
+/// draws the inset above it (see `inset`). `fit_map` sets its scale and place.
 #[derive(Component)]
 struct MapCamera;
 
@@ -135,12 +142,8 @@ fn spawn_map_camera(mut commands: Commands) {
             clear_color: ClearColorConfig::Custom(CYTOPLASM),
             ..default()
         },
-        // Whole pixels for each sprite pixel: 2 screen pixels at 1280x720.
         Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMin {
-                min_width: layout::VIEW_SIZE.x,
-                min_height: layout::VIEW_SIZE.y,
-            },
+            scaling_mode: ScalingMode::WindowSize,
             ..OrthographicProjection::default_2d()
         }),
         map_layer(),
@@ -148,6 +151,80 @@ fn spawn_map_camera(mut commands: Commands) {
         IsDefaultUiCamera,
         DespawnOnExit(GameState::Manage),
     ));
+}
+
+/// The layout of the map for the current window. A new value (the window
+/// changed) makes the map systems spawn their sprites again.
+#[derive(Resource, Deref)]
+pub(super) struct MapLayout(pub layout::Layout);
+
+/// Marks a sprite of the map that is spawned for one layout.
+#[derive(Component)]
+pub(super) struct MapEntity;
+
+/// Space in the window that the map leaves for the header and the action bar.
+const TOP_MARGIN: f32 = 40.0;
+const BOTTOM_MARGIN: f32 = 58.0;
+
+/// Width of the right column (the inset and the side panel), in logical
+/// pixels.
+pub(super) fn right_column_width(window_width: f32) -> f32 {
+    (window_width * 0.27).clamp(300.0, 440.0)
+}
+
+/// The scale of the map, in physical pixels for each sprite pixel: a whole
+/// number from 2 up (the pixel grid stays even), a quarter step below.
+pub fn map_scale(available: Vec2, scale_factor: f32) -> f32 {
+    let fit = (available * scale_factor / layout::MIN_SIZE).min_element();
+    if fit >= 2.0 {
+        (fit + 0.05).floor()
+    } else {
+        ((fit * 4.0 + 0.2).floor() / 4.0).max(0.5)
+    }
+}
+
+/// Fits the map to the window: the camera scale and place, and the layout. The
+/// map fills the window left of the right column, between the header and the
+/// action bar.
+fn fit_map(
+    mut commands: Commands,
+    window: Query<&Window, With<PrimaryWindow>>,
+    current: Option<Res<MapLayout>>,
+    mut camera: Query<(&mut Projection, &mut Transform), With<MapCamera>>,
+    old: Query<Entity, With<MapEntity>>,
+) {
+    let (Ok(window), Ok((mut projection, mut transform))) = (window.single(), camera.single_mut())
+    else {
+        return;
+    };
+    let (width, height) = (window.width(), window.height());
+    let left = (width - right_column_width(width) - 8.0).max(200.0);
+    let area = Vec2::new(left, (height - TOP_MARGIN - BOTTOM_MARGIN).max(200.0));
+    let scale = map_scale(area, window.scale_factor()) / window.scale_factor();
+    if let Projection::Orthographic(ortho) = &mut *projection
+        && ortho.scale != 1.0 / scale
+    {
+        ortho.scale = 1.0 / scale;
+    }
+    // The map is centred in `area`; the camera looks at the window centre.
+    let centre = Vec2::new(
+        (width / 2.0 - left / 2.0) / scale,
+        (TOP_MARGIN + area.y / 2.0 - height / 2.0) / scale,
+    )
+    .round();
+    transform.translation.x = centre.x;
+    transform.translation.y = centre.y;
+    let wanted = layout::Layout::new((area / scale).floor());
+    if current.is_none_or(|c| c.0 != wanted) {
+        for entity in &old {
+            commands.entity(entity).despawn();
+        }
+        commands.insert_resource(MapLayout(wanted));
+    }
+}
+
+fn forget_layout(mut commands: Commands) {
+    commands.remove_resource::<MapLayout>();
 }
 
 /// The local player's cell.
@@ -321,6 +398,91 @@ fn update_action_bar(
             text.0 = line;
         }
     }
+}
+
+
+// --- Hooks for the smoke test ---
+
+/// A thing on the map, for the smoke test to point at (the same picks that a
+/// click or a hover sets).
+#[derive(Debug, Clone, Copy)]
+pub enum SmokePick {
+    Pathway(BlockKind),
+    Slot(usize),
+    Pool(Currency),
+}
+
+impl From<SmokePick> for Pick {
+    fn from(pick: SmokePick) -> Pick {
+        match pick {
+            SmokePick::Pathway(k) => Pick::Pathway(k),
+            SmokePick::Slot(i) => Pick::Slot(i),
+            SmokePick::Pool(c) => Pick::Pool(c),
+        }
+    }
+}
+
+/// What the smoke test reads from the screen.
+#[derive(Debug, Default)]
+pub struct SmokeProbe {
+    /// The title of the side panel.
+    pub panel_title: Option<String>,
+    pub tooltip_visible: bool,
+    pub tooltip_text: String,
+    /// The pathways that show the "!" badge.
+    pub badges: Vec<BlockKind>,
+    /// Pipes that show the red pulse.
+    pub limiting_pipes: usize,
+    /// The + buttons of the panel.
+    pub plus_buttons: Vec<ProteinTarget>,
+}
+
+/// Sends what a click on the thing sends: the panel opens (or closes, for
+/// `None`).
+pub fn smoke_select(world: &mut World, pick: Option<SmokePick>) {
+    world.resource_mut::<Selection>().0 = pick.map(Pick::from);
+}
+
+/// Sends what the pointer sends when it is over the thing.
+pub fn smoke_hover(world: &mut World, pick: Option<SmokePick>) {
+    world.resource_mut::<Hovered>().0 = pick.map(Pick::from);
+}
+
+/// Presses the + button of a protein in the panel, for one frame. Call it
+/// after the UI focus system (`PreUpdate`), so the press is kept. Returns
+/// false if the panel has no such button.
+pub fn smoke_press_plus(world: &mut World, target: ProteinTarget) -> bool {
+    let mut found = false;
+    let mut buttons = world.query::<(&ManageAction, &mut Interaction)>();
+    for (action, mut interaction) in buttons.iter_mut(world) {
+        if *action == ManageAction::Queue(target) {
+            *interaction = Interaction::Pressed;
+            found = true;
+        }
+    }
+    found
+}
+
+pub fn smoke_probe(world: &mut World) -> SmokeProbe {
+    let mut probe = SmokeProbe {
+        panel_title: panel::shown_title(world),
+        ..default()
+    };
+    let (visible, text) = panel::tooltip_state(world);
+    probe.tooltip_visible = visible;
+    probe.tooltip_text = text;
+    let (badges, limiting) = diagram::probe(world);
+    probe.badges = badges;
+    probe.limiting_pipes = limiting;
+    let mut buttons = world.query::<&ManageAction>();
+    probe.plus_buttons = buttons
+        .iter(world)
+        .filter_map(|a| match a {
+            ManageAction::Queue(target) => Some(*target),
+            _ => None,
+        })
+        .collect();
+    probe
 }
 
 #[cfg(test)]

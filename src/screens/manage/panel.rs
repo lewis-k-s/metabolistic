@@ -17,9 +17,8 @@ use bevy::prelude::*;
 use bevy::ui::GlobalZIndex;
 use bevy::window::PrimaryWindow;
 
-use super::diagram::{short_name, source_name, spaced_name};
+use super::diagram::{pool_name, source_name, spaced_name};
 use super::inset;
-use super::layout;
 use super::{BAD, DIM, GOLD, GOOD, Hovered, ManageAction, Pick, Selection};
 use crate::GameState;
 use crate::actions::{HIGH_LEVEL, LOW_LEVEL};
@@ -61,7 +60,7 @@ const INSET_ASPECT: f32 = 0.7;
 /// The name of a protein target.
 pub(super) fn protein_name(target: ProteinTarget) -> String {
     match target {
-        ProteinTarget::Enzyme(kind) => format!("{} enzyme", short_name(kind)),
+        ProteinTarget::Enzyme(kind) => format!("{} enzyme", spaced_name(kind)),
         ProteinTarget::Membrane(p) => format!("{p:?}"),
     }
 }
@@ -76,9 +75,6 @@ fn channel_name(channel: Channel) -> &'static str {
     }
 }
 
-fn pool_name(currency: Currency) -> String {
-    format!("{currency:?}")
-}
 
 /// The limit of a pathway in words.
 pub fn limit_words(limit: Limit) -> String {
@@ -205,10 +201,14 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
         None => Content {
             title: "Cell map".into(),
             lines: vec![
-                line("Click a pathway plate for its rates", TEXT),
-                line("and enzymes, or a socket in the", TEXT),
-                line("membrane to add proteins.", TEXT),
-                line("Keys 1-4 set the action slots.", DIM),
+                line(
+                    "Click a pathway plate for its rates and enzymes, or a socket in the membrane to add proteins. Keys 1-4 set the action slots.",
+                    TEXT,
+                ),
+                line(
+                    "The small tags on the left of a pool are flows that are not pathways: U upkeep, M movement, A actions, R membrane repair, G genome repair, F food, E engulfed cell, C recycled protein.",
+                    DIM,
+                ),
             ],
             rows: Vec::new(),
         },
@@ -236,7 +236,7 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
             }
             lines.extend(outs);
             Content {
-                title: pool_name(currency),
+                title: pool_name(currency).to_string(),
                 lines,
                 rows: Vec::new(),
             }
@@ -482,10 +482,7 @@ fn layout_column(
     else {
         return;
     };
-    // The map camera scales so that VIEW_SIZE fits in the window.
-    let scale = (window.width() / layout::VIEW_SIZE.x).min(window.height() / layout::VIEW_SIZE.y);
-    let free = window.width() / 2.0 - layout::MAP_RIGHT * scale - 6.0;
-    let width = free.clamp(240.0, 520.0);
+    let width = super::right_column_width(window.width());
     column.width = Val::Px(width);
     holder.height = Val::Px(((width - 16.0) * INSET_ASPECT).round());
 }
@@ -608,8 +605,12 @@ fn update_tooltip(
         *visibility = Visibility::Hidden;
         return;
     };
-    let (Some(cursor), Some((proteome, queue, size))) = (
-        window.cursor_position(),
+    // Without a cursor (a test sends the hover), the tooltip sits in the middle.
+    let cursor = window
+        .cursor_position()
+        .unwrap_or(Vec2::new(window.width() * 0.3, window.height() * 0.4));
+    let (cursor, Some((proteome, queue, size))) = (
+        cursor,
         super::local_cell(&players).and_then(|c| cells.get(c).ok()),
     ) else {
         *visibility = Visibility::Hidden;
@@ -755,4 +756,27 @@ mod tests {
         let tip = tooltip_text(Pick::Pathway(BlockKind::Respiration), &view(), &cell(&proteome, &queue));
         assert!(tip.contains("unknown"), "{tip}");
     }
+}
+
+/// The title of the panel now, for the smoke test.
+pub(super) fn shown_title(world: &World) -> Option<String> {
+    world
+        .resource::<PanelState>()
+        .shown
+        .as_ref()
+        .map(|c| c.title.clone())
+}
+
+/// Whether the tooltip is visible, and its text, for the smoke test.
+pub(super) fn tooltip_state(world: &mut World) -> (bool, String) {
+    let visible = world
+        .query_filtered::<&Visibility, With<Tooltip>>()
+        .iter(world)
+        .any(|v| *v != Visibility::Hidden);
+    let text = world
+        .query_filtered::<&Text, With<TooltipText>>()
+        .iter(world)
+        .next()
+        .map_or(String::new(), |t| t.0.clone());
+    (visible, text)
 }
