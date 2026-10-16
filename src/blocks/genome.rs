@@ -63,16 +63,23 @@ pub enum BlockKind {
     Chemosynthesis,
     /// Ribosomes: make protein units from amino acids and ATP.
     ProteinSynthesis,
+    /// Turns reactive oxygen species back into O2, for some ATP.
+    Catalase,
+    /// A waxy cuticle: the cell loses water more slowly (the key gene of land).
+    Cuticle,
+    /// Placeholder gene of the land gate cell: cells that live together. It has
+    /// no block yet, and it costs 0 in Prepare.
+    Multicellularity,
 }
 
 impl BlockKind {
     /// Human-readable description of each metabolic block
     pub fn description(&self) -> &'static str {
         match self {
-            BlockKind::LightCapture => "Capture light to produce ATP and NADPH",
+            BlockKind::LightCapture => "Photosynthesis: light makes ATP, reducing power, carbon and O2 (and some ROS)",
             BlockKind::SugarCatabolism => "Break down sugars into pyruvate",
             BlockKind::OrganicAcidOxidation => "Oxidize organic acids via the TCA cycle",
-            BlockKind::Respiration => "Use NADH to generate large amounts of ATP",
+            BlockKind::Respiration => "Respiration: O2 and carbon make much more ATP (and a little ROS)",
             BlockKind::Fermentation => "Anaerobic ATP production with redox balance",
             BlockKind::NitrogenSulfurAssimilation => "Assimilate nitrogen and sulfur sources",
             BlockKind::AminoAcidBiosynthesis => "Produce amino acids from precursors",
@@ -85,6 +92,9 @@ impl BlockKind {
             BlockKind::VesicleExport => "Export waste in vesicles",
             BlockKind::Chemosynthesis => "Make energy and carbon from vent minerals and heat",
             BlockKind::ProteinSynthesis => "Make proteins from amino acids",
+            BlockKind::Catalase => "Turn reactive oxygen species back into O2 (costs ATP)",
+            BlockKind::Cuticle => "A waxy cuticle: less water loss on land (costs lipids, adds drag)",
+            BlockKind::Multicellularity => "Cells that live together (no effect yet)",
         }
     }
 }

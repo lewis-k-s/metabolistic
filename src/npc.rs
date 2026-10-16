@@ -73,9 +73,9 @@ pub const DEATH_FOOD_CARBON: f32 = 8.0;
 pub const SHELTER_KEEP_OUT: f32 = 30.0;
 /// Seconds between two respawns of NPCs (one NPC at a time).
 pub const RESPAWN_SECONDS: f32 = 25.0;
-/// Seconds between two respawns of pigment prey while the player lacks the gene.
-pub const PIGMENT_RESPAWN_SECONDS: f32 = 6.0;
-/// Pigment prey kept alive while the player has no pigment gene.
+/// Seconds between two respawns of key-gene prey while the player lacks the gene.
+pub const KEY_RESPAWN_SECONDS: f32 = 6.0;
+/// Pigment prey kept alive while the player has no pigment gene (the vents).
 pub const PIGMENT_PREY_TARGET: usize = 3;
 /// An NPC does not respawn closer than this to the player (pixels).
 pub const RESPAWN_CLEAR_DISTANCE: f32 = 260.0;
@@ -148,11 +148,17 @@ pub fn spec(archetype: Archetype) -> NpcSpec {
 }
 
 /// The small genome of an archetype: chemosynthesis, and the signature gene
-/// (or `signature` instead of the default one).
+/// (or `signature` instead of the default one). A phototroph (light capture)
+/// also has catalase, like a cyanobacterium: it lives with its own oxygen. So
+/// engulfing one can give either gene.
 pub fn npc_genome(archetype: Archetype, signature: Option<BlockKind>) -> Genome {
     let mut genome = Genome::default();
     let mut kinds = vec![BlockKind::Chemosynthesis];
-    kinds.extend(signature.or(spec(archetype).signature));
+    let signature = signature.or(spec(archetype).signature);
+    kinds.extend(signature);
+    if signature == Some(BlockKind::LightCapture) {
+        kinds.push(BlockKind::Catalase);
+    }
     for kind in kinds {
         genome.add_gene(kind);
         genome.express_gene(kind);
@@ -416,6 +422,7 @@ pub fn npc_steering_system(
     time: Res<Time>,
     grid: Option<Res<EnvGrid>>,
     shelters: Res<Shelters>,
+    level: Option<Res<crate::level::CurrentLevel>>,
     mut rng: ResMut<NpcRng>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     bodies: Query<(Entity, &Transform, &CellSize), With<Cell>>,
@@ -433,6 +440,8 @@ pub fn npc_steering_system(
     >,
 ) {
     let dt = time.delta_secs();
+    // In the light of shallow water, creatures do not run from light.
+    let like_light = level.is_some_and(|l| l.0.npcs_like_light);
     let player = players
         .iter()
         .next()
@@ -483,6 +492,7 @@ pub fn npc_steering_system(
             ),
             None => (Vec2::ZERO, 0.0, Vec2::ZERO, 0.0, Vec2::ZERO),
         };
+        let (light, light_gradient) = if like_light { (0.0, Vec2::ZERO) } else { (light, light_gradient) };
         let senses = Senses {
             position,
             radius: world_radius(size),
@@ -607,7 +617,19 @@ pub struct SpawnSlot(pub usize);
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct RespawnTimers {
     pub general: f32,
-    pub pigment: f32,
+    pub key: f32,
+}
+
+/// The key-gene rule of the level: while the player lacks `gene`, the world
+/// keeps `count` prey that carry it. `None` switches the rule off. The default
+/// is the pigment rule of the vents. The world sets it from the `LevelDef`.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct KeyGeneRule(pub Option<(BlockKind, usize)>);
+
+impl Default for KeyGeneRule {
+    fn default() -> Self {
+        Self(Some((BlockKind::SecondaryMetabolites, PIGMENT_PREY_TARGET)))
+    }
 }
 
 /// Spawns the NPC of a slot.
@@ -620,33 +642,35 @@ pub fn spawn_slot(commands: &mut Commands, slots: &NpcSlots, slot: usize) -> Ent
 
 /// Empty slots to fill, lowest first, at most `count`. `alive[i]` says if slot
 /// `i` has an NPC; `allowed[i]` says if it may spawn now (for example, the
-/// player is not too close). With `only_pigment`, only pigment slots count.
+/// player is not too close). With `only_key`, only key-gene slots count.
 pub fn slots_to_fill(
     alive: &[bool],
     allowed: &[bool],
-    pigment: &[bool],
+    key: &[bool],
     count: usize,
-    only_pigment: bool,
+    only_key: bool,
 ) -> Vec<usize> {
     (0..alive.len())
-        .filter(|&i| !alive[i] && allowed[i] && (!only_pigment || pigment[i]))
+        .filter(|&i| !alive[i] && allowed[i] && (!only_key || key[i]))
         .take(count)
         .collect()
 }
 
-/// How many pigment prey must be added: while the player lacks the pigment gene,
-/// the world keeps `PIGMENT_PREY_TARGET` of them. Never negative.
-pub fn pigment_prey_needed(player_has_gene: bool, alive: usize) -> usize {
-    if player_has_gene { 0 } else { PIGMENT_PREY_TARGET.saturating_sub(alive) }
+/// How many key-gene prey must be added: while the player lacks the gene, the
+/// world keeps `target` of them. Never negative.
+pub fn key_prey_needed(player_has_gene: bool, alive: usize, target: usize) -> usize {
+    if player_has_gene { 0 } else { target.saturating_sub(alive) }
 }
 
 /// Fills empty slots slowly (one NPC every `RESPAWN_SECONDS`, never above the
-/// number of slots) and keeps the pigment prey up while the player has no
-/// pigment gene (one every `PIGMENT_RESPAWN_SECONDS`).
+/// number of slots) and keeps the key-gene prey up while the player lacks the
+/// gene of the level (one every `KEY_RESPAWN_SECONDS`): pigment prey in the
+/// vents, catalase prey in shallow water.
 #[allow(clippy::type_complexity)]
 pub fn npc_respawn_system(
     time: Res<Time>,
     slots: Res<NpcSlots>,
+    rule: Res<KeyGeneRule>,
     mut timers: ResMut<RespawnTimers>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     player_cells: Query<(&Transform, &Genome), With<Cell>>,
@@ -657,16 +681,20 @@ pub fn npc_respawn_system(
         return;
     }
     let dt = time.delta_secs();
-    let Some((player_position, has_pigment)) = players
+    let key_gene = rule.0.map(|(gene, _)| gene);
+    let target = rule.0.map_or(0, |(_, count)| count);
+    let Some((player_position, has_key)) = players
         .iter()
         .find_map(|c| player_cells.get(c.0).ok())
         .map(|(t, g)| {
             (
                 t.translation.truncate(),
-                matches!(
-                    g.get_gene_state(&BlockKind::SecondaryMetabolites),
-                    Some(GeneState::Expressed | GeneState::Enhanced)
-                ),
+                key_gene.is_none_or(|gene| {
+                    matches!(
+                        g.get_gene_state(&gene),
+                        Some(GeneState::Expressed | GeneState::Enhanced)
+                    )
+                }),
             )
         })
     else {
@@ -683,10 +711,10 @@ pub fn npc_respawn_system(
         .iter()
         .map(|(_, position, _)| position.distance(player_position) > RESPAWN_CLEAR_DISTANCE)
         .collect();
-    let pigment: Vec<bool> = slots
+    let key: Vec<bool> = slots
         .0
         .iter()
-        .map(|(a, _, s)| *a == Archetype::Prey && *s == Some(BlockKind::SecondaryMetabolites))
+        .map(|(a, _, s)| *a == Archetype::Prey && key_gene.is_some() && *s == key_gene)
         .collect();
 
     let missing = alive.iter().filter(|a| !**a).count();
@@ -698,23 +726,23 @@ pub fn npc_respawn_system(
         slots.0.len(),
     );
     timers.general = left;
-    let mut fill = slots_to_fill(&alive, &allowed, &pigment, due, false);
+    let mut fill = slots_to_fill(&alive, &allowed, &key, due, false);
 
-    let alive_pigment = (0..alive.len()).filter(|&i| alive[i] && pigment[i]).count();
-    let needed = pigment_prey_needed(has_pigment, alive_pigment);
+    let alive_key = (0..alive.len()).filter(|&i| alive[i] && key[i]).count();
+    let needed = key_prey_needed(has_key, alive_key, target);
     let (left, due) = crate::particles::timer_step(
-        timers.pigment,
+        timers.key,
         dt,
-        PIGMENT_RESPAWN_SECONDS,
-        PIGMENT_PREY_TARGET - needed.min(PIGMENT_PREY_TARGET),
-        PIGMENT_PREY_TARGET,
+        KEY_RESPAWN_SECONDS,
+        target - needed.min(target),
+        target,
     );
-    timers.pigment = left;
+    timers.key = left;
     let mut taken = alive.clone();
     for &i in &fill {
         taken[i] = true;
     }
-    fill.extend(slots_to_fill(&taken, &allowed, &pigment, due.min(needed), true));
+    fill.extend(slots_to_fill(&taken, &allowed, &key, due.min(needed), true));
     for slot in fill {
         spawn_slot(&mut commands, &slots, slot);
     }
@@ -726,6 +754,7 @@ impl Plugin for NpcPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NpcRng>()
             .init_resource::<NpcSlots>()
+            .init_resource::<KeyGeneRule>()
             .init_resource::<RespawnTimers>()
             .add_message::<NpcDied>()
             .add_systems(
@@ -903,12 +932,13 @@ mod tests {
     }
 
     #[test]
-    fn pigment_prey_are_topped_up_only_while_the_player_lacks_the_gene() {
-        assert_eq!(pigment_prey_needed(false, 0), PIGMENT_PREY_TARGET);
-        assert_eq!(pigment_prey_needed(false, 2), 1);
-        assert_eq!(pigment_prey_needed(false, 3), 0);
-        assert_eq!(pigment_prey_needed(false, 5), 0);
-        assert_eq!(pigment_prey_needed(true, 0), 0);
+    fn key_prey_are_topped_up_only_while_the_player_lacks_the_gene() {
+        assert_eq!(key_prey_needed(false, 0, PIGMENT_PREY_TARGET), PIGMENT_PREY_TARGET);
+        assert_eq!(key_prey_needed(false, 2, 3), 1);
+        assert_eq!(key_prey_needed(false, 3, 3), 0);
+        assert_eq!(key_prey_needed(false, 5, 3), 0);
+        assert_eq!(key_prey_needed(true, 0, 3), 0);
+        assert_eq!(key_prey_needed(false, 0, 0), 0, "a level with no rule");
     }
 
     #[test]

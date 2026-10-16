@@ -1,7 +1,7 @@
 # Gameplay core: design and roadmap
 
 Status: agreed in a design review on 2026-10-15. M1 and M2 are done and
-merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done (not committed yet). Next: tune the vent slice, then M7.
+merged to `master` (2026-10-15). M3 and M4 are done. M5 is done. M6 is done. M7 is done. M8 is done (not committed yet): the last milestone of the roadmap. Next: playtest and tune all three stages.
 This document records the decisions and the order of work. Items marked
 **playtest** need numbers from play before we fix them. The art rules are in
 `docs/art-direction.md`.
@@ -119,6 +119,8 @@ reaches zero.
 | Cofactor | Metals |
 | Taken in | Minerals (filled by transporters from the grid; used by chemosynthesis) |
 | Waste | Waste |
+| Screen | Pigments (block UV; decay slowly) |
+| Oxygen | O2 (made by photosynthesis; leaves to the grid), ROS (reactive oxygen species: damage; catalase turns them back into O2) |
 
 Membrane integrity costs Lipids to repair. This connects defence to
 metabolism.
@@ -133,7 +135,8 @@ metabolism.
   - a **lytic** enzyme damages it. It costs a cofactor, and some walls fight
     back.
 - Tissue is cells joined by walls. The number and range of tissue types
-  increase with each stage.
+  increase with each stage. Kinds so far: wall, pore, mat (M7), tough (M7), waxy
+  (M8: solid, stops water in the grid, lets O2 through).
 
 ### Other entities
 
@@ -154,7 +157,10 @@ metabolism.
   animation frames (see `docs/art-direction.md`). Do not scale or rotate a
   cell sprite at run time: rotation turns the light. There is no soft-body
   physics.
-- Land uses the same controls and model, with a different drag value.
+- Land uses the same controls and model, with a different drag value. The
+  field gives a drag multiplier at the cell's position (`FieldKind::drag_multiplier`,
+  pure): water is 1, dry ground on land is 2.5, and the edge of a wet zone is in
+  between. A cuticle adds a little drag (`movement::cuticle_drag_factor`).
 
 ### Meta progression
 
@@ -169,7 +175,7 @@ metabolism.
 |---|---|---|---|---|
 | Vents | Chemosynthesis: Minerals + Heat -> ATP, carbon | Heat at the vent core; scarcity away from it; deadly light zones | Pigments (UV screen) | LightCapture (a pigmented phototroph) |
 | Shallow water | Photosynthesis: Light -> ATP, ReducingPower | UV; **your own O2 and reactive oxygen species** | O2 detox (catalase), then respiration | Respiration (an alpha-proteobacterium, as a mitochondrion) |
-| Land | Respiration: O2 + carbon -> much more ATP | Desiccation (Water field) | Cuticle / thick membrane | Open (multicellularity?) |
+| Land | Respiration: O2 + carbon -> much more ATP | Desiccation (Water field), heavy drag on dry ground | Cuticle / thick membrane | Multicellularity (a placeholder gene with no block); winning completes the run |
 
 The shallow-water stage is the Great Oxidation Event. Your new, more powerful
 metabolism is the source of the risk: the pathways you build produce reactive
@@ -178,22 +184,22 @@ you must stay near water, the world you left behind.
 
 ## 3. Current code compared with the design
 
-Updated after M6.
+Updated after M8.
 
 | Area | Now | Still to do |
 |---|---|---|
 | Solver | Enzymes x saturation, proportional sharing, fixed 0.05 s sub-steps (`metabolism/solver.rs`) | - |
-| Pools | The pools above (with Pigments), plus a `StoredLipids` component | - |
-| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites | photosynthesis, catalase, respiration (M7, M8) |
+| Pools | The pools above (with Pigments, O2 and ROS), plus a `StoredLipids` component; `Hydration` and `CuticleShield` on each cell | - |
+| Blocks | Fermentation, FatStorage, VesicleExport, Chemosynthesis, ProteinSynthesis, AminoAcidBiosynthesis, LipidMetabolism, NucleotideCofactorSynthesis, SecondaryMetabolites, LightCapture (photosynthesis), Catalase, Respiration, Cuticle | - |
 | Proteins | `Proteome`, `SynthesisQueue`, recycling, membrane slots from size, editor UI | - |
-| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | Mutation from ROS |
-| Environment | `EnvGrid` with Heat, Minerals and Light: diffusion, drift, sources, decay | OrganicCarbon, O2, Water |
+| Genome | `Silent` / `Expressed` / `Mutated` / `Enhanced`; UV mutation load, repair, translation efficiency, `GenomeIntegrity`; gene transfer by engulf and virus | - |
+| Environment | `EnvGrid` with Heat, Minerals, Light, O2 and Water: diffusion, drift, sources, decay, leaky (mat) cells, a per-channel leak (waxy wall) | OrganicCarbon |
 | Run screen | The player is a `Cell` with a body; the level comes from the stage's `LevelDef`; HUD with stage name and seed; run-over screen with the cause of death or "Run complete", and the new codex genes | - |
 | NPCs and world | NPC `Cell`s on a slow tick (every 4th), steering, engulf, symbiont exchange, food, metals, viruses, toxin hits, walls with pores, lysis, gate cell | Fusion protein, immune proteins |
 | Physics | avian2d, 64 Hz, no interpolation | - |
 | Art | Baked 8-direction sheets, integer scale (3x), dithered grid texture | A final light colour; a sprite for the shelter disc |
 | Manage screen | Editor: genome, enzymes, membrane slots, queue with time to finish, action slots | - |
-| Run structure | `RunState` (seed, stage, genes taken, carry), `Stage` + `LevelDef`, Prepare screen with a codex budget, Stage complete screen, `Codex` saved as JSON, seeded vent layout with a validator | Levels for shallow water and land (M7, M8) |
+| Run structure | `RunState` (seed, stage, genes taken, carry), `Stage` + `LevelDef`, Prepare screen with a codex budget, Stage complete screen, `Codex` saved as JSON, seeded vent, shallow-water and land layouts with a validator; winning land completes the run | A fourth stage |
 
 Out of date: the multiplayer and mitochondrial-genome items in `TODO.md`, and
 `flowmap_design.md`. Mitochondria now come from endosymbiosis (the shallow
@@ -491,14 +497,152 @@ Original plan:
 2. Codex: save obtained genes. Choose a starting genome with a budget.
 3. Some level variation (procedural layout of fixed parts).
 
-### M7. Shallow water
+### M7. Shallow water - done (not committed yet)
+
+Notes:
+- **Photosynthesis** (`blocks/photosynthesis.rs`, gene `LightCapture`): Light
+  (outside, K 3) -> per turnover ATP 3, ReducingPower 1.5, CarbonSkeletons 1,
+  O2 1.5, ROS 0.2. No input pool; light is a condition. Tests check the
+  stoichiometry and the saturation.
+- **Oxygen and ROS** (`oxygen.rs`, new pools `O2`, `ROS`, new `Channel::O2`):
+  O2 and the grid level under the cell move towards each other by
+  `1 - exp(-0.15 dt)` of the difference (no overshoot; the grid gains what the
+  cell loses; a wall tap gets nothing). 2% of the internal O2 per second turns
+  into ROS (exact, tick-length independent). ROS decays 3% per second. ROS damage
+  per unit per second: membrane 0.3 (`DamageSource::Ros`), genome integrity
+  0.0012, mutation load 0.006. A shelter does not help. Death message names it.
+  Sprite tint from white to a green-grey as ROS goes to 25 (`ros_tint_color`, a
+  flat colour: no scaling or rotation). HUD lines "O2" and "ROS" (with a warning).
+- **Catalase** (`blocks/catalase.rs`, `BlockKind::Catalase`): 2 ROS + 0.5 ATP ->
+  1 O2, K 4. Measured with the starter cell, no UV, light 10, 5 ticks a second:
+  3 photosynthesis enzymes and no catalase die in about 57 s (ROS about 22); with
+  1 catalase enzyme ROS stays near 3, with 2 near 1.2, and the cell lives; 1
+  photosynthesis enzyme and no catalase dies after about 2 minutes (the lipids run
+  out first). Tests: `tests/shallow_water_test.rs`.
+- **Gate reward**: `run::grant_gate_enzyme`: a gate gene with a block gives the
+  carry one free enzyme, and its pathway goes into the first empty action slot (if any), so the player can turn photosynthesis Off or Low at once. `LightCapture` now costs 1 point in Prepare. NPCs with
+  `LightCapture` also get `Catalase` (like cyanobacteria), so they live with their
+  own O2 and engulfing one can give either gene.
+- **Level** (`shallow.rs`, `FieldKind::Shallow`, `LevelDef::shallow_base`): light
+  from the surface: 10 at the top, `exp(-depth / 560)` below (about 3 at the
+  start, 0.2 at the bottom); UV fraction 0.3. One weak vent on the sea floor. Three
+  shelters (microbial mats). 16 creatures: 3 catalase prey (key gene), 6
+  cyanobacteria, 2 deep prey, 2 grazers (predators), 3 symbionts. NPCs do not run
+  from light here (`npcs_like_light`). New `LevelDef` fields: `surface_light`,
+  `key_gene` (gene, centre, count, `dim_edge`: replaces `pigment_prey`),
+  `gate_sprite`, `npcs_like_light`; `WallLine.kind`, `Chamber.wall` and
+  `Chamber.lit`. The `KeyGeneRule` resource (from the level) generalises the
+  pigment top-up; the vents still use the default pigment rule.
+- **Gate**: alpha-proteobacterium in a tough-walled chamber on the sea floor, gives
+  `Respiration` (no block until M8: costs 0 in Prepare). New sprite
+  `gate_cell_proteobacterium` (72x72, rose `proteo` ramp) in `art/gen_sprites.py`;
+  the victory clip is the phototroph gate's.
+- **Tissue**: `WallKind::Mat`: no body; any cell crawls through at 30 px/s (the
+  thrust becomes a crawl force); the grid diffuses through at 0.3 (`EnvGrid::set_leak`,
+  mass conserved); a lysis ignores it. `WallKind::Tough`: solid; lysis costs 1
+  Metals more, and the attacker loses 4 membrane integrity. Without Metals the
+  lysis is silently refused.
+- **Layout**: `layout::generate_shallow(seed)` jitters the start, vent, shelters,
+  tissue rows, pores, prey and zones. `validate` is now level-generic and has new
+  rules: start not in strong UV, key carriers in their zone, key zone and chamber
+  entrance reachable on foot (`reachable`: mats are crossed, walls and pores are
+  not). Over seeds 0-199 no shallow layout needed a retry or the base layout.
+- Smoke test: after StageComplete it enters shallow water (three Run steps: the
+  start, the catalase prey with ROS 18 for the tint, the chamber).
+- **Art owner** (stand-ins, not final): mat and tough wall reuse `wall_membrane`
+  with a colour tint; O2 on the grid is a sea-green dither; the surface light draws
+  only the strong top zone; cells have a ROS tint, not a "stressed" clip; creatures
+  reuse the vent sheets (the art doc has no shallow palette yet).
+- Not done: Respiration block (M8), immune proteins, fusion, a typed seed on Prepare.
+
+Original plan:
 
 1. Photosynthesis block. It produces O2 into the cell and the grid.
 2. Reactive oxygen species: damage from your own O2. Catalase block.
 3. Respiration gate cell (endosymbiosis).
 4. More tissue types.
 
-### M8. Land
+### M8. Land - done (not committed yet)
+
+Notes:
+- **Respiration** (`blocks/respiration.rs`, `BlockKind::Respiration`): per turnover
+  1 CarbonSkeletons + 1 O2 + 0.5 ReducingPower -> 3 ATP + 0.1 ROS, K 2. That is 3 ATP
+  per carbon, about 3x fermentation (1 ATP per pyruvate). It costs 1 point in Prepare.
+  The O2 comes from the cell's O2 pool, which takes it from the grid with the M7
+  `o2_exchange` (exact, mass conserved). In air the exchange rate is 0.6 per second
+  (`AIR_EXCHANGE_RATE`; water 0.15): `FieldKind::o2_exchange_rate`. The gate reward
+  now gives a free enzyme and an action slot for it (`grant_gate_enzyme`).
+- **Measured** (starter cell, land air, carbon and reducing power in stock, 20 s
+  after 30 s): 1 respiration enzyme gives +1.4 ATP/s net of upkeep (O2 pool about 2.8),
+  2 give +2.7, 3 give +3.5 (the O2 uptake and the carbon stock start to limit).
+  One photosynthesis enzyme in land light makes about 1.4 ATP/s and 0.5 carbon/s, so
+  one photosynthesis plus one respiration enzyme roughly doubles the ATP of the same
+  carbon. Without catalase the ROS stays near 3 (membrane loss about 0.9/s, repair
+  gives 2/s); with 1 catalase enzyme it stays near 0.25.
+- **Water channel** (`Channel::Water`, index 4): only the land field uses it. Wet zones
+  are `WetSpot` sources in the `LevelDef` (`wet`): the shore (a rect along the west
+  edge, level 10), seven puddles (source 18, about 9 in the middle), four moist soil
+  pores (source 12) and the gate room (12). Water diffuses 0.5 and decays 0.5 per
+  second, so a zone has a halo of about one grid cell; the plain has about 0.05 to 0.2
+  (0.5 next to a zone). The water layer is static after the warm-up (`settle`).
+  `LevelDef::air_o2` (4.0 on land) is a uniform O2 source.
+- **Hydration and desiccation** (`desiccation.rs`): `Hydration` in [0, 1] on each
+  cell. `wetness(W) = W / (1.5 + W)`. `dH/dt = 0.5 wet (1 - H) - 0.06 (1 - wet)
+  (1 - shield) H`, solved exactly for each tick (the tick length does not change it;
+  a wet cell never dries). Below H 0.4 the membrane takes `3 (0.4 - H) / 0.4`
+  per second (`DamageSource::Desiccation`, integrated exactly over the tick).
+  The death message says "desiccation". Measured: no cuticle, 15 s on dry ground
+  from full to the threshold. Only the player's cell dries (creatures are
+  land-adapted: **playtest**), and only where `FieldKind::dries()`.
+- **Cuticle** (`blocks/cuticle.rs`, `BlockKind::Cuticle`): a gene with a block, not a
+  membrane protein. Why: a key gene must move as a `BlockKind` through the key-gene
+  rule, engulf, the codex and the gate; a block also gives the running cost. It uses
+  0.05 Lipids per turnover per second. Its turnovers per second set the shield
+  `s / (2 + s)`, capped at 0.95 (never 0). `CuticleShield` is set each tick from the
+  turnover, so no lipids or a silent or mutated gene lower it. Measured: shield 0.32 /
+  0.48 / 0.64 with 1 / 2 / 4 enzymes; 22 / 30 / 43 s to the threshold. It adds drag:
+  `1 + 0.25 shield` (`movement::cuticle_drag_factor`). It costs 1 point in Prepare.
+- **Land drag** (`FieldKind::drag_multiplier(water)`, pure): `2.5 + (1 - 2.5) wetness`.
+  `world::player_body::apply_thrust` samples the Water layer at the cell. Crawl speed
+  100 px/s in water and 40 px/s on dry ground (a flagellum doubles the thrust).
+  A mat or adhesin crawl keeps its own speed. The metabolic cost of moving is the
+  thrust used, so a dry crossing costs about 2.5x the ATP for the distance.
+- **Level** (`land.rs`, `FieldKind::Land`, `LevelDef::land_base`, `layout::generate_land`):
+  the same 64 x 48 grid. Light 2.8 everywhere (no falloff), UV fraction 0.5, so UV
+  is 1.4. Shore on the west edge, start just east of it. Four soil-pore shelters.
+  16 creatures: 3 cuticle prey (key gene) in the first puddle, 5 photosynthesising
+  prey (they make O2), 2 other prey, 2 predators, 3 symbionts. Food zones are in or
+  next to wet zones (carbon is scarce on dry ground). The land background is dark earth.
+- **Tissue**: every wall kind. A plain wall line with pores, a tough line with pores, a
+  moss crust (a mat strip), and the new **`WallKind::Waxy`** hedge with pores. A waxy
+  tile is solid for cells, not a wall in the grid, and `EnvGrid::set_channel_leak`
+  closes it to water only (O2 goes through; mass conserved). The gate chamber is
+  waxy with a wet room inside.
+- **Key gene**: `KeyGeneRule` with `Cuticle`, 3 carriers, topped up while the player
+  lacks it. NPCs with the gene get the block. The validator checks that the carriers
+  are in the key zone (a puddle).
+- **Validator** (`layout::validate`, new rules): water near the start, water at the
+  key zone and the gate room, and `wet_hops_ok`: the dry gap between wet zones from
+  the start to the gate room is at most 350 px edge to edge (`MAX_DRY_HOP`). Over seeds
+  0-199 no land layout needed a retry or the base layout.
+- **Gate**: the cell in the waxy chamber gives `Multicellularity` (no block, 0 in
+  Prepare, no enzyme). Winning it completes the run: "Run complete" and the text no
+  longer says "More stages coming". The gate sprite is `gate_cell_phototroph` again
+  (a note for the art owner in the art doc).
+- **HUD**: a hydration bar with a warning, and the cuticle shield line (land only).
+- **Smoke test**: after the shallow gate step it passes a second StageComplete and
+  enters land: the start (W held), a dry stretch with hydration 0.2, and the waxy gate
+  chamber. 17 steps in all.
+- **Tests**: `tests/land_test.rs` (respiration stoichiometry and O2 dependence, O2
+  uptake and mass, desiccation and the tick length, the cuticle, drag, the waxy wall,
+  200 land seeds, the key-gene top-up, the whole chain Vents -> Shallow water -> Land
+  -> run complete) and unit tests in `layout`, `desiccation`, `land`, `oxygen`,
+  `movement`, `hud`, `stage`.
+- **Art owner** (stand-ins, not final): see the art doc, "M8 stand-ins".
+- Not done: a fourth stage, multicellularity mechanics, immune proteins, fusion, a
+  typed seed on Prepare. Creatures do not dry out.
+
+Original plan:
 
 1. Respiration block (O2 + carbon -> much more ATP).
 2. Water channel and desiccation. Cuticle / thick membrane.
@@ -510,10 +654,21 @@ Original plan:
 - Shelter resources: unlimited or limited.
 - NPC metabolism cost, and how much to simplify it.
 - The second and third cofactors.
-- What the land gate cell gives (multicellularity?), and if there is a
-  fourth stage.
+- Is there a fourth stage, and what does multicellularity do? (The land gate gives
+  a placeholder gene with no block.)
 - Grid resolution compared with cell size (now: grid cell 32, player radius
   20).
 - Mineral scarcity: should plumes run dry under a cell?
 - The art includes immune proteins (MHC I and II, TCR, antibody, perforin).
   They are not in this roadmap yet: which stage or mechanic uses them?
+- Should creatures dry out on land too? Now only the player does, so the land
+  stays full of life.
+- The land drag (2.5x) and the dry-hop limit (350 px): is crossing dry ground
+  a risk to plan, or a punishment? Do flagella (double thrust) make the cuticle
+  optional?
+- Should the cell also lose water to heat or light, or gain it from food? Now only
+  the water under it counts.
+- OrganicCarbon is still not a grid channel: food particles stand in for carbon
+  on land.
+- Respiration is limited by O2 uptake and carbon. Should a transporter raise the
+  O2 uptake, like minerals?

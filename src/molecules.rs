@@ -1,6 +1,6 @@
 //! # Internal pools (currencies)
 //!
-//! A cell keeps eleven internal pools. See `docs/gameplay-roadmap.md`, section
+//! A cell keeps thirteen internal pools. See `docs/gameplay-roadmap.md`, section
 //! "Internal pools".
 //!
 //! | Group | Pools |
@@ -12,6 +12,7 @@
 //! | Intake | Minerals (the stock that transporters fill from the grid) |
 //! | Waste | Waste |
 //! | Screen | Pigments (block UV; they decay slowly) |
+//! | Oxygen | O2 (made by photosynthesis, leaves to the grid), ROS (reactive oxygen species: damage; catalase turns them back into O2) |
 //!
 //! Lipids have a stored form, `StoredLipids` (lipid beads), on the cell. Fat
 //! storage moves lipids between the pool and the store.
@@ -50,11 +51,17 @@ pub enum Currency {
     Minerals,
     /// Pigments that screen UV. They decay slowly (see `genome_damage`).
     Pigments,
+    /// Oxygen made by photosynthesis. It leaves the cell to the grid, and part
+    /// of it turns into ROS (see `oxygen`).
+    O2,
+    /// Reactive oxygen species. They damage the membrane and the genome (see
+    /// `oxygen`). Catalase turns them back into O2.
+    ROS,
 }
 
 impl Currency {
     /// All pools, in a fixed order.
-    pub const ALL: [Currency; 11] = [
+    pub const ALL: [Currency; 13] = [
         Currency::ATP,
         Currency::ReducingPower,
         Currency::Pyruvate,
@@ -66,6 +73,8 @@ impl Currency {
         Currency::Waste,
         Currency::Minerals,
         Currency::Pigments,
+        Currency::O2,
+        Currency::ROS,
     ];
 }
 
@@ -111,6 +120,8 @@ impl CurrencyPools {
             (Currency::Waste, 0.0),
             (Currency::Minerals, 10.0),
             (Currency::Pigments, 0.0),
+            (Currency::O2, 0.0),
+            (Currency::ROS, 0.0),
         ]);
         Self { pools }
     }

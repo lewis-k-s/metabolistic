@@ -6,12 +6,14 @@ pub mod actions;
 pub mod blocks;
 pub mod cell;
 pub mod codex;
+pub mod desiccation;
 pub mod engulf;
 pub mod envgrid;
 pub mod environment;
 pub mod exchange;
 pub mod gate;
 pub mod genome_damage;
+pub mod land;
 pub mod layout;
 pub mod level;
 pub mod membrane;
@@ -19,11 +21,13 @@ pub mod metabolism;
 pub mod molecules;
 pub mod movement;
 pub mod npc;
+pub mod oxygen;
 pub mod particles;
 pub mod player;
 pub mod prepare;
 pub mod proteins;
 pub mod run;
+pub mod shallow;
 pub mod shelter;
 pub mod shared;
 pub mod stage;
@@ -117,6 +121,8 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(oxygen::OxygenPlugin)
+            .add_plugins(desiccation::DesiccationPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,
@@ -169,6 +175,8 @@ impl MetabolisticApp {
             .add_plugins(metabolism::MetabolicFlowPlugin)
             .add_plugins(proteins::ProteinPlugin)
             .add_plugins(genome_damage::GenomeDamagePlugin)
+            .add_plugins(oxygen::OxygenPlugin)
+            .add_plugins(desiccation::DesiccationPlugin)
             .add_plugins((
                 engulf::EngulfPlugin,
                 npc::NpcPlugin,

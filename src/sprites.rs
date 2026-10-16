@@ -512,6 +512,22 @@ mod tests {
         assert!(manifest["prey_bacillus"].clips.contains_key(clip::DEATH));
     }
 
+    /// The gate cell of every stage has an idle sheet, and the NPC sprites of the
+    /// shallow-water level are in the manifest.
+    #[test]
+    fn the_gate_sprite_of_each_level_is_in_the_manifest() {
+        let manifest = parse_manifest(MANIFEST).unwrap();
+        for stage in crate::stage::STAGES {
+            let Some(def) = stage.level_def(1) else { continue };
+            let sprite = &manifest[def.gate_sprite];
+            assert!(sprite.clips.contains_key(clip::IDLE), "{}", def.gate_sprite);
+            assert_eq!(sprite.frame_size, UVec2::new(72, 72), "the gate size of the art doc");
+            for npc in &def.npcs {
+                assert!(manifest.contains_key(crate::npc::spec(npc.archetype).sprite));
+            }
+        }
+    }
+
     /// Every sheet in the manifest exists and its PNG has the size that the
     /// manifest says. This catches art and code that drift apart.
     #[test]

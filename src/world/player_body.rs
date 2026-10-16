@@ -15,13 +15,19 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::actions::{ActionState, action_damping, action_thrust};
-use crate::walls::crawl_force;
+use crate::desiccation::CuticleShield;
+use crate::envgrid::EnvGrid;
+use crate::environment::Channel;
+use crate::level::CurrentLevel;
+use crate::walls::{MAT_CRAWL_SPEED, WallMap, crawl_force, crawl_force_at, in_mat};
 use crate::world::cell_layers;
 use crate::cell::{Cell, CellSize};
 use crate::movement::{
-    MoveInput, ThrustEffort, body_drag, body_mass, thrust_capacity, wasd_direction, world_radius,
+    MoveInput, ThrustEffort, body_drag, drag_in_field, body_mass, thrust_capacity, wasd_direction, world_radius,
 };
 use crate::player::{ControlledCell, LocalPlayer};
+use crate::metabolism::CurrencyPools;
+use crate::molecules::Currency;
 use crate::proteins::Proteome;
 use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row};
 use crate::{GameState, InRun};
@@ -58,7 +64,7 @@ pub fn plugin(app: &mut App) {
         )
     // Thrust is a force: set it before avian's fixed-step physics.
     .add_systems(FixedUpdate, apply_thrust.run_if(in_state(InRun)))
-    .add_systems(Update, update_cell_layers.run_if(in_state(InRun)))
+    .add_systems(Update, (update_cell_layers, ros_tint_system).run_if(in_state(InRun)))
     .add_systems(OnExit(InRun), reset_camera);
 }
 
@@ -132,12 +138,17 @@ fn read_move_input(
 /// its `ThrustEffort`. The metabolic tick pays ATP for it.
 fn apply_thrust(
     time: Res<Time>,
+    walls: Res<WallMap>,
+    grid: Option<Res<EnvGrid>>,
+    level: Option<Res<CurrentLevel>>,
     mut cells: Query<
         (
+            &Transform,
             &MoveInput,
             &Proteome,
             &CellSize,
             &ActionState,
+            &CuticleShield,
             &mut ConstantForce,
             &mut LinearDamping,
             &mut ThrustEffort,
@@ -145,11 +156,22 @@ fn apply_thrust(
         With<Cell>,
     >,
 ) {
-    for (input, proteome, size, actions, mut force, mut damping, mut effort) in &mut cells {
-        let drag = action_damping(body_drag(size), actions);
-        // A held adhesin on a wall crawls through it at a slow speed.
+    let field = level.as_ref().map(|l| l.0.field);
+    for (transform, input, proteome, size, actions, shield, mut force, mut damping, mut effort) in &mut cells {
+        // The field sets the drag at the cell's position (dry ground on land is
+        // much heavier than water); a cuticle adds a little.
+        let water = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Water, transform.translation.truncate()));
+        let multiplier = field.map_or(1.0, |f| f.drag_multiplier(water));
+        let drag = drag_in_field(action_damping(body_drag(size), actions), multiplier, shield.0);
+        let on_mat = grid
+            .as_deref()
+            .is_some_and(|g| in_mat(&walls, g.origin(), transform.translation.truncate()));
+        // A held adhesin on a wall crawls through it at a slow speed. So does
+        // a cell in a microbial mat, with no adhesin.
         let thrust = if actions.ghosting() {
             crawl_force(input.0, body_mass(size), drag)
+        } else if on_mat {
+            crawl_force_at(input.0, body_mass(size), drag, MAT_CRAWL_SPEED)
         } else {
             action_thrust(input.0, thrust_capacity(proteome), actions)
         };
@@ -169,6 +191,31 @@ fn update_cell_layers(
         let wanted = cell_layers(proteome, actions.ghosting());
         if *layers != wanted {
             commands.entity(entity).insert(wanted);
+        }
+    }
+}
+
+/// The colour multiplier of a cell sprite at a ROS tint (0 to 1): from white to
+/// a sickly green-grey. A flat colour only: the sprite is never scaled or
+/// rotated. The art has no ROS look yet: **art owner** should bake a "stressed"
+/// clip.
+pub fn ros_tint_color(tint: f32) -> Color {
+    let t = tint.clamp(0.0, 1.0);
+    Color::srgb(1.0 - 0.35 * t, 1.0 - 0.05 * t, 1.0 - 0.55 * t)
+}
+
+/// Tints the sprite of each cell with its ROS: the body-horror look.
+fn ros_tint_system(
+    cells: Query<&CurrencyPools, With<Cell>>,
+    mut sprites: Query<(&ChildOf, &mut Sprite), With<BlobSprite>>,
+) {
+    for (parent, mut sprite) in &mut sprites {
+        let Ok(pools) = cells.get(parent.parent()) else {
+            continue;
+        };
+        let color = ros_tint_color(crate::oxygen::ros_tint(pools.get(Currency::ROS)));
+        if sprite.color != color {
+            sprite.color = color;
         }
     }
 }
@@ -272,6 +319,14 @@ mod tests {
         assert_eq!(heading_row(Vec2::new(0.0, 100.0), 3), 6);
         assert_eq!(heading_row(Vec2::new(1.0, 1.0), 3), 3);
         assert_eq!(heading_row(Vec2::ZERO, 5), 5);
+    }
+
+    #[test]
+    fn the_ros_tint_goes_from_white_to_sickly_green() {
+        assert_eq!(ros_tint_color(0.0).to_srgba(), Srgba::WHITE);
+        let full = ros_tint_color(1.0).to_srgba();
+        assert!(full.red < 0.7 && full.blue < 0.5 && full.green > 0.9, "{full:?}");
+        assert_eq!(ros_tint_color(5.0), ros_tint_color(1.0));
     }
 
     #[test]

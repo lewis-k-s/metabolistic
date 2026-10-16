@@ -16,6 +16,8 @@
 //! - `Transform`: the position in the world (`EnvGrid` is sampled there)
 //! - `MoveInput`, `ThrustEffort`: the wanted direction, and the thrust used
 //! - `ExchangeStats`: minerals taken from the grid and used
+//! - O2 and ROS pools: see `oxygen`
+//! - `Hydration`, `CuticleShield`: water in the cell (see `desiccation`)
 //! - `GenomeIntegrity`, `MutationLoad`, `RepairProgress`: genome damage from UV
 //!   (see `genome_damage`)
 //!
@@ -33,6 +35,7 @@ use crate::exchange::ExchangeStats;
 use crate::actions::{ActionBar, ActionState, PathwayLevels};
 use crate::shelter::InShelter;
 use crate::genome_damage::{GenomeIntegrity, InducedMutations, MutationLoad, RepairProgress};
+use crate::desiccation::{CuticleShield, Hydration};
 use crate::engulf::EngulfIntent;
 use crate::membrane::Membrane;
 use crate::metabolism::{CellTick, CurrencyPools, MetabolicGraph};
@@ -68,7 +71,9 @@ use crate::proteins::{Proteome, SynthesisQueue};
     ActionBar,
     ActionState,
     CellTick,
-    EngulfIntent
+    EngulfIntent,
+    Hydration,
+    CuticleShield
 )]
 pub struct Cell;
 
@@ -79,6 +84,10 @@ pub enum DamageSource {
     Heat,
     /// UV light that pigments did not screen.
     Uv,
+    /// Reactive oxygen species inside the cell (see `oxygen`).
+    Ros,
+    /// Too little water in the cell (see `desiccation`).
+    Desiccation,
 }
 
 /// Membrane damage that a cell took, by source, since it was spawned. It lets
@@ -87,6 +96,8 @@ pub enum DamageSource {
 pub struct DamageTaken {
     pub heat: f32,
     pub uv: f32,
+    pub ros: f32,
+    pub desiccation: f32,
 }
 
 impl DamageTaken {
@@ -95,12 +106,19 @@ impl DamageTaken {
         match source {
             DamageSource::Heat => self.heat += amount.max(0.0),
             DamageSource::Uv => self.uv += amount.max(0.0),
+            DamageSource::Ros => self.ros += amount.max(0.0),
+            DamageSource::Desiccation => self.desiccation += amount.max(0.0),
         }
     }
 
     /// The source that did the most damage. `None` if there was none.
     pub fn main_source(&self) -> Option<DamageSource> {
-        let all = [(DamageSource::Heat, self.heat), (DamageSource::Uv, self.uv)];
+        let all = [
+            (DamageSource::Heat, self.heat),
+            (DamageSource::Uv, self.uv),
+            (DamageSource::Ros, self.ros),
+            (DamageSource::Desiccation, self.desiccation),
+        ];
         all.into_iter()
             .filter(|&(_, amount)| amount > 0.0)
             .max_by(|a, b| a.1.total_cmp(&b.1))
@@ -232,6 +250,10 @@ mod tests {
         assert_eq!(taken.heat, 3.0);
         taken.add(DamageSource::Uv, 5.0);
         assert_eq!(taken.main_source(), Some(DamageSource::Uv));
+        taken.add(DamageSource::Ros, 9.0);
+        assert_eq!(taken.main_source(), Some(DamageSource::Ros));
+        taken.add(DamageSource::Desiccation, 20.0);
+        assert_eq!(taken.main_source(), Some(DamageSource::Desiccation));
     }
 
     #[test]

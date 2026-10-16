@@ -9,8 +9,7 @@
 //! - **If the contact breaks** for longer than `GATE_GRACE` seconds, the progress
 //!   **resets to 0**. (The short grace stops physics jitter from resetting it.)
 //! - When the time is full, the player takes the gate gene (`LevelDef::gate_gene`;
-//!   `GATE_GENE` is the default, a placeholder: the light capture block comes in
-//!   M7), the stage is won, and the world plays `gate_cell_victory` for
+//!   `GATE_GENE` is the default: light capture), the stage is won, and the world plays `gate_cell_victory` for
 //!   `VICTORY_DELAY` seconds. Then the run goes on to the next stage, or ends
 //!   (see `run`).
 
@@ -27,10 +26,14 @@ use crate::run::{PendingVictory, RunSummary};
 pub const GATE_SECONDS: f32 = 3.0;
 /// Seconds of lost contact before the progress resets.
 pub const GATE_GRACE: f32 = 0.25;
-/// The gene that the gate cell gives. A placeholder for light capture.
+/// The gene that the gate cell of the vents gives: photosynthesis.
 pub const GATE_GENE: BlockKind = BlockKind::LightCapture;
 /// Seconds between the win and the run-over screen (the victory clip is 1.6 s).
 pub const VICTORY_DELAY: f32 = 1.6;
+
+/// The sprite of a gate cell, from its level (`LevelDef::gate_sprite`).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GateSprite(pub &'static str);
 
 /// How long the player has touched the gate cell.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq)]

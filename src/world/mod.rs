@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use crate::genome_damage::UvFraction;
 use crate::level::{CurrentLevel, LevelDef};
 use crate::run::RunState;
-use crate::npc::{NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
+use crate::npc::{KeyGeneRule, NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
 use crate::particles::{
     ParticleTimers, ParticleZones, point_in_circle, spawn_food, spawn_metal, spawn_virus,
     VIRUS_SPEED,
@@ -66,7 +66,8 @@ pub fn cell_layers(proteome: &Proteome, ghosting: bool) -> CollisionLayers {
     CollisionLayers::new(Layer::Cell, LayerMask(filters))
 }
 
-/// Deep-water background colour (the art doc's `WATER` ramp).
+/// Deep-water background colour (the art doc's `WATER` ramp). A level sets its own
+/// at the start (`FieldKind::background`: dry earth on land).
 const WATER_COLOR: Color = Color::srgb(0.039, 0.071, 0.149);
 
 /// Thickness of the invisible walls around the field.
@@ -85,7 +86,7 @@ pub fn plugin(app: &mut App) {
             npc_view::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
-        .add_systems(OnExit(InRun), remove_grid);
+        .add_systems(OnExit(InRun), (remove_grid, reset_background));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -104,10 +105,12 @@ fn spawn_world(
         LevelDef::vents_base()
     });
     let grid = def.grid();
+    let [r, g, b] = def.field.background();
+    commands.insert_resource(ClearColor(Color::srgb(r, g, b)));
     let world_size = grid.world_size();
     let origin = grid.origin();
 
-    grid_view::spawn_grid_view(&mut commands, &grid);
+    grid_view::spawn_grid_view(&mut commands, &grid, grid_view::GridStyle::for_field(def.field));
     for vent in def.vents.iter().copied() {
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
     }
@@ -135,6 +138,7 @@ fn spawn_world(
     }
     commands.insert_resource(slots);
     commands.insert_resource(RespawnTimers::default());
+    commands.insert_resource(KeyGeneRule(def.key_gene.map(|k| (k.gene, k.count))));
     let gate = spawn_npc(
         &mut commands,
         crate::npc::Archetype::Gate,
@@ -142,7 +146,10 @@ fn spawn_world(
         Some(def.gate_gene),
         def.npcs.len() as u32,
     );
-    commands.entity(gate).insert(crate::gate::GateProgress::default());
+    commands.entity(gate).insert((
+        crate::gate::GateProgress::default(),
+        crate::gate::GateSprite(def.gate_sprite),
+    ));
     for (index, position) in def.viruses.iter().enumerate() {
         let angle = index as f32 * 2.1;
         spawn_virus(&mut commands, *position, Vec2::new(angle.cos(), angle.sin()) * VIRUS_SPEED);
@@ -167,6 +174,10 @@ fn spawn_world(
     commands.insert_resource(CurrentLevel(def));
 }
 
+fn reset_background(mut commands: Commands) {
+    commands.insert_resource(ClearColor(WATER_COLOR));
+}
+
 fn remove_grid(mut commands: Commands) {
     commands.remove_resource::<crate::envgrid::EnvGrid>();
     commands.remove_resource::<CurrentLevel>();
@@ -174,6 +185,7 @@ fn remove_grid(mut commands: Commands) {
     commands.insert_resource(WallMap::default());
     commands.insert_resource(ParticleZones::default());
     commands.insert_resource(NpcSlots::default());
+    commands.insert_resource(KeyGeneRule::default());
 }
 
 /// Four invisible walls keep the player inside the field.

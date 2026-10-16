@@ -96,6 +96,13 @@ pub fn sense_environment_system(
         env.set(Channel::Heat, heat);
         let light = grid.sample(Channel::Light, transform.translation.truncate());
         env.set(Channel::Light, light);
+        // The water's O2 level: the HUD shows it. The O2 exchange samples it
+        // again (see `oxygen`).
+        let o2 = grid.sample(Channel::O2, transform.translation.truncate());
+        env.set(Channel::O2, o2);
+        // The moisture under the cell: hydration reads it (see `desiccation`).
+        let water = grid.sample(Channel::Water, transform.translation.truncate());
+        env.set(Channel::Water, water);
     }
 }
 

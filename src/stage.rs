@@ -3,8 +3,8 @@
 //! A run is a sequence of stages (`STAGES`). A stage is data: `Stage::level_def`
 //! gives the `LevelDef` that the world spawns from. A stage without a
 //! `LevelDef` is not built yet; the run is complete when the next stage has
-//! none. M7 and M8 add a stage by returning a `LevelDef` for it, with no change
-//! to the run code.
+//! none. All three stages have a level now, so winning land completes the run
+//! (a fourth stage would only need a new `Stage` and a `LevelDef`).
 
 use crate::level::LevelDef;
 
@@ -27,12 +27,13 @@ impl Stage {
         }
     }
 
-    /// The level of this stage for a run seed. `None` until the stage is built
-    /// (M7: shallow water, M8: land).
+    /// The level of this stage for a run seed. `None` for a stage that is not
+    /// built.
     pub fn level_def(self, run_seed: u64) -> Option<LevelDef> {
         match self {
             Stage::Vents => Some(crate::layout::generate_vents(stage_seed(run_seed, 0))),
-            Stage::ShallowWater | Stage::Land => None,
+            Stage::ShallowWater => Some(crate::layout::generate_shallow(stage_seed(run_seed, 1))),
+            Stage::Land => Some(crate::layout::generate_land(stage_seed(run_seed, 2))),
         }
     }
 
@@ -58,19 +59,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_vents_have_a_level_for_now() {
+    fn every_stage_has_a_level() {
         assert!(Stage::Vents.level_def(5).is_some());
-        assert!(Stage::ShallowWater.level_def(5).is_none());
-        assert!(Stage::Land.level_def(5).is_none());
+        assert!(Stage::ShallowWater.level_def(5).is_some());
+        assert!(Stage::Land.level_def(5).is_some());
+        assert_eq!(Stage::Land.level_def(5), Stage::Land.level_def(5));
         assert_eq!(Stage::Vents.level_def(5), Stage::Vents.level_def(5));
+        assert_eq!(Stage::ShallowWater.level_def(5), Stage::ShallowWater.level_def(5));
     }
 
     #[test]
     fn the_run_is_complete_when_the_next_stage_has_no_level() {
-        assert_eq!(next_stage_index(0, Stage::is_playable), None);
-        // When M7 adds a level, the vents lead to it with no other change.
-        assert_eq!(next_stage_index(0, |s| s != Stage::Land), Some(1));
-        assert_eq!(next_stage_index(1, |s| s != Stage::Land), None);
+        assert_eq!(next_stage_index(0, Stage::is_playable), Some(1));
+        assert_eq!(next_stage_index(1, Stage::is_playable), Some(2), "land follows shallow water");
+        assert_eq!(next_stage_index(2, Stage::is_playable), None, "land is the last stage");
+        assert_eq!(next_stage_index(0, |_| false), None);
+        assert_eq!(next_stage_index(1, |s| s != Stage::Land), None, "a stage without a level ends the run");
         assert_eq!(next_stage_index(2, |_| true), None, "no stage after the last");
     }
 

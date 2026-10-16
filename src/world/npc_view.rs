@@ -64,11 +64,12 @@ pub fn plugin(app: &mut App) {
 /// Adds the body and the sprite to each new NPC.
 fn attach_npc_bodies(
     sheets: Res<Sheets>,
-    npcs: Query<(Entity, &Npc, &CellSize), Added<Npc>>,
+    npcs: Query<(Entity, &Npc, &CellSize, Option<&crate::gate::GateSprite>), Added<Npc>>,
     mut commands: Commands,
 ) {
-    for (entity, npc, size) in &npcs {
-        let sprite = spec(npc.archetype).sprite;
+    for (entity, npc, size, gate_sprite) in &npcs {
+        // The level picks the sprite of its gate cell.
+        let sprite = gate_sprite.map_or(spec(npc.archetype).sprite, |g| g.0);
         let gate = npc.archetype == Archetype::Gate;
         let first = if gate { clip::IDLE } else { clip::SPAWN };
         attach_body_for(&mut commands, &sheets, entity, size, sprite, first, gate);

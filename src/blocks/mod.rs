@@ -20,6 +20,12 @@
 //!
 //! - **Chemosynthesis** (`ChemosynthesisBlock`): Minerals + Heat (outside) ->
 //!   ATP + ReducingPower + CarbonSkeletons. Metals are a cofactor.
+//! - **Photosynthesis** (`photosynthesis`, gene `LightCapture`): Light (outside) ->
+//!   ATP + ReducingPower + CarbonSkeletons + O2 + a little ROS.
+//! - **Catalase** (`catalase`): ROS + ATP -> O2.
+//! - **Respiration** (`respiration`, M8): CarbonSkeletons + O2 + ReducingPower ->
+//!   much more ATP + a little ROS.
+//! - **Cuticle** (`cuticle`, M8): uses Lipids; its strength lowers water loss.
 //! - **Amino acid biosynthesis**, **lipid metabolism** (`biosynthesis`):
 //!   CarbonSkeletons + ATP + ReducingPower -> AminoAcids or Lipids.
 //! - **Protein synthesis** (`ProteinSynthesisBlock`): AminoAcids + ATP ->
@@ -34,13 +40,17 @@
 //! - **Vesicle export** (`VesicleExportBlock`): removes Waste from the cell.
 
 pub mod biosynthesis;
+pub mod catalase;
 pub mod chemosynthesis;
+pub mod cuticle;
 pub mod fat_storage;
 pub mod fermentation;
 pub mod genome;
 pub mod nucleotides;
+pub mod photosynthesis;
 pub mod protein_synthesis;
 pub mod refill;
+pub mod respiration;
 pub mod secondary_metabolites;
 pub mod vesicle_export;
 
@@ -104,6 +114,22 @@ pub fn block_spec(kind: BlockKind) -> Option<BlockSpec> {
         BlockKind::Chemosynthesis => Some(BlockSpec {
             profile: chemosynthesis::flux_profile(),
             kinetics: chemosynthesis::kinetics(),
+        }),
+        BlockKind::LightCapture => Some(BlockSpec {
+            profile: photosynthesis::flux_profile(),
+            kinetics: photosynthesis::kinetics(),
+        }),
+        BlockKind::Catalase => Some(BlockSpec {
+            profile: catalase::flux_profile(),
+            kinetics: catalase::kinetics(),
+        }),
+        BlockKind::Respiration => Some(BlockSpec {
+            profile: respiration::flux_profile(),
+            kinetics: respiration::kinetics(),
+        }),
+        BlockKind::Cuticle => Some(BlockSpec {
+            profile: cuticle::flux_profile(),
+            kinetics: cuticle::kinetics(),
         }),
         BlockKind::AminoAcidBiosynthesis => {
             Some(BlockSpec::new(biosynthesis::amino_acid_profile()))
@@ -180,6 +206,18 @@ pub fn spawn_block(
     match kind {
         BlockKind::Chemosynthesis => {
             entity.insert(chemosynthesis::ChemosynthesisBlock);
+        }
+        BlockKind::LightCapture => {
+            entity.insert(photosynthesis::PhotosynthesisBlock);
+        }
+        BlockKind::Catalase => {
+            entity.insert(catalase::CatalaseBlock);
+        }
+        BlockKind::Respiration => {
+            entity.insert(respiration::RespirationBlock);
+        }
+        BlockKind::Cuticle => {
+            entity.insert(cuticle::CuticleBlock);
         }
         BlockKind::AminoAcidBiosynthesis => {
             entity.insert(biosynthesis::AminoAcidBiosynthesisBlock);
@@ -269,7 +307,7 @@ mod tests {
         let mut genome = Genome::default();
         genome.add_gene(BlockKind::Fermentation);
         genome.express_gene(BlockKind::Fermentation);
-        genome.add_gene(BlockKind::LightCapture); // not implemented
+        genome.add_gene(BlockKind::Multicellularity); // no block
         let plan = plan_blocks(&genome, &CellBlocks::default());
         assert_eq!(
             plan.spawn,

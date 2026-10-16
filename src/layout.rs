@@ -1,6 +1,6 @@
 //! # Level layout from a seed
 //!
-//! The vent level has fixed parts (a core vent, two light shafts, a gate
+//! The vent level (and, with `generate_shallow`, the shallow-water level) has fixed parts (a core vent, two light shafts, a gate
 //! chamber, two wall lines) and this module places them. `generate_vents`
 //! moves the second vent, the shafts, the shelters and the start inside small
 //! boxes, picks the pores along each wall line, and scatters the creatures,
@@ -10,7 +10,12 @@
 //!
 //! - the start is not in heat or in light, and is clear of walls;
 //! - a shelter is within `SHELTER_REACH` of the start;
-//! - the pigment prey wait in the dim edge of a light shaft;
+//! - the key-gene carriers (the pigment prey in the vents, the catalase prey in
+//!   shallow water) wait where the level says: in the dim edge of a light shaft,
+//!   or within `KEY_ZONE_RADIUS` of the zone centre;
+//! - the start is not in strong UV (shallow water);
+//! - from the start, the key zone and the outside of every chamber pore can be
+//!   reached on foot (`reachable`): mats can be crossed, walls and pores cannot;
 //! - the gate chamber has a pore, and the gate cell is inside it;
 //! - no shelter, vent, creature, virus or zone centre overlaps a wall, a vent
 //!   or the chamber, and all are inside the field;
@@ -48,18 +53,36 @@ pub const PREDATOR_DISTANCE: f32 = 400.0;
 /// The pigment prey are this far below the lower end of a shaft: at least
 /// `min`, at most `max` (world units).
 pub const DIM_EDGE: (f32, f32) = (30.0, 130.0);
+/// The carriers of a key gene outside the vents wait this close to the zone
+/// centre.
+pub const KEY_ZONE_RADIUS: f32 = 90.0;
+/// The start must not be in more UV than this (shallow water).
+pub const START_MAX_UV: f32 = 1.5;
 
 /// One broken rule.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayoutError {
     StartInHeat,
     StartInLight,
+    StartInStrongUv,
     StartAtWall,
     NoShelterNearStart,
     ShelterBlocked(usize),
-    PigmentPreyNotInDimEdge,
+    /// The carriers of the key gene are too few, or outside the key zone.
+    KeyCarriersMisplaced,
+    /// The key zone cannot be reached from the start without crossing a wall.
+    KeyZoneUnreachable,
+    /// The outside of a chamber pore cannot be reached from the start.
+    ChamberUnreachable,
     ChamberHasNoPore,
     GateOutsideChamber,
+    /// No wet zone within `crate::land::MAX_DRY_HOP` of the start.
+    NoWaterNearStart,
+    /// The gate room, or the key zone, is not in or next to a wet zone.
+    NoWaterAtGoal,
+    /// The wet zones leave a dry gap wider than `MAX_DRY_HOP` between the start
+    /// and the gate room.
+    DryGapTooWide,
     /// A point of the layout is in a wall, a vent, the chamber or outside the field.
     Overlap(&'static str, Vec2),
     PredatorNearStart,
@@ -68,6 +91,92 @@ pub enum LayoutError {
 /// True if the point is inside the rectangle grown by `margin`.
 fn in_rect(point: Vec2, min: Vec2, max: Vec2, margin: f32) -> bool {
     point.cmpge(min - Vec2::splat(margin)).all() && point.cmple(max + Vec2::splat(margin)).all()
+}
+
+/// Can a cell walk from `from` to `to` over the tiles of the level? A wall, a
+/// tough wall and a pore stop the walk; a mat does not (any cell crawls through
+/// it). The walk moves between the four neighbours of a tile.
+pub fn reachable(map: &crate::walls::WallMap, origin: Vec2, def: &LevelDef, from: Vec2, to: Vec2) -> bool {
+    use crate::walls::{WallKind, tile_at};
+    let (Some(start), Some(goal)) = (tile_at(origin, from), tile_at(origin, to)) else {
+        return false;
+    };
+    let inside = |(x, y): (usize, usize)| x < def.width && y < def.height;
+    let open = |tile: (usize, usize)| {
+        inside(tile) && !matches!(map.get(tile), Some(WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Pore))
+    };
+    if !open(start) || !inside(goal) {
+        return false;
+    }
+    let mut seen = vec![false; def.width * def.height];
+    let mut queue = std::collections::VecDeque::from([start]);
+    seen[start.1 * def.width + start.0] = true;
+    while let Some((x, y)) = queue.pop_front() {
+        if (x, y) == goal {
+            return true;
+        }
+        let neighbours = [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ];
+        for tile in neighbours {
+            // The goal may be a pore or a wall tile itself: stand next to it.
+            if !inside(tile) || seen[tile.1 * def.width + tile.0] || !(open(tile) || tile == goal) {
+                continue;
+            }
+            seen[tile.1 * def.width + tile.0] = true;
+            queue.push_back(tile);
+        }
+    }
+    false
+}
+
+/// Can a walker go from `from` to `to` by hops from wet zone to wet zone, each hop
+/// at most `max_hop` over dry ground (edge to edge)? The first hop starts at
+/// `from`, the last ends within `max_hop` of `to`. Walls are ignored.
+pub fn wet_hops_ok(wet: &[level::WetSpot], from: Vec2, to: Vec2, max_hop: f32) -> bool {
+    let near = |p: Vec2, w: &level::WetSpot| w.distance(p) <= max_hop;
+    let mut reached: Vec<bool> = wet.iter().map(|w| near(from, w)).collect();
+    if reached.iter().all(|r| !r) {
+        return false;
+    }
+    loop {
+        let mut changed = false;
+        for i in 0..wet.len() {
+            if reached[i] {
+                continue;
+            }
+            // A zone is reached when some reached zone is within a hop. The
+            // distance from a zone to a point is zero inside it; for two zones
+            // use the nearest sample on the edge of the other (a disc centre or
+            // rect centre is close enough for hops of hundreds of pixels).
+            let probe = spot_centre(&wet[i]);
+            if (0..wet.len()).any(|j| reached[j] && wet[j].distance(probe) <= max_hop + spot_radius(&wet[i])) {
+                reached[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    (0..wet.len()).any(|i| reached[i] && wet[i].distance(to) <= max_hop)
+}
+
+fn spot_centre(spot: &level::WetSpot) -> Vec2 {
+    match *spot {
+        level::WetSpot::Disc { centre, .. } => centre,
+        level::WetSpot::Rect { min, max, .. } => (min + max) * 0.5,
+    }
+}
+
+fn spot_radius(spot: &level::WetSpot) -> f32 {
+    match *spot {
+        level::WetSpot::Disc { radius, .. } => radius,
+        level::WetSpot::Rect { min, max, .. } => (max - min).max_element() * 0.5,
+    }
 }
 
 /// The hard rules of a level. `Ok` if all hold, else every broken rule.
@@ -88,6 +197,13 @@ pub fn validate(def: &LevelDef) -> Result<(), Vec<LayoutError>> {
     {
         errors.push(LayoutError::StartInLight);
     }
+    if let Some(surface) = def.surface_light {
+        let top = -origin.y;
+        let uv = crate::genome_damage::uv_level(surface.at_depth(top - def.start.y), def.uv_fraction);
+        if uv > START_MAX_UV {
+            errors.push(LayoutError::StartInStrongUv);
+        }
+    }
     if touching_wall(&walls, origin, def.start, WALL_CLEARANCE) {
         errors.push(LayoutError::StartAtWall);
     }
@@ -105,20 +221,28 @@ pub fn validate(def: &LevelDef) -> Result<(), Vec<LayoutError>> {
         }
     }
 
-    // The pigment prey.
-    let pigment: Vec<_> = def
-        .npcs
-        .iter()
-        .filter(|n| n.signature == Some(BlockKind::SecondaryMetabolites))
-        .collect();
-    let in_dim_edge = |p: Vec2| {
-        def.shafts.iter().any(|s| {
-            let below = s.min.y - p.y;
-            p.x >= s.min.x - 80.0 && p.x <= s.max.x + 80.0 && below >= DIM_EDGE.0 && below <= DIM_EDGE.1
-        })
-    };
-    if pigment.len() < crate::npc::PIGMENT_PREY_TARGET || !pigment.iter().all(|n| in_dim_edge(n.position)) {
-        errors.push(LayoutError::PigmentPreyNotInDimEdge);
+    // The key-gene carriers.
+    if let Some(key) = def.key_gene {
+        let carriers: Vec<_> = def
+            .npcs
+            .iter()
+            .filter(|n| n.archetype == Archetype::Prey && n.signature == Some(key.gene))
+            .collect();
+        let in_dim_edge = |p: Vec2| {
+            def.shafts.iter().any(|s| {
+                let below = s.min.y - p.y;
+                p.x >= s.min.x - 80.0 && p.x <= s.max.x + 80.0 && below >= DIM_EDGE.0 && below <= DIM_EDGE.1
+            })
+        };
+        let in_zone = |p: Vec2| {
+            if key.dim_edge { in_dim_edge(p) } else { p.distance(key.centre) <= KEY_ZONE_RADIUS }
+        };
+        if carriers.len() < key.count || !carriers.iter().all(|n| in_zone(n.position)) {
+            errors.push(LayoutError::KeyCarriersMisplaced);
+        }
+        if !reachable(&walls, origin, def, def.start, key.centre) {
+            errors.push(LayoutError::KeyZoneUnreachable);
+        }
     }
 
     // The gate chamber.
@@ -127,6 +251,39 @@ pub fn validate(def: &LevelDef) -> Result<(), Vec<LayoutError>> {
     }
     if !in_rect(def.gate_position, chamber_min, chamber_max, 0.0) {
         errors.push(LayoutError::GateOutsideChamber);
+    }
+    // The tile south of each pore: the way in. At least one must be reachable.
+    let outside: Vec<Vec2> = def
+        .chamber
+        .pores
+        .iter()
+        .filter(|x| def.chamber.x.contains(x))
+        .map(|&x| {
+            origin
+                + Vec2::new(x as f32 + 0.5, *def.chamber.y.start() as f32 - 1.5)
+                    * crate::envgrid::CELL_SIZE
+        })
+        .collect();
+    if !outside.is_empty() && !outside.iter().any(|&p| reachable(&walls, origin, def, def.start, p)) {
+        errors.push(LayoutError::ChamberUnreachable);
+    }
+
+    // Water on land (`Channel::Water`): a cell dries out, so the start, the key
+    // zone and the gate room need water, and the dry gaps between wet zones must
+    // be short enough to cross.
+    if !def.wet.is_empty() {
+        let hop = crate::land::MAX_DRY_HOP;
+        let dist = |p: Vec2| def.wet.iter().map(|w| w.distance(p)).fold(f32::INFINITY, f32::min);
+        if dist(def.start) > hop * 0.5 {
+            errors.push(LayoutError::NoWaterNearStart);
+        }
+        let key_dry = def.key_gene.is_some_and(|k| dist(k.centre) > 1.0);
+        if dist(def.gate_position) > 1.0 || key_dry {
+            errors.push(LayoutError::NoWaterAtGoal);
+        }
+        if !wet_hops_ok(&def.wet, def.start, def.gate_position, hop) {
+            errors.push(LayoutError::DryGapTooWide);
+        }
     }
 
     // Overlaps.
@@ -194,7 +351,7 @@ fn jitter(rng: &mut StdRng, amount: f32) -> Vec2 {
     Vec2::new(rng.random_range(-amount..=amount), rng.random_range(-amount..=amount))
 }
 
-/// One layout, not checked.
+/// One vent layout, not checked.
 fn propose(seed: u64, attempt: u32) -> LevelDef {
     let mixed = seed ^ u64::from(attempt).wrapping_mul(0x9E37_79B9_7F4A_7C15);
     let mut rng = StdRng::seed_from_u64(mixed);
@@ -227,7 +384,9 @@ fn propose(seed: u64, attempt: u32) -> LevelDef {
     // The pigment prey follow shaft A.
     let shaft_a = def.shafts[0];
     let centre = Vec2::new((shaft_a.min.x + shaft_a.max.x) * 0.5, shaft_a.min.y - 38.0) + jitter(rng, 10.0);
-    def.pigment_prey = centre;
+    if let Some(key) = &mut def.key_gene {
+        key.centre = centre;
+    }
     for npc in &mut def.npcs {
         if npc.signature == Some(BlockKind::SecondaryMetabolites) {
             npc.position = centre + (npc.position - level::PIGMENT_PREY_POSITION) + jitter(rng, 8.0);
@@ -271,6 +430,140 @@ pub fn generate_vents_counted(seed: u64) -> (LevelDef, u32) {
 /// The vent level for a seed. The same seed gives the same level.
 pub fn generate_vents(seed: u64) -> LevelDef {
     generate_vents_counted(seed).0
+}
+
+/// One shallow-water layout, not checked.
+fn propose_shallow(seed: u64, attempt: u32) -> LevelDef {
+    let mixed = seed ^ u64::from(attempt).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut rng = StdRng::seed_from_u64(mixed);
+    let rng = &mut rng;
+    let mut def = LevelDef::shallow_base();
+    def.seed = seed;
+
+    def.vents[0].position += Vec2::new(rng.random_range(-60.0..=60.0), 0.0);
+    def.start += jitter(rng, 15.0);
+    for shelter in &mut def.shelters {
+        shelter.position += jitter(rng, 20.0);
+    }
+
+    // Tissue: the mat band and strip move by a tile, the tough line gets two
+    // pores, the chamber two pores.
+    def.lines[0].at = rng.random_range(30..=32);
+    def.lines[1].at = rng.random_range(37..=38);
+    def.lines[2].pores = pick_pores(rng, 5..=29, 2, 3);
+    def.chamber.pores = pick_pores(rng, def.chamber.x.clone(), 2, 2);
+
+    // The catalase prey follow a zone that moves a little.
+    let centre = crate::shallow::CATALASE_PREY + jitter(rng, 30.0);
+    if let Some(key) = &mut def.key_gene {
+        key.centre = centre;
+    }
+    for npc in &mut def.npcs {
+        if npc.signature == Some(BlockKind::Catalase) {
+            npc.position = centre + (npc.position - crate::shallow::CATALASE_PREY) + jitter(rng, 8.0);
+        } else {
+            npc.position += jitter(rng, 35.0);
+        }
+    }
+    for p in &mut def.viruses {
+        *p += jitter(rng, 60.0);
+    }
+    for (p, _) in def.food_zones.iter_mut().chain(def.metal_zones.iter_mut()) {
+        *p += jitter(rng, 15.0);
+    }
+    def
+}
+
+/// The shallow-water level for a seed, and the number of attempts that it took.
+pub fn generate_shallow_counted(seed: u64) -> (LevelDef, u32) {
+    for attempt in 0..MAX_ATTEMPTS {
+        let def = propose_shallow(seed, attempt);
+        if validate(&def).is_ok() {
+            return (def, attempt + 1);
+        }
+    }
+    let mut base = LevelDef::shallow_base();
+    base.seed = seed;
+    (base, MAX_ATTEMPTS + 1)
+}
+
+/// The shallow-water level for a seed. The same seed gives the same level.
+pub fn generate_shallow(seed: u64) -> LevelDef {
+    generate_shallow_counted(seed).0
+}
+
+/// One land layout, not checked.
+fn propose_land(seed: u64, attempt: u32) -> LevelDef {
+    let mixed = seed ^ u64::from(attempt).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut rng = StdRng::seed_from_u64(mixed);
+    let rng = &mut rng;
+    let mut def = LevelDef::land_base();
+    def.seed = seed;
+
+    def.start += jitter(rng, 15.0);
+    for shelter in &mut def.shelters {
+        shelter.position += jitter(rng, 15.0);
+    }
+    // The wet zones that belong to a shelter move with it (the four pore
+    // discs come right after the shore and the seven puddles).
+    let pore_start = def.wet.len() - def.shelters.len() - 1;
+    for (i, shelter) in def.shelters.clone().iter().enumerate() {
+        if let level::WetSpot::Disc { centre, .. } = &mut def.wet[pore_start + i] {
+            *centre = shelter.position;
+        }
+    }
+
+    // Tissue: the moss crust and the plain line move by a tile, the tough line,
+    // the plain line and the waxy hedge get new pores, the chamber two pores.
+    def.lines[0].pores = pick_pores(rng, 15..=29, 2, 4);
+    def.lines[1].at = rng.random_range(23..=25);
+    def.lines[2].pores = pick_pores(rng, 14..=34, 2, 4);
+    def.lines[3].pores = pick_pores(rng, 8..=24, 2, 4);
+    def.chamber.pores = pick_pores(rng, def.chamber.x.clone(), 2, 2);
+
+    // The cuticle prey follow a puddle that moves a little.
+    let shift = jitter(rng, 25.0);
+    let centre = crate::land::CUTICLE_PREY + shift;
+    if let Some(key) = &mut def.key_gene {
+        key.centre = centre;
+    }
+    // The first puddle (right after the shore) is the cuticle puddle.
+    if let level::WetSpot::Disc { centre: c, .. } = &mut def.wet[1] {
+        *c = centre;
+    }
+    def.food_zones[0].0 = centre;
+    for npc in &mut def.npcs {
+        if npc.signature == Some(BlockKind::Cuticle) {
+            npc.position = centre + (npc.position - crate::land::CUTICLE_PREY) + jitter(rng, 8.0);
+        } else {
+            npc.position += jitter(rng, 30.0);
+        }
+    }
+    for p in &mut def.viruses {
+        *p += jitter(rng, 60.0);
+    }
+    for (p, _) in def.food_zones.iter_mut().skip(1).chain(def.metal_zones.iter_mut()) {
+        *p += jitter(rng, 12.0);
+    }
+    def
+}
+
+/// The land level for a seed, and the number of attempts that it took.
+pub fn generate_land_counted(seed: u64) -> (LevelDef, u32) {
+    for attempt in 0..MAX_ATTEMPTS {
+        let def = propose_land(seed, attempt);
+        if validate(&def).is_ok() {
+            return (def, attempt + 1);
+        }
+    }
+    let mut base = LevelDef::land_base();
+    base.seed = seed;
+    (base, MAX_ATTEMPTS + 1)
+}
+
+/// The land level for a seed. The same seed gives the same level.
+pub fn generate_land(seed: u64) -> LevelDef {
+    generate_land_counted(seed).0
 }
 
 #[cfg(test)]
@@ -341,7 +634,7 @@ mod tests {
 
         let mut def = base.clone();
         def.npcs[0].position = Vec2::new(320.0, 600.0);
-        assert!(validate(&def).unwrap_err().contains(&LayoutError::PigmentPreyNotInDimEdge));
+        assert!(validate(&def).unwrap_err().contains(&LayoutError::KeyCarriersMisplaced));
 
         let mut def = base.clone();
         def.chamber.pores.clear();
@@ -365,5 +658,210 @@ mod tests {
         let grid = def.cold_grid();
         assert_eq!(grid.wall_count(), def.wall_map().len());
         assert!(def.wall_tiles().iter().filter(|(_, k)| *k == crate::walls::WallKind::Pore).count() >= 5);
+    }
+
+    // --- Shallow water ---
+
+    /// Counts the broken shallow rules over many proposals. Run with
+    /// `cargo th layout::tests::print_shallow_failures -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn print_shallow_failures() {
+        let mut counts = std::collections::BTreeMap::new();
+        for seed in 0..200u64 {
+            if let Err(errors) = validate(&propose_shallow(seed, 0)) {
+                for e in errors {
+                    let key = match e {
+                        LayoutError::Overlap(what, p) => format!("Overlap({what} {})", (p / 50.0).round() * 50.0),
+                        other => format!("{other:?}"),
+                    };
+                    *counts.entry(key).or_insert(0) += 1;
+                }
+            }
+        }
+        eprintln!("{counts:#?}");
+    }
+
+    #[test]
+    fn the_shallow_base_layout_is_valid() {
+        assert_eq!(validate(&LevelDef::shallow_base()), Ok(()));
+    }
+
+    #[test]
+    fn two_hundred_shallow_seeds_give_valid_layouts_and_a_retry_is_rare() {
+        let mut retries = 0;
+        let mut fallbacks = 0;
+        for seed in 0..200u64 {
+            let (def, attempts) = generate_shallow_counted(seed);
+            assert_eq!(validate(&def), Ok(()), "seed {seed}");
+            assert_eq!(def.seed, seed);
+            retries += u32::from(attempts > 1);
+            fallbacks += u32::from(attempts > MAX_ATTEMPTS);
+        }
+        assert_eq!(fallbacks, 0, "the base layout is only a safety net");
+        assert!(retries <= 10, "{retries} of 200 seeds needed a retry");
+    }
+
+    #[test]
+    fn shallow_layouts_vary_with_the_seed_and_repeat_for_one_seed() {
+        assert_eq!(generate_shallow(7), generate_shallow(7));
+        assert_ne!(generate_shallow(7), generate_shallow(8));
+        // The tissue differs: the tough line and the chamber have other pores.
+        assert_ne!(generate_shallow(7).wall_tiles(), generate_shallow(8).wall_tiles());
+    }
+
+    #[test]
+    fn the_shallow_validator_catches_each_rule() {
+        let base = LevelDef::shallow_base();
+
+        // The start at the surface is in strong UV.
+        let mut def = base.clone();
+        def.start.y = 700.0;
+        assert!(validate(&def).unwrap_err().contains(&LayoutError::StartInStrongUv));
+
+        // Carriers too far from the key zone.
+        let mut def = base.clone();
+        def.npcs[0].position = Vec2::new(300.0, 100.0);
+        assert!(validate(&def).unwrap_err().contains(&LayoutError::KeyCarriersMisplaced));
+
+        // A tough wall round the start cuts the key zone off. Close the line
+        // between the start and the key zone with a full tough column.
+        let mut def = base.clone();
+        def.lines.push(crate::level::WallLine {
+            kind: crate::walls::WallKind::Tough,
+            vertical: true,
+            at: 17,
+            span: 0..=47,
+            pores: Vec::new(),
+        });
+        let errors = validate(&def).unwrap_err();
+        assert!(errors.contains(&LayoutError::KeyZoneUnreachable), "{errors:?}");
+
+        // Close the pores of the chamber: no way in.
+        let mut def = base.clone();
+        def.chamber.pores.clear();
+        let errors = validate(&def).unwrap_err();
+        assert!(errors.contains(&LayoutError::ChamberHasNoPore), "{errors:?}");
+    }
+
+    #[test]
+    fn a_mat_can_be_crossed_but_a_wall_cannot() {
+        let mut def = LevelDef::shallow_base();
+        def.lines = vec![crate::level::WallLine {
+            kind: crate::walls::WallKind::Mat,
+            vertical: true,
+            at: 20,
+            span: 0..=47,
+            pores: Vec::new(),
+        }];
+        let origin = -Vec2::new(def.width as f32, def.height as f32) * crate::envgrid::CELL_SIZE * 0.5;
+        let map = def.wall_map();
+        let (left, right) = (Vec2::new(-700.0, 0.0), Vec2::new(0.0, 0.0));
+        assert!(reachable(&map, origin, &def, left, right), "a mat line is crossed");
+        def.lines[0].kind = crate::walls::WallKind::Wall;
+        assert!(!reachable(&def.wall_map(), origin, &def, left, right), "a wall line is not");
+        def.lines[0].kind = crate::walls::WallKind::Tough;
+        assert!(!reachable(&def.wall_map(), origin, &def, left, right));
+    }
+
+    // --- Land ---
+
+    /// Counts the broken land rules over many proposals. Run with
+    /// `cargo th layout::tests::print_land_failures -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn print_land_failures() {
+        let mut counts = std::collections::BTreeMap::new();
+        for seed in 0..200u64 {
+            if let Err(errors) = validate(&propose_land(seed, 0)) {
+                for e in errors {
+                    let key = match e {
+                        LayoutError::Overlap(what, p) => format!("Overlap({what} {})", (p / 50.0).round() * 50.0),
+                        other => format!("{other:?}"),
+                    };
+                    *counts.entry(key).or_insert(0) += 1;
+                }
+            }
+        }
+        eprintln!("{counts:#?}");
+    }
+
+    #[test]
+    fn the_land_base_layout_is_valid() {
+        assert_eq!(validate(&LevelDef::land_base()), Ok(()));
+    }
+
+    #[test]
+    fn two_hundred_land_seeds_give_valid_layouts_and_a_retry_is_rare() {
+        let mut retries = 0;
+        let mut fallbacks = 0;
+        for seed in 0..200u64 {
+            let (def, attempts) = generate_land_counted(seed);
+            assert_eq!(validate(&def), Ok(()), "seed {seed}");
+            assert_eq!(def.seed, seed);
+            retries += u32::from(attempts > 1);
+            fallbacks += u32::from(attempts > MAX_ATTEMPTS);
+        }
+        assert_eq!(fallbacks, 0, "the base layout is only a safety net");
+        assert!(retries <= 10, "{retries} of 200 seeds needed a retry");
+    }
+
+    #[test]
+    fn land_layouts_vary_with_the_seed_and_repeat_for_one_seed() {
+        assert_eq!(generate_land(7), generate_land(7));
+        assert_ne!(generate_land(7), generate_land(8));
+        assert_ne!(generate_land(7).wall_tiles(), generate_land(8).wall_tiles());
+    }
+
+    #[test]
+    fn the_land_validator_catches_each_water_rule() {
+        let base = LevelDef::land_base();
+
+        // The start far from every wet zone.
+        let mut def = base.clone();
+        def.start = Vec2::new(900.0, 700.0);
+        def.wet = vec![level::WetSpot::Disc { centre: Vec2::new(-900.0, -600.0), radius: 40.0, level: 8.0 }];
+        let errors = validate(&def).unwrap_err();
+        assert!(errors.contains(&LayoutError::NoWaterNearStart), "{errors:?}");
+
+        // The gate room without water.
+        let mut def = base.clone();
+        def.wet.pop();
+        let errors = validate(&def).unwrap_err();
+        assert!(errors.contains(&LayoutError::NoWaterAtGoal), "{errors:?}");
+
+        // Only the shore: the gate room is too far to hop to.
+        let mut def = base.clone();
+        let gate = *def.wet.last().unwrap();
+        def.wet = vec![def.wet[0], gate];
+        let errors = validate(&def).unwrap_err();
+        assert!(errors.contains(&LayoutError::DryGapTooWide), "{errors:?}");
+    }
+
+    #[test]
+    fn the_land_grid_has_water_air_and_a_waxy_wall_that_stops_only_water() {
+        use crate::environment::Channel;
+        use crate::walls::WallKind;
+        let def = LevelDef::land_base();
+        let grid = def.grid();
+        // Wet at the shore and in a puddle, dry on the plain.
+        assert!(grid.sample(Channel::Water, Vec2::new(-960.0, 0.0)) > 5.0);
+        assert!(grid.sample(Channel::Water, crate::land::CUTICLE_PREY) > 5.0);
+        assert!(grid.sample(Channel::Water, Vec2::new(-330.0, -180.0)) < 0.3);
+        // Air everywhere, and the start has some.
+        assert!(grid.sample(Channel::O2, def.start) > 3.0);
+        // Every tile of a waxy kind is open to O2 and shut to water.
+        let mut waxy = 0;
+        for ((x, y), kind) in def.wall_tiles() {
+            if kind == WallKind::Waxy {
+                waxy += 1;
+                assert!(!grid.is_wall(x, y));
+                assert_eq!(grid.channel_leak(Channel::Water, x, y), crate::walls::WAXY_WATER_FACTOR);
+                assert_eq!(grid.channel_leak(Channel::O2, x, y), 1.0);
+            }
+        }
+        assert!(waxy > 20);
+        // The gate room is wet; the waxy chamber keeps the plain's dryness out.
+        assert!(grid.sample(Channel::Water, def.gate_position) > 3.0);
     }
 }

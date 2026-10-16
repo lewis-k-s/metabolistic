@@ -39,7 +39,7 @@ use crate::membrane::Membrane;
 use crate::metabolism::CurrencyPools;
 use crate::particles::VirusInfection;
 use crate::player::{ControlledCell, LocalPlayer};
-use crate::proteins::Proteome;
+use crate::proteins::{ProteinTarget, Proteome};
 use crate::stage::{STAGES, Stage, next_stage_index};
 use crate::{GameState, InRun};
 
@@ -90,6 +90,23 @@ pub fn carry_over(genome: &Genome, proteome: &Proteome, action_bar: &ActionBar) 
         genome,
         proteome: proteome.clone(),
         action_bar: action_bar.clone(),
+    }
+}
+
+/// The reward of a gate cell: if its gene has a block, the carry gets one free
+/// enzyme for it, so the next stage starts with the pathway working, slowly.
+/// A gene with no block (Multicellularity) gets nothing. The pathway
+/// also goes into the first empty action slot (if one is free), so the player
+/// can turn it Off or Low at once: photosynthesis makes ROS.
+pub fn grant_gate_enzyme(carry: &mut Carry, gene: BlockKind) {
+    if crate::blocks::block_spec(gene).is_some() {
+        carry.proteome.add(ProteinTarget::Enzyme(gene));
+        let action = crate::actions::ActionKind::Pathway(gene);
+        if !carry.action_bar.slots.contains(&Some(action))
+            && let Some(slot) = carry.action_bar.slots.iter_mut().find(|s| s.is_none())
+        {
+            *slot = Some(action);
+        }
     }
 }
 
@@ -176,9 +193,10 @@ pub fn run_over_title(summary: &RunSummary) -> &'static str {
 /// The line under the title: the cause of death, or the gene that was taken.
 pub fn run_over_message(summary: &RunSummary) -> String {
     match summary.victory {
-        Some(gene) => format!(
-            "You engulfed the gate cell and took its gene: {gene:?}. (More stages coming.)"
+        Some(gene) if summary.run_complete => format!(
+            "You engulfed the last gate cell and took its gene: {gene:?}. You crossed from the vents to the land."
         ),
+        Some(gene) => format!("You engulfed the gate cell and took its gene: {gene:?}."),
         None => death_message(summary.cause, summary.source),
     }
 }
@@ -201,6 +219,12 @@ pub fn death_message(cause: Option<DeathCause>, source: Option<DamageSource>) ->
         Some(DeathCause::MembraneBroken) => match source {
             Some(DamageSource::Heat) => "Your membrane failed. Main damage: heat.".to_string(),
             Some(DamageSource::Uv) => "Your membrane failed. Main damage: UV light.".to_string(),
+            Some(DamageSource::Ros) => {
+                "Your membrane failed. Main damage: reactive oxygen species. You poisoned yourself with your own oxygen.".to_string()
+            }
+            Some(DamageSource::Desiccation) => {
+                "Your membrane failed. Main damage: desiccation. You dried out away from water.".to_string()
+            }
             None => "Your membrane failed.".to_string(),
         },
         None => "The run ended.".to_string(),
@@ -319,11 +343,14 @@ pub fn victory_countdown_system(
     if pending.0 > 0.0 {
         return;
     }
-    let carry = players
+    let mut carry = players
         .iter()
         .find_map(|c| cells.get(c.0).ok())
         .map(|(genome, proteome, bar)| carry_over(genome, proteome, bar))
         .unwrap_or_else(|| run.cell_carry());
+    if let Some(gene) = summary.victory {
+        grant_gate_enzyme(&mut carry, gene);
+    }
     match run.complete_stage(carry, Stage::is_playable) {
         StageOutcome::NextStage => next_state.set(GameState::StageComplete),
         StageOutcome::RunComplete => {
@@ -373,6 +400,10 @@ mod tests {
         let uv = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Uv));
         assert!(uv.contains("UV") && uv != burnt);
         assert!(burnt.contains("heat"));
+        let ros = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Ros));
+        assert!(ros.contains("oxygen") && ros != uv && ros != burnt);
+        let dry = death_message(Some(DeathCause::MembraneBroken), Some(DamageSource::Desiccation));
+        assert!(dry.contains("desiccation") && dry != ros && dry != uv);
         assert_ne!(starved, death_message(None, None));
     }
 }
