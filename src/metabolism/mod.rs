@@ -24,7 +24,9 @@
 //! In the game, `run_metabolic_schedule_timed` runs ticks from real time. Tests
 //! set `FlowmapTimingConfig::manual` and call `run_metabolic_tick` directly.
 
+pub mod ledger;
 pub mod solver;
+pub mod view;
 
 use std::collections::HashMap;
 
@@ -35,14 +37,15 @@ use crate::blocks::genome::{BlockKind, GeneState};
 use crate::actions::Throttle;
 use crate::cell::{Cell, CellBlocks, CellSize, maintenance_atp_per_sec};
 use crate::envgrid::EnvGrid;
-use crate::environment::{Channel, LocalEnvironment, external_saturation};
+use crate::environment::{Channel, LocalEnvironment, external_saturation, limiting_channel};
 use crate::exchange;
 pub use crate::molecules::CurrencyPools; // Re-export for backward compatibility
 use crate::molecules::Currency;
 use crate::proteins::Proteome;
+pub use ledger::{FlowLedger, FlowSource};
 pub use solver::{
-    BlockInput, MAX_SUBSTEP, TickResult, block_demand, block_rates, dependency_lists, solve_order,
-    solve_tick,
+    BlockInput, Limit, MAX_SUBSTEP, TickResult, block_demand, block_limit, block_limits,
+    block_rates, dependency_lists, solve_order, solve_tick,
 };
 
 // --- Components ---
@@ -379,6 +382,8 @@ pub enum MetabolicSet {
     Solve,
     Build,
     Exchange,
+    /// Closes the tick of each cell's `FlowLedger`.
+    Record,
 }
 
 /// Runs one metabolic tick now. Use with `FlowmapTimingConfig::manual()`.
@@ -432,6 +437,7 @@ pub fn solve_cell_flux_system(
             &CellSize,
             &LocalEnvironment,
             &mut CurrencyPools,
+            &mut FlowLedger,
             &mut MetabolicGraph,
             &CellTick,
         ),
@@ -446,7 +452,7 @@ pub fn solve_cell_flux_system(
     )>,
     mut turnovers: Query<&mut BlockTurnover>,
 ) {
-    for (cell_blocks, proteome, size, env, mut pools, mut graph, tick) in &mut cells {
+    for (cell_blocks, proteome, size, env, mut pools, mut ledger, mut graph, tick) in &mut cells {
         if !tick.due {
             continue;
         }
@@ -480,6 +486,7 @@ pub fn solve_cell_flux_system(
                 k_half: b.kinetics.k_half,
                 cofactors: b.kinetics.cofactors,
                 external: external_saturation(env, b.kinetics.external, b.kinetics.k_half),
+                external_channel: limiting_channel(env, b.kinetics.external, b.kinetics.k_half),
             })
             .collect();
         // Maintenance competes for ATP like a block, at a fixed rate.
@@ -488,6 +495,12 @@ pub fn solve_cell_flux_system(
         let result = solve_tick(&pools, &inputs, dt);
         for (currency, delta) in result.deltas {
             pools.modify(currency, delta);
+        }
+        // The maintenance cost is in the solver deltas. The ledger holds it too
+        // (and the view counts blocks only), so only `record`, not apply.
+        if let Some(&turnover) = result.turnover.last() {
+            let atp = maintenance.0.get(&Currency::ATP).copied().unwrap_or(0.0);
+            ledger.record(FlowSource::Upkeep, Currency::ATP, atp * turnover);
         }
         for (block, turnover) in owned.iter().zip(&result.turnover) {
             if let Ok(mut t) = turnovers.get_mut(block.entity) {
@@ -536,6 +549,7 @@ impl Plugin for MetabolicFlowPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FlowmapTimingConfig>()
             .init_resource::<TickCounter>()
+            .add_plugins(view::MetabolismViewPlugin)
             .init_schedule(MetabolicSchedule)
             .configure_sets(
                 MetabolicSchedule,
@@ -546,6 +560,7 @@ impl Plugin for MetabolicFlowPlugin {
                     MetabolicSet::Solve,
                     MetabolicSet::Build,
                     MetabolicSet::Exchange,
+                    MetabolicSet::Record,
                 )
                     .chain(),
             )
@@ -556,6 +571,10 @@ impl Plugin for MetabolicFlowPlugin {
             .add_systems(
                 MetabolicSchedule,
                 solve_cell_flux_system.in_set(MetabolicSet::Solve),
+            )
+            .add_systems(
+                MetabolicSchedule,
+                ledger::advance_ledgers_system.in_set(MetabolicSet::Record),
             )
             .add_systems(
                 MetabolicSchedule,

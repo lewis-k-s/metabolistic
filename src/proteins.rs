@@ -21,7 +21,7 @@ use bevy::prelude::*;
 
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellSize, membrane_slots};
-use crate::metabolism::CurrencyPools;
+use crate::metabolism::{CurrencyPools, FlowLedger, FlowSource};
 use crate::molecules::Currency;
 
 /// Protein units in one protein.
@@ -247,12 +247,13 @@ pub fn apply_protein_commands(
             &mut Proteome,
             &CellSize,
             &mut CurrencyPools,
+            &mut FlowLedger,
         ),
         With<Cell>,
     >,
 ) {
     for order in queue_orders.read() {
-        let Ok((mut queue, proteome, size, _)) = cells.get_mut(order.cell) else {
+        let Ok((mut queue, proteome, size, ..)) = cells.get_mut(order.cell) else {
             continue;
         };
         if let Err(err) = queue_protein(&mut queue, &proteome, membrane_slots(size), order.target) {
@@ -260,11 +261,11 @@ pub fn apply_protein_commands(
         }
     }
     for order in recycle_orders.read() {
-        let Ok((_, mut proteome, _, mut pools)) = cells.get_mut(order.cell) else {
+        let Ok((_, mut proteome, _, mut pools, mut ledger)) = cells.get_mut(order.cell) else {
             continue;
         };
         if let Some(amino_acids) = recycle_protein(&mut proteome, order.target) {
-            pools.modify(Currency::AminoAcids, amino_acids);
+            ledger.apply(&mut pools, FlowSource::Recycle, Currency::AminoAcids, amino_acids);
         }
     }
 }

@@ -73,6 +73,29 @@ pub enum BlockKind {
 }
 
 impl BlockKind {
+    /// Every block kind, in declaration order.
+    pub const ALL: [BlockKind; 19] = [
+        BlockKind::LightCapture,
+        BlockKind::SugarCatabolism,
+        BlockKind::OrganicAcidOxidation,
+        BlockKind::Respiration,
+        BlockKind::Fermentation,
+        BlockKind::NitrogenSulfurAssimilation,
+        BlockKind::AminoAcidBiosynthesis,
+        BlockKind::LipidMetabolism,
+        BlockKind::NucleotideCofactorSynthesis,
+        BlockKind::SecondaryMetabolites,
+        BlockKind::AromaticPrecursorSynthesis,
+        BlockKind::Polymerization,
+        BlockKind::FatStorage,
+        BlockKind::VesicleExport,
+        BlockKind::Chemosynthesis,
+        BlockKind::ProteinSynthesis,
+        BlockKind::Catalase,
+        BlockKind::Cuticle,
+        BlockKind::Multicellularity,
+    ];
+
     /// Human-readable description of each metabolic block
     pub fn description(&self) -> &'static str {
         match self {

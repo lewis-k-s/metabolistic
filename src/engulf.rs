@@ -27,7 +27,7 @@ use crate::blocks::block_spec;
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, CellSize};
 use crate::genome_damage::GeneRng;
-use crate::metabolism::CurrencyPools;
+use crate::metabolism::{CurrencyPools, FlowLedger, FlowSource};
 use crate::molecules::Currency;
 use crate::movement::world_radius;
 use crate::player::{ControlledCell, LocalPlayer};
@@ -235,6 +235,7 @@ pub fn engulf_system(
             &mut Genome,
             &mut SynthesisQueue,
             &Proteome,
+            &mut FlowLedger,
         ),
         With<Cell>,
     >,
@@ -267,12 +268,13 @@ pub fn engulf_system(
         let target_position = target_transform.translation.truncate();
         let gains = engulf_yield(target_pools);
         let target_genome = target_genome.clone();
-        let Ok((transform, mut pools, mut genome, mut queue, proteome)) = cells.get_mut(engulfer)
+        let Ok((transform, mut pools, mut genome, mut queue, proteome, mut ledger)) =
+            cells.get_mut(engulfer)
         else {
             continue;
         };
         for (currency, amount) in gains {
-            pools.modify(currency, amount);
+            ledger.apply(&mut pools, FlowSource::Engulf, currency, amount);
         }
         let gene = pick_gene(&target_genome, &genome, &mut rng.0);
         if let Some(kind) = gene {

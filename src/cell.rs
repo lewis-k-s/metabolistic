@@ -38,7 +38,7 @@ use crate::genome_damage::{GenomeIntegrity, InducedMutations, MutationLoad, Repa
 use crate::desiccation::{CuticleShield, Hydration};
 use crate::engulf::EngulfIntent;
 use crate::membrane::Membrane;
-use crate::metabolism::{CellTick, CurrencyPools, MetabolicGraph};
+use crate::metabolism::{CellTick, CurrencyPools, FlowLedger, MetabolicGraph};
 use crate::molecules::{Currency, StoredLipids};
 use crate::movement::{MoveInput, ThrustEffort};
 use crate::proteins::{Proteome, SynthesisQueue};
@@ -49,6 +49,7 @@ use crate::proteins::{Proteome, SynthesisQueue};
     Name::new("Cell"),
     Genome,
     CurrencyPools,
+    FlowLedger,
     StoredLipids,
     CellBlocks,
     MetabolicGraph,

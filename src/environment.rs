@@ -94,6 +94,19 @@ pub fn external_saturation(env: &LocalEnvironment, channels: &[Channel], k: f32)
         .fold(1.0, f32::min)
 }
 
+/// The channel with the lowest saturation, or `None` if there are no channels.
+/// The first channel wins a tie.
+pub fn limiting_channel(env: &LocalEnvironment, channels: &[Channel], k: f32) -> Option<Channel> {
+    let mut best: Option<(Channel, f32)> = None;
+    for &c in channels {
+        let s = saturation(env.get(c), k);
+        if best.is_none_or(|(_, b)| s < b) {
+            best = Some((c, s));
+        }
+    }
+    best.map(|(c, _)| c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -33,7 +33,9 @@ use bevy::prelude::*;
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, OwnedBy};
 use crate::genome_damage::{InducedMutations, MutationLoad};
-use crate::metabolism::{CellTick, CurrencyPools, FlowmapTimingConfig, MetabolicNode, MetabolicSet};
+use crate::metabolism::{
+    CellTick, CurrencyPools, FlowLedger, FlowSource, FlowmapTimingConfig, MetabolicNode, MetabolicSet,
+};
 use crate::molecules::Currency;
 use crate::movement::thrust_force;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
@@ -596,6 +598,7 @@ pub fn use_slot_system(
         (
             &ActionBar,
             &mut CurrencyPools,
+            &mut FlowLedger,
             &mut ActionState,
             &mut PathwayLevels,
             &mut MutationLoad,
@@ -607,14 +610,24 @@ pub fn use_slot_system(
     >,
 ) {
     for order in orders.read() {
-        let Ok((bar, mut pools, mut state, mut levels, mut load, mut induced, genome, proteome)) =
-            cells.get_mut(order.cell)
+        let Ok((
+            bar,
+            mut pools,
+            mut ledger,
+            mut state,
+            mut levels,
+            mut load,
+            mut induced,
+            genome,
+            proteome,
+        )) = cells.get_mut(order.cell)
         else {
             continue;
         };
         let Some(kind) = bar.slots.get(order.slot).copied().flatten() else {
             continue;
         };
+        let before = pools.clone();
         let mut target = ActionTarget {
             pools: &mut pools,
             state: &mut state,
@@ -624,7 +637,9 @@ pub fn use_slot_system(
             genome,
             proteome,
         };
-        match use_action(kind, &mut target) {
+        let result = use_action(kind, &mut target);
+        ledger.record_diff(FlowSource::Action, &before, &pools);
+        match result {
             UseResult::Fired(direction) => {
                 fired.write(FireToxin {
                     cell: order.cell,
@@ -675,9 +690,9 @@ pub fn throttle_ramp_system(
 /// A held adhesin pays ATP each tick. With no ATP left, it lets go.
 pub fn adhesin_upkeep_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut ActionState, &mut CurrencyPools, &CellTick), With<Cell>>,
+    mut cells: Query<(&mut ActionState, &mut CurrencyPools, &mut FlowLedger, &CellTick), With<Cell>>,
 ) {
-    for (mut state, mut pools, tick) in &mut cells {
+    for (mut state, mut pools, mut ledger, tick) in &mut cells {
         let dt = tick.dt(timing.target_delta());
         if !state.adhesin_held || !tick.due {
             continue;
@@ -687,7 +702,7 @@ pub fn adhesin_upkeep_system(
             state.adhesin_held = false;
             state.held_for = 0.0;
         } else {
-            pools.modify(Currency::ATP, -cost);
+            ledger.apply(&mut pools, FlowSource::Action, Currency::ATP, -cost);
         }
     }
 }

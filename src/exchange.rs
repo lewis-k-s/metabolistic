@@ -28,7 +28,9 @@ use crate::blocks::chemosynthesis::MINERALS_PER_TURNOVER;
 use crate::envgrid::EnvGrid;
 use crate::environment::{Channel, LocalEnvironment};
 use crate::membrane::Membrane;
-use crate::metabolism::{BlockTurnover, CellTick, CurrencyPools, FlowmapTimingConfig};
+use crate::metabolism::{
+    BlockTurnover, CellTick, CurrencyPools, FlowLedger, FlowSource, FlowmapTimingConfig,
+};
 use crate::molecules::Currency;
 use crate::movement::{ThrustEffort, move_atp_cost};
 use crate::shelter::InShelter;
@@ -117,6 +119,7 @@ pub fn mineral_exchange_system(
             &CellBlocks,
             &Proteome,
             &mut CurrencyPools,
+            &mut FlowLedger,
             &mut ExchangeStats,
             &CellTick,
         ),
@@ -124,7 +127,7 @@ pub fn mineral_exchange_system(
     >,
     turnovers: Query<&BlockTurnover>,
 ) {
-    for (transform, blocks, proteome, mut pools, mut stats, tick) in &mut cells {
+    for (transform, blocks, proteome, mut pools, mut ledger, mut stats, tick) in &mut cells {
         if !tick.due {
             continue;
         }
@@ -140,7 +143,7 @@ pub fn mineral_exchange_system(
         let request = uptake_request(stock, transporters, dt);
         // The grid gives what it has. The cell gets exactly that.
         let taken = grid.take(Channel::Minerals, transform.translation.truncate(), request);
-        pools.modify(Currency::Minerals, taken);
+        ledger.apply(&mut pools, FlowSource::Intake, Currency::Minerals, taken);
         stats.minerals_taken += taken;
     }
 }
@@ -148,11 +151,13 @@ pub fn mineral_exchange_system(
 /// Without a grid, a constant supply: the `Minerals` pool is topped up to the
 /// `Minerals` level of `LocalEnvironment`. This is a test-only source (M1
 /// headless tests): it makes minerals from nothing.
-pub fn constant_supply_system(mut cells: Query<(&LocalEnvironment, &mut CurrencyPools), With<Cell>>) {
-    for (env, mut pools) in &mut cells {
+pub fn constant_supply_system(
+    mut cells: Query<(&LocalEnvironment, &mut CurrencyPools, &mut FlowLedger), With<Cell>>,
+) {
+    for (env, mut pools, mut ledger) in &mut cells {
         let supply = env.get(Channel::Minerals);
         if supply > pools.get(Currency::Minerals) {
-            pools.set(Currency::Minerals, supply);
+            ledger.set(&mut pools, FlowSource::Intake, Currency::Minerals, supply);
         }
     }
 }
@@ -180,11 +185,11 @@ pub fn heat_damage_system(
 
 /// Moving costs ATP for the thrust used since the last tick.
 pub fn movement_cost_system(
-    mut cells: Query<(&mut ThrustEffort, &mut CurrencyPools, &CellTick), With<Cell>>,
+    mut cells: Query<(&mut ThrustEffort, &mut CurrencyPools, &mut FlowLedger, &CellTick), With<Cell>>,
 ) {
-    for (mut effort, mut pools, tick) in &mut cells {
+    for (mut effort, mut pools, mut ledger, tick) in &mut cells {
         if tick.due && effort.0 > 0.0 {
-            pools.modify(Currency::ATP, -move_atp_cost(effort.0));
+            ledger.apply(&mut pools, FlowSource::Movement, Currency::ATP, -move_atp_cost(effort.0));
             effort.0 = 0.0;
         }
     }
