@@ -22,11 +22,12 @@
 //! Outside conditions are not pools: the spatial grid (`envgrid`) holds them.
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::debug;
 
 /// One internal pool. A key in `CurrencyPools` and in `FluxProfile`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Currency {
     /// The main energy currency.
     ATP,
@@ -79,7 +80,7 @@ impl Currency {
 }
 
 /// The internal pools of one cell.
-#[derive(Component, Default, Debug, Clone)]
+#[derive(Component, Default, Debug, Clone, Serialize, Deserialize)]
 pub struct CurrencyPools {
     pub pools: HashMap<Currency, f32>,
 }

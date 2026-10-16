@@ -1,0 +1,13 @@
+{
+  "stage": "Land",
+  "seed": 1,
+  "genes": { "LightCapture": "Expressed", "Catalase": "Expressed", "Respiration": "Expressed" },
+  "enzymes": { "LightCapture": 1, "Catalase": 1, "Respiration": 1 },
+  "membrane": { "Flagellum": 1 },
+  "actions": [
+    { "Pathway": "LightCapture" },
+    { "Pathway": "Catalase" },
+    { "Pathway": "Respiration" },
+    "FlagellumBurst"
+  ]
+}

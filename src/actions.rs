@@ -29,6 +29,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, OwnedBy};
@@ -179,7 +180,7 @@ pub fn change_level(level: Level, atp: f32) -> Option<(Level, f32)> {
 // --- The bar ---
 
 /// What a slot can hold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActionKind {
     /// An expressed block: Off / Low / High.
     Pathway(BlockKind),
@@ -215,7 +216,7 @@ impl ActionKind {
 }
 
 /// The action slots of a cell.
-#[derive(Component, Default, Debug, Clone, PartialEq)]
+#[derive(Component, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActionBar {
     pub slots: [Option<ActionKind>; SLOT_COUNT],
 }

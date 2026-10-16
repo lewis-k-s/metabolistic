@@ -1,0 +1,12 @@
+{
+  "stage": "Vents",
+  "seed": 1,
+  "membrane": { "Flagellum": 3, "Adhesin": 1, "Toxin": 1, "Transporter": 1 },
+  "actions": [
+    { "Pathway": "Chemosynthesis" },
+    "FlagellumBurst",
+    "Adhesin",
+    "Toxin"
+  ],
+  "pools": { "ATP": 500, "AminoAcids": 60, "Lipids": 60 }
+}

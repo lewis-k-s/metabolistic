@@ -27,6 +27,7 @@ pub mod player;
 pub mod prepare;
 pub mod proteins;
 pub mod run;
+pub mod scenario;
 pub mod shallow;
 pub mod shelter;
 pub mod shared;
@@ -132,6 +133,7 @@ impl MetabolisticApp {
             ))
             .add_plugins(codex::CodexPlugin { in_memory: false })
             .add_plugins(run::RunPlugin)
+            .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
             // The game picks mutated genes at random; tests use a fixed seed.
@@ -149,6 +151,9 @@ impl MetabolisticApp {
                 .add_plugins(sprites::plugin)
                 .add_plugins(screens::plugin)
                 .add_plugins(world::plugin);
+            if let Some(scenario) = scenario::requested() {
+                app.insert_resource(scenario::ScenarioLaunch(scenario));
+            }
             if smoke_test::requested() {
                 app.add_plugins(smoke_test::plugin);
             }
@@ -186,6 +191,7 @@ impl MetabolisticApp {
             ))
             .add_plugins(codex::CodexPlugin { in_memory: true })
             .add_plugins(run::RunPlugin)
+            .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
             // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not

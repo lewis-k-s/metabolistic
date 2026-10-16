@@ -25,6 +25,7 @@
 
 use bevy::prelude::*;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeSet;
 
@@ -57,7 +58,8 @@ pub struct RunSummary {
 
 /// What the cell takes from one stage to the next: its genome and proteome (and
 /// the action bar that goes with the proteome). Everything else starts again.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Carry {
     pub genome: Genome,
     pub proteome: Proteome,
@@ -131,6 +133,9 @@ pub struct RunState {
     pub genes_taken: Vec<BlockKind>,
     /// The cell that goes into the next stage. `None` in the first stage.
     pub carry: Option<Carry>,
+    /// Where the first cell starts, if a scenario sets it. Cleared when the
+    /// stage changes.
+    pub spawn: Option<Vec2>,
     /// The genes that were new to the codex when the run ended.
     pub new_genes: Vec<BlockKind>,
 }
@@ -173,6 +178,7 @@ impl RunState {
             Some(next) => {
                 self.stage_index = next;
                 self.carry = Some(carry);
+                self.spawn = None;
                 StageOutcome::NextStage
             }
             None => StageOutcome::RunComplete,

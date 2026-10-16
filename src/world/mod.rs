@@ -168,7 +168,7 @@ fn spawn_world(
     });
     commands.insert_resource(ParticleTimers::default());
 
-    let (player, cell) = spawn_cell_from_carry(&mut commands, def.start, run.cell_carry());
+    let (player, cell) = spawn_cell_from_carry(&mut commands, run.spawn.unwrap_or(def.start), run.cell_carry());
     commands.entity(player).insert(DespawnOnExit(InRun));
     player_body::attach_body(&mut commands, &sheets, cell);
     commands.insert_resource(CurrentLevel(def));

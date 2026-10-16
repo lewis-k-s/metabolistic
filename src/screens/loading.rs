@@ -5,6 +5,8 @@ use bevy::prelude::*;
 
 use super::{label, screen_root};
 use crate::GameState;
+use crate::codex::{Codex, CodexStore};
+use crate::scenario::{self, ScenarioLaunch};
 use crate::sprites::Sheets;
 
 pub(super) fn plugin(app: &mut App) {
@@ -21,9 +23,14 @@ fn spawn_loading_screen(mut commands: Commands) {
     ));
 }
 
+#[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
 fn finish_loading(
+    mut commands: Commands,
     sheets: Option<Res<Sheets>>,
     server: Res<AssetServer>,
+    scenario: Option<Res<ScenarioLaunch>>,
+    mut codex: ResMut<Codex>,
+    mut store: ResMut<CodexStore>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     // The sheets are inserted at startup, so on the first frame they may be missing.
@@ -36,6 +43,13 @@ fn finish_loading(
     }
     if progress.failed > 0 {
         error!("{} sprite sheets failed to load", progress.failed);
+    }
+    // A scenario skips the menu and Prepare: the run starts at once.
+    if let Some(scenario) = scenario {
+        scenario::start(&scenario.0, &mut commands, &mut codex, &mut store);
+        commands.remove_resource::<ScenarioLaunch>();
+        next_state.set(GameState::Run);
+        return;
     }
     next_state.set(GameState::Menu);
 }

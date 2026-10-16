@@ -6,11 +6,16 @@
 //! none. All three stages have a level now, so winning land completes the run
 //! (a fourth stage would only need a new `Stage` and a `LevelDef`).
 
+use serde::{Deserialize, Serialize};
+
 use crate::level::LevelDef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Stage {
+    #[default]
+    #[serde(alias = "Vent")]
     Vents,
+    #[serde(alias = "Shallow")]
     ShallowWater,
     Land,
 }
