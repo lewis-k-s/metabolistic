@@ -1,3 +1,5 @@
+//! The Codex overlay (`codex`) opens over the menu, Prepare and Manage.
+//!
 //! The top-level screens: `Loading`, `Menu`, `Prepare`, `Run`, `Manage`, `StageComplete` and `RunOver` (see
 //! `crate::GameState`). Each screen tags the entities it spawns with
 //! `DespawnOnExit`, so leaving a screen removes them. The world of a run (the
@@ -7,6 +9,7 @@ use bevy::prelude::*;
 
 use crate::GameState;
 
+pub mod codex;
 pub mod loading;
 pub mod manage;
 pub mod menu;
@@ -18,6 +21,7 @@ pub mod stage_complete;
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins((
         loading::plugin,
+        codex::plugin,
         menu::plugin,
         run::plugin,
         run_over::plugin,
@@ -55,7 +59,12 @@ fn navigation_input(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
+    codex: Res<codex::CodexUi>,
 ) {
+    // Esc closes the Codex overlay first (see `codex::codex_keys`).
+    if codex.open {
+        return;
+    }
     let nav = if keys.just_pressed(KeyCode::Escape) {
         crate::shared::Navigation::Back
     } else if keys.just_pressed(KeyCode::Tab) {

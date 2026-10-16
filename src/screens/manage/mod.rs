@@ -371,7 +371,7 @@ fn update_header(
     };
     let paused = sim_paused(shelter.0, true);
     let line = format!(
-        "Manage  -  {}    Tab: back to run   Esc: menu",
+        "Manage  -  {}    Tab: back to run   C: codex   Esc: menu",
         if paused {
             "in a shelter: time is stopped"
         } else {

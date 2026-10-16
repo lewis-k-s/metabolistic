@@ -28,6 +28,7 @@ pub(super) fn plugin(app: &mut App) {
 enum PrepareAction {
     Toggle(BlockKind),
     Start,
+    Codex,
     Back,
 }
 
@@ -65,6 +66,7 @@ fn spawn_prepare_screen(mut commands: Commands, codex: Res<Codex>, choice: Res<P
             ))
             .with_children(|list| fill_list(list, &codex, &choice));
             root.spawn(button("Start run", PrepareAction::Start));
+            root.spawn(button("Codex", PrepareAction::Codex));
             root.spawn(button("Back", PrepareAction::Back));
         });
 }
@@ -103,6 +105,7 @@ fn prepare_buttons(
     mut choice: ResMut<PrepareChoice>,
     mut run: ResMut<RunState>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut codex_ui: ResMut<super::codex::CodexUi>,
 ) {
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -116,6 +119,7 @@ fn prepare_buttons(
                 *run = RunState::begin(rand::rng().random::<u64>(), choice.0.clone());
                 next_state.set(GameState::Run);
             }
+            PrepareAction::Codex => codex_ui.open = true,
             PrepareAction::Back => next_state.set(GameState::Menu),
         }
     }

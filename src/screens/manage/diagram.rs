@@ -247,29 +247,13 @@ pub const MOL_ICONS: [(Currency, &str); 13] = [
     (Currency::ROS, "sprites/mol_ros.png"),
 ];
 
-/// The pathway icons that exist in `assets/sprites`.
-pub const PATHWAY_ICONS: [(BlockKind, &str); 13] = [
-    (BlockKind::Chemosynthesis, "sprites/pathway_icon_chemosynthesis.png"),
-    (BlockKind::Fermentation, "sprites/pathway_icon_fermentation.png"),
-    (BlockKind::AminoAcidBiosynthesis, "sprites/pathway_icon_amino_acid_biosynthesis.png"),
-    (BlockKind::LipidMetabolism, "sprites/pathway_icon_lipid_metabolism.png"),
-    (BlockKind::ProteinSynthesis, "sprites/pathway_icon_protein_synthesis.png"),
-    (BlockKind::FatStorage, "sprites/pathway_icon_fat_storage.png"),
-    (BlockKind::VesicleExport, "sprites/pathway_icon_vesicle_export.png"),
-    (BlockKind::LightCapture, "sprites/pathway_icon_light_capture.png"),
-    (BlockKind::Respiration, "sprites/pathway_icon_respiration.png"),
-    (BlockKind::Catalase, "sprites/pathway_icon_catalase.png"),
-    (BlockKind::Cuticle, "sprites/pathway_icon_cuticle.png"),
-    (BlockKind::NucleotideCofactorSynthesis, "sprites/pathway_icon_nucleotide_cofactor_synthesis.png"),
-    (BlockKind::SecondaryMetabolites, "sprites/pathway_icon_secondary_metabolites.png"),
-];
 
 fn mol_icon(currency: Currency) -> Option<&'static str> {
     MOL_ICONS.iter().find(|(c, _)| *c == currency).map(|(_, p)| *p)
 }
 
 fn pathway_icon(kind: BlockKind) -> Option<&'static str> {
-    PATHWAY_ICONS.iter().find(|(k, _)| *k == kind).map(|(_, p)| *p)
+    crate::codex_catalog::gene_icon(kind)
 }
 
 /// The tint of a pathway: its stand-in icon and its enzymes.
@@ -1284,7 +1268,7 @@ mod tests {
         for (_, path) in MOL_ICONS {
             assert!(dir.join(path).exists(), "{path}");
         }
-        for (_, path) in PATHWAY_ICONS {
+        for (_, path) in crate::codex_catalog::PATHWAY_ICONS {
             assert!(dir.join(path).exists(), "{path}");
         }
         for name in [

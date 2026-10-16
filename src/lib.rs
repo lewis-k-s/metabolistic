@@ -6,6 +6,7 @@ pub mod actions;
 pub mod blocks;
 pub mod cell;
 pub mod codex;
+pub mod codex_catalog;
 pub mod desiccation;
 pub mod engulf;
 pub mod envgrid;
