@@ -34,7 +34,7 @@
 use std::collections::HashMap;
 
 use super::{BlockStatus, CurrencyPools, FluxProfile};
-use crate::environment::saturation;
+use crate::environment::{Channel, saturation};
 use crate::molecules::Currency;
 
 /// Largest sub-step of `solve_tick`, in seconds.
@@ -57,6 +57,9 @@ pub struct BlockInput<'a> {
     pub cofactors: &'a [Currency],
     /// Saturation in [0, 1] from outside channels. 1 if the block has none.
     pub external: f32,
+    /// The outside channel with the lowest saturation. Only `block_limit` reads
+    /// it, to name the channel. `None` if the block has no channels.
+    pub external_channel: Option<Channel>,
 }
 
 impl<'a> BlockInput<'a> {
@@ -70,6 +73,7 @@ impl<'a> BlockInput<'a> {
             k_half: 0.0,
             cofactors: &[],
             external: 1.0,
+            external_channel: None,
         }
     }
 
@@ -125,30 +129,38 @@ pub fn block_demand(pools: &HashMap<Currency, f32>, block: &BlockInput) -> f32 {
     scale * internal_saturation(pools, block)
 }
 
-/// The rates (turnovers per second) of all blocks for a step of `h` seconds,
-/// after shared pools are divided in proportion to demand.
-pub fn block_rates(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32) -> Vec<f32> {
-    let demand: Vec<f32> = blocks.iter().map(|b| block_demand(pools, b)).collect();
-
+/// Fraction of the wanted amount that each pool can give in a step of `h`
+/// seconds. Only pools that some block wants are in the map.
+fn pool_fractions(
+    pools: &HashMap<Currency, f32>,
+    blocks: &[BlockInput],
+    demand: &[f32],
+    h: f32,
+) -> HashMap<Currency, f32> {
     // Total amount of each pool that the blocks want in this step.
     let mut wanted: HashMap<Currency, f32> = HashMap::new();
-    for (block, &d) in blocks.iter().zip(&demand) {
+    for (block, &d) in blocks.iter().zip(demand) {
         for (&c, &rate) in &block.profile.0 {
             if rate < 0.0 && d > 0.0 {
                 *wanted.entry(c).or_insert(0.0) += -rate * d * h;
             }
         }
     }
-
-    // Fraction of the wanted amount that each pool can give.
-    let fraction: HashMap<Currency, f32> = wanted
+    wanted
         .into_iter()
         .map(|(c, want)| {
             let have = pools.get(&c).copied().unwrap_or(0.0).max(0.0);
             let f = if want > have { have / want } else { 1.0 };
             (c, f)
         })
-        .collect();
+        .collect()
+}
+
+/// The rates (turnovers per second) of all blocks for a step of `h` seconds,
+/// after shared pools are divided in proportion to demand.
+pub fn block_rates(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32) -> Vec<f32> {
+    let demand: Vec<f32> = blocks.iter().map(|b| block_demand(pools, b)).collect();
+    let fraction = pool_fractions(pools, blocks, &demand, h);
 
     blocks
         .iter()
@@ -165,6 +177,121 @@ pub fn block_rates(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32
                 .map(|(c, _)| fraction[c])
                 .fold(1.0, f32::min);
             d * f
+        })
+        .collect()
+}
+
+/// Why a block runs below its full rate. See `block_limit`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Limit {
+    /// No limit: every factor is at `LIMIT_THRESHOLD` or more.
+    None,
+    /// The gene is silent, or the drive (regulation, action level) is 0.
+    Off,
+    /// The cell has no enzymes for the block.
+    NoEnzymes,
+    /// The outside channel is low (for example no heat).
+    External(Channel),
+    /// An input pool is low.
+    Input(Currency),
+    /// A cofactor pool is low. The block needs it but does not use it up.
+    Cofactor(Currency),
+    /// The pool cannot pay all blocks that want it, so the block gets a share.
+    Shared(Currency),
+}
+
+/// A factor at or above this value is not a limit.
+pub const LIMIT_THRESHOLD: f32 = 0.9;
+
+/// The factors that slow a block: the lowest outside, input and cofactor
+/// saturation. Returns the limit of the lowest one, and its value. Does not
+/// look at sharing.
+fn own_limit(pools: &HashMap<Currency, f32>, block: &BlockInput) -> (Limit, f32) {
+    let level = |c: &Currency| pools.get(c).copied().unwrap_or(0.0);
+    let mut best = (Limit::None, 1.0_f32);
+    if let Some(channel) = block.external_channel
+        && block.external < best.1
+    {
+        best = (Limit::External(channel), block.external);
+    }
+    let inputs = block
+        .profile
+        .0
+        .iter()
+        .filter(|&(_, &rate)| rate < 0.0)
+        .map(|(c, _)| *c);
+    // A fixed order, so that ties do not depend on HashMap order.
+    let mut currencies: Vec<Currency> = inputs.collect();
+    currencies.sort();
+    currencies.extend(block.cofactors);
+    for c in currencies {
+        let s = saturation(level(&c), block.k_half);
+        if s < best.1 {
+            let limit = if block.cofactors.contains(&c) {
+                Limit::Cofactor(c)
+            } else {
+                Limit::Input(c)
+            };
+            best = (limit, s);
+        }
+    }
+    best
+}
+
+/// The reason that one block runs below its full rate, from the pools alone.
+/// It uses the terms of `block_demand`: enzymes, status, drive, outside
+/// saturation and the lowest input or cofactor saturation. It cannot see
+/// other blocks, so it never says `Shared`; use `block_limits` for that.
+pub fn block_limit(pools: &HashMap<Currency, f32>, block: &BlockInput) -> Limit {
+    if block.status.throughput() <= 0.0 || block.drive <= 0.0 {
+        return Limit::Off;
+    }
+    if block.enzymes <= 0.0 {
+        return Limit::NoEnzymes;
+    }
+    if block.external <= 0.0 && block.external_channel.is_none() {
+        return Limit::Off; // an outside factor of 0 with no channel to name
+    }
+    let (limit, value) = own_limit(pools, block);
+    if value < LIMIT_THRESHOLD { limit } else { Limit::None }
+}
+
+/// The limit of each block, including `Shared`. `h` is the step length of
+/// `block_rates` (use `MAX_SUBSTEP`). The weakest factor of a block names its
+/// limit: its own saturation, or its share of a pool that other blocks want
+/// too. A pool that only this block wants is `Input`, not `Shared`.
+pub fn block_limits(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32) -> Vec<Limit> {
+    let demand: Vec<f32> = blocks.iter().map(|b| block_demand(pools, b)).collect();
+    let fraction = pool_fractions(pools, blocks, &demand, h);
+    blocks
+        .iter()
+        .zip(&demand)
+        .map(|(block, &d)| {
+            let own = block_limit(pools, block);
+            if d <= 0.0 {
+                return own;
+            }
+            let (_, own_value) = own_limit(pools, block);
+            let mut inputs: Vec<Currency> = block.profile.get_demanded_currencies();
+            inputs.sort();
+            let share = inputs
+                .into_iter()
+                .map(|c| (c, fraction.get(&c).copied().unwrap_or(1.0)))
+                .fold(None::<(Currency, f32)>, |best, (c, f)| match best {
+                    Some((_, b)) if b <= f => best,
+                    _ => Some((c, f)),
+                });
+            match share {
+                Some((c, f)) if f < LIMIT_THRESHOLD && f < own_value => {
+                    let demanders = blocks
+                        .iter()
+                        .zip(&demand)
+                        .filter(|(b, bd)| **bd > 0.0 && b.profile.has_demand_for(c))
+                        .count();
+                    if demanders > 1 { Limit::Shared(c) } else { Limit::Input(c) }
+                }
+                _ => own,
+            }
         })
         .collect()
 }

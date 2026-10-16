@@ -15,6 +15,7 @@ mod land_test;
 mod living_world_test;
 mod metabolic_flow_test;
 mod metabolic_invariants;
+mod metabolism_view_test;
 mod multi_system_interactions;
 mod npc_benchmark;
 mod precision_tests;

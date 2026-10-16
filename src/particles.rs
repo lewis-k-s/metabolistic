@@ -27,7 +27,7 @@ use crate::engulf::take_gene;
 use crate::envgrid::EnvGrid;
 use crate::genome_damage::{GeneRng, MutationLoad};
 use crate::membrane::Membrane;
-use crate::metabolism::CurrencyPools;
+use crate::metabolism::{CurrencyPools, FlowLedger, FlowSource};
 use crate::molecules::Currency;
 use crate::movement::world_radius;
 use crate::npc::NpcRng;
@@ -201,7 +201,7 @@ fn touches(cell: Vec2, cell_radius: f32, other: Vec2, other_radius: f32) -> bool
 /// A cell that touches food eats it. Each particle goes to one cell.
 pub fn food_pickup_system(
     foods: Query<(Entity, &FoodParticle, &Transform)>,
-    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools, &mut FlowLedger), With<Cell>>,
     mut commands: Commands,
 ) {
     if foods.is_empty() {
@@ -209,11 +209,11 @@ pub fn food_pickup_system(
     }
     for (food_entity, food, food_transform) in &foods {
         let position = food_transform.translation.truncate();
-        let eater = cells.iter_mut().find(|(transform, size, _)| {
+        let eater = cells.iter_mut().find(|(transform, size, ..)| {
             touches(transform.translation.truncate(), world_radius(size), position, PICKUP_RADIUS)
         });
-        if let Some((_, _, mut pools)) = eater {
-            pools.modify(Currency::CarbonSkeletons, food.carbon);
+        if let Some((_, _, mut pools, mut ledger)) = eater {
+            ledger.apply(&mut pools, FlowSource::Food, Currency::CarbonSkeletons, food.carbon);
             commands.entity(food_entity).despawn();
         }
     }
@@ -222,16 +222,16 @@ pub fn food_pickup_system(
 /// A cell that touches a metal pickup takes its Metals.
 pub fn metal_pickup_system(
     pickups: Query<(Entity, &MetalPickup, &Transform)>,
-    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools), With<Cell>>,
+    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools, &mut FlowLedger), With<Cell>>,
     mut commands: Commands,
 ) {
     for (entity, pickup, pickup_transform) in &pickups {
         let position = pickup_transform.translation.truncate();
-        let taker = cells.iter_mut().find(|(transform, size, _)| {
+        let taker = cells.iter_mut().find(|(transform, size, ..)| {
             touches(transform.translation.truncate(), world_radius(size), position, PICKUP_RADIUS)
         });
-        if let Some((_, _, mut pools)) = taker {
-            pools.modify(Currency::Metals, pickup.amount);
+        if let Some((_, _, mut pools, mut ledger)) = taker {
+            ledger.apply(&mut pools, FlowSource::Food, Currency::Metals, pickup.amount);
             commands.entity(entity).despawn();
         }
     }

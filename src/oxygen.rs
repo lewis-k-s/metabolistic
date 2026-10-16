@@ -31,7 +31,8 @@ use crate::environment::Channel;
 use crate::genome_damage::{GenomeIntegrity, MutationLoad};
 use crate::membrane::Membrane;
 use crate::metabolism::{
-    CellTick, CurrencyPools, FlowmapTimingConfig, MetabolicSchedule, MetabolicSet, decay_fraction,
+    CellTick, CurrencyPools, FlowLedger, FlowSource, FlowmapTimingConfig, MetabolicSchedule,
+    MetabolicSet, decay_fraction,
 };
 use crate::molecules::Currency;
 
@@ -107,9 +108,9 @@ pub fn ros_tint(ros: f32) -> f32 {
 /// remove some ROS.
 pub fn ros_chemistry_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut CurrencyPools, &CellTick), With<Cell>>,
+    mut cells: Query<(&mut CurrencyPools, &mut FlowLedger, &CellTick), With<Cell>>,
 ) {
-    for (mut pools, tick) in &mut cells {
+    for (mut pools, mut ledger, tick) in &mut cells {
         if !tick.due {
             continue;
         }
@@ -120,8 +121,13 @@ pub fn ros_chemistry_system(
             continue;
         }
         let made = ros_from_o2(o2, dt);
-        pools.set(Currency::O2, o2 - made);
-        pools.set(Currency::ROS, ros_after_decay(ros, dt) + made);
+        ledger.set(&mut pools, FlowSource::Upkeep, Currency::O2, o2 - made);
+        ledger.set(
+            &mut pools,
+            FlowSource::Upkeep,
+            Currency::ROS,
+            ros_after_decay(ros, dt) + made,
+        );
     }
 }
 
@@ -131,10 +137,10 @@ pub fn o2_exchange_system(
     timing: Res<FlowmapTimingConfig>,
     level: Option<Res<crate::level::CurrentLevel>>,
     mut grid: Option<ResMut<EnvGrid>>,
-    mut cells: Query<(&Transform, &mut CurrencyPools, &CellTick), With<Cell>>,
+    mut cells: Query<(&Transform, &mut CurrencyPools, &mut FlowLedger, &CellTick), With<Cell>>,
 ) {
     let rate = level.map_or(O2_EXCHANGE_RATE, |l| l.0.field.o2_exchange_rate());
-    for (transform, mut pools, tick) in &mut cells {
+    for (transform, mut pools, mut ledger, tick) in &mut cells {
         if !tick.due {
             continue;
         }
@@ -143,7 +149,8 @@ pub fn o2_exchange_system(
         let pool = pools.get(Currency::O2);
         let Some(grid) = grid.as_deref_mut() else {
             if pool > 0.0 {
-                pools.set(Currency::O2, pool - o2_exchange_at(pool, 0.0, rate, dt));
+                let lost = pool - o2_exchange_at(pool, 0.0, rate, dt);
+                ledger.set(&mut pools, FlowSource::Export, Currency::O2, lost);
             }
             continue;
         };
@@ -152,11 +159,11 @@ pub fn o2_exchange_system(
         if flow > 0.0 {
             // The grid gets exactly what the cell loses.
             let given = grid.deposit(Channel::O2, position, flow);
-            pools.set(Currency::O2, pool - given);
+            ledger.set(&mut pools, FlowSource::Export, Currency::O2, pool - given);
         } else if flow < 0.0 {
             // The cell gets exactly what the grid gives.
             let taken = grid.take(Channel::O2, position, -flow);
-            pools.set(Currency::O2, pool + taken);
+            ledger.set(&mut pools, FlowSource::Intake, Currency::O2, pool + taken);
         }
     }
 }

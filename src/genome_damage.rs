@@ -35,7 +35,9 @@ use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, DamageSource, DamageTaken};
 use crate::environment::{Channel, LocalEnvironment};
 use crate::membrane::Membrane;
-use crate::metabolism::{CellTick, CurrencyPools, FlowmapTimingConfig, MetabolicSet, decay_fraction};
+use crate::metabolism::{
+    CellTick, CurrencyPools, FlowLedger, FlowSource, FlowmapTimingConfig, MetabolicSet, decay_fraction,
+};
 use crate::molecules::Currency;
 use crate::shelter::InShelter;
 
@@ -403,12 +405,13 @@ pub fn genome_repair_system(
             &mut GenomeIntegrity,
             &mut RepairProgress,
             &mut CurrencyPools,
+            &mut FlowLedger,
             &CellTick,
         ),
         With<Cell>,
     >,
 ) {
-    for (mut genome, mut integrity, mut progress, mut pools, tick) in &mut cells {
+    for (mut genome, mut integrity, mut progress, mut pools, mut ledger, tick) in &mut cells {
         if !tick.due {
             continue;
         }
@@ -437,8 +440,13 @@ pub fn genome_repair_system(
             integrity.0 = (integrity.0 + step.integrity).min(1.0);
         }
         if step.atp > 0.0 {
-            pools.modify(Currency::ATP, -step.atp);
-            pools.modify(Currency::Nucleotides, -step.nucleotides);
+            ledger.apply(&mut pools, FlowSource::GenomeRepair, Currency::ATP, -step.atp);
+            ledger.apply(
+                &mut pools,
+                FlowSource::GenomeRepair,
+                Currency::Nucleotides,
+                -step.nucleotides,
+            );
         }
         if step.genes > 0 {
             let mut kinds: Vec<BlockKind> = genome
@@ -458,16 +466,17 @@ pub fn genome_repair_system(
 /// Pigments decay slowly.
 pub fn pigment_decay_system(
     timing: Res<FlowmapTimingConfig>,
-    mut cells: Query<(&mut CurrencyPools, &CellTick), With<Cell>>,
+    mut cells: Query<(&mut CurrencyPools, &mut FlowLedger, &CellTick), With<Cell>>,
 ) {
-    for (mut pools, tick) in &mut cells {
+    for (mut pools, mut ledger, tick) in &mut cells {
         if !tick.due {
             continue;
         }
         let dt = tick.dt(timing.target_delta());
         let pigments = pools.get(Currency::Pigments);
         if pigments > 0.0 {
-            pools.set(Currency::Pigments, decayed_pigments(pigments, dt));
+            let decayed = decayed_pigments(pigments, dt);
+            ledger.set(&mut pools, FlowSource::Upkeep, Currency::Pigments, decayed);
         }
     }
 }

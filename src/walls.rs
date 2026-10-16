@@ -41,7 +41,7 @@ use crate::actions::{ActionState, LyseOrder};
 use crate::cell::{Cell, CellSize};
 use crate::envgrid::{CELL_SIZE, EnvGrid};
 use crate::membrane::Membrane;
-use crate::metabolism::CurrencyPools;
+use crate::metabolism::{CurrencyPools, FlowLedger, FlowSource};
 use crate::molecules::Currency;
 use crate::movement::world_radius;
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
@@ -287,23 +287,30 @@ pub fn lyse_system(
     mut cut: MessageWriter<TileLysed>,
     mut map: ResMut<WallMap>,
     grid: Option<ResMut<EnvGrid>>,
-    mut cells: Query<(&Transform, &CellSize, &mut CurrencyPools, &mut Membrane), With<Cell>>,
+    mut cells: Query<
+        (&Transform, &CellSize, &mut CurrencyPools, &mut FlowLedger, &mut Membrane),
+        With<Cell>,
+    >,
 ) {
     let Some(mut grid) = grid else {
         return;
     };
     for order in orders.read() {
-        let Ok((transform, size, mut pools, mut membrane)) = cells.get_mut(order.cell) else {
+        let Ok((transform, size, mut pools, mut ledger, mut membrane)) = cells.get_mut(order.cell)
+        else {
             continue;
         };
-        if let Some(Lysis { tile, recoil }) = lyse(
+        let before = pools.clone();
+        let lysis = lyse(
             &mut map,
             &mut pools,
             grid.origin(),
             transform.translation.truncate(),
             world_radius(size),
             order.direction,
-        ) {
+        );
+        ledger.record_diff(FlowSource::Action, &before, &pools);
+        if let Some(Lysis { tile, recoil }) = lysis {
             grid.set_wall(tile.0, tile.1, false);
             if recoil > 0.0 {
                 membrane.damage(recoil);
