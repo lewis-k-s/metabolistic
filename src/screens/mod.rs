@@ -29,12 +29,19 @@ pub(crate) fn plugin(app: &mut App) {
     .add_systems(Update, (navigation_input, button_colors));
 }
 
-/// One 2D camera for every screen.
+/// The camera of the run world and of every menu screen. The Manage screen has
+/// its own camera for the map (`manage::MapCamera`) and shrinks this one into
+/// the inset.
+#[derive(Component)]
+pub struct RunCamera;
+
+/// The 2D camera of the run world and the menus.
 fn spawn_camera(mut commands: Commands) {
     // World units are sprite pixels. The scale makes each one a whole number
     // of screen pixels (art doc, "In the game").
     commands.spawn((
         Name::new("Camera"),
+        RunCamera,
         Camera2d,
         Projection::Orthographic(OrthographicProjection {
             scale: 1.0 / crate::sprites::PIXEL_SCALE,

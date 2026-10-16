@@ -51,6 +51,33 @@ pub enum MembraneProtein {
     Lytic,
 }
 
+impl MembraneProtein {
+    /// Every membrane protein, in the order that screens list them.
+    pub const ALL: [MembraneProtein; 6] = [
+        MembraneProtein::Transporter,
+        MembraneProtein::Flagellum,
+        MembraneProtein::Adhesin,
+        MembraneProtein::Toxin,
+        MembraneProtein::Lytic,
+        MembraneProtein::Receptor,
+    ];
+}
+
+/// The name of the overlay sheet (a sprite of `manifest.json`) that shows a
+/// membrane protein. The one place that maps a protein to its art: the Manage
+/// screen and the Run screen both use it.
+pub fn overlay_sheet(protein: MembraneProtein) -> &'static str {
+    match protein {
+        // The only transporter that exists takes up minerals.
+        MembraneProtein::Transporter => "overlay_transporter_mineral",
+        MembraneProtein::Flagellum => "overlay_flagellum",
+        MembraneProtein::Adhesin => "overlay_adhesin",
+        MembraneProtein::Toxin => "overlay_toxin",
+        MembraneProtein::Lytic => "overlay_lytic",
+        MembraneProtein::Receptor => "overlay_receptor",
+    }
+}
+
 /// What a protein is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProteinTarget {

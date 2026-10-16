@@ -380,7 +380,7 @@ fn camera_follow(
     mut track: ResMut<CameraTrack>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<&Transform, (With<Cell>, Without<Camera2d>)>,
-    mut cameras: Query<&mut Transform, With<Camera2d>>,
+    mut cameras: Query<&mut Transform, (With<Camera2d>, With<crate::screens::RunCamera>)>,
 ) {
     let Some(target) = players
         .iter()
@@ -401,7 +401,7 @@ fn camera_follow(
 /// Puts the camera back at the origin for the menu screens.
 fn reset_camera(
     mut track: ResMut<CameraTrack>,
-    mut cameras: Query<&mut Transform, With<Camera2d>>,
+    mut cameras: Query<&mut Transform, (With<Camera2d>, With<crate::screens::RunCamera>)>,
 ) {
     track.0 = None;
     for mut camera in &mut cameras {
