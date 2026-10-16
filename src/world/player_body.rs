@@ -2,11 +2,14 @@
 //!
 //! The local player's `Cell` gets the physics body: a circle collider, mass and
 //! drag from `CellSize`, and a thrust force from `MoveInput` and its flagella.
-//! The sprite is a child of the cell. It plays the baked sheets of
-//! `sprites` (spawn, idle, move in 8 directions). The body deform is in the
-//! frames (art rule 9), so the game never scales or rotates the sprite. World
-//! units are sprite pixels; the camera scale makes each one `PIXEL_SCALE`
-//! screen pixels.
+//! The sprite is a grandchild of the cell: cell -> `BodyDeform` pivot -> sprite.
+//! It plays the baked sheets of `sprites` (spawn, idle, move in 8 directions).
+//! The frames carry the shape of each clip (art rule 9). On top of them, the
+//! pivot stretches the sprite along its motion while the cell pushes in that
+//! direction (`move_stretch`): a fast cell that the player drives stretches, a
+//! cell that a blow or a current carries does not. The sprite turns back by the
+//! pivot angle, so the frame itself never rotates. World units are sprite
+//! pixels; the camera scale makes each one `PIXEL_SCALE` screen pixels.
 //!
 //! The formulas are in `movement`. The systems here fetch data and hand it to
 //! avian2d.
@@ -38,9 +41,29 @@ const CAMERA_FOLLOW_RATE: f32 = 6.0;
 /// in pixels per second.
 const MOVE_SPEED_THRESHOLD: f32 = 8.0;
 
-/// The child sprite of a cell that plays the sprite sheets.
+/// Most stretch of a body sprite along its motion, at full speed with a full
+/// push in that direction. The long axis is `1 + MAX_MOVE_STRETCH`. **Playtest.**
+pub const MAX_MOVE_STRETCH: f32 = 0.15;
+/// How fast the stretch follows its target, per second.
+const DEFORM_RATE: f32 = 12.0;
+/// Below this stretch the pivot is the identity, so the still sprite stays on
+/// the pixel grid.
+const MIN_VISIBLE_STRETCH: f32 = 1e-3;
+
+/// The sprite of a cell that plays the sprite sheets. `cell` is the cell that
+/// it shows (the sprite is a grandchild of it, under the `BodyDeform` pivot).
 #[derive(Component)]
-pub struct BlobSprite;
+pub struct BlobSprite {
+    pub cell: Entity,
+}
+
+/// The pivot between a cell and its sprite. It carries the smoothed stretch
+/// along `angle` (radians, the direction of motion).
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq)]
+pub struct BodyDeform {
+    pub stretch: f32,
+    pub angle: f32,
+}
 
 /// The smoothed camera position, before it is rounded to a whole pixel.
 #[derive(Resource, Default)]
@@ -50,7 +73,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<CameraTrack>()
         .add_systems(
             Update,
-            (read_move_input, drive_body_sprite)
+            (read_move_input, drive_body_sprite, deform_body_sprite)
                 .chain()
                 .before(SpriteSystems::Animate)
                 .run_if(in_state(InRun)),
@@ -102,9 +125,13 @@ pub fn attach_body_for(
         warn!("the manifest has no {sprite}/{first_clip}");
         return;
     };
-    commands
-        .entity(cell)
-        .with_child((Name::new("Cell Sprite"), BlobSprite, body, Transform::default()));
+    commands.entity(cell).with_child((
+        Name::new("Cell Deform"),
+        BodyDeform::default(),
+        Transform::default(),
+        Visibility::default(),
+        children![(Name::new("Cell Sprite"), BlobSprite { cell }, body, Transform::default())],
+    ));
 }
 
 /// WASD sets the wanted direction on the Run screen, and the aim of the actions.
@@ -207,10 +234,10 @@ pub fn ros_tint_color(tint: f32) -> Color {
 /// Tints the sprite of each cell with its ROS: the body-horror look.
 fn ros_tint_system(
     cells: Query<&CurrencyPools, With<Cell>>,
-    mut sprites: Query<(&ChildOf, &mut Sprite), With<BlobSprite>>,
+    mut sprites: Query<(&BlobSprite, &mut Sprite)>,
 ) {
-    for (parent, mut sprite) in &mut sprites {
-        let Ok(pools) = cells.get(parent.parent()) else {
+    for (blob, mut sprite) in &mut sprites {
+        let Ok(pools) = cells.get(blob.cell) else {
             continue;
         };
         let color = ros_tint_color(crate::oxygen::ros_tint(pools.get(Currency::ROS)));
@@ -235,10 +262,10 @@ pub fn heading_row(velocity: Vec2, current: usize) -> usize {
 fn drive_body_sprite(
     sheets: Res<Sheets>,
     cells: Query<&LinearVelocity, With<Cell>>,
-    mut sprites: Query<(&ChildOf, &mut Animator), With<BlobSprite>>,
+    mut sprites: Query<(&BlobSprite, &mut Animator)>,
 ) {
-    for (parent, mut animator) in &mut sprites {
-        let Ok(velocity) = cells.get(parent.parent()) else {
+    for (blob, mut animator) in &mut sprites {
+        let Ok(velocity) = cells.get(blob.cell) else {
             continue;
         };
         animator.row = heading_row(velocity.0, animator.row);
@@ -249,18 +276,92 @@ fn drive_body_sprite(
     }
 }
 
-/// Puts the body sprite on a whole world pixel, so its pixels stay on the
-/// screen pixel grid while the physics body moves smoothly.
-fn snap_body_sprite(
-    cells: Query<&Transform, (With<Cell>, Without<BlobSprite>)>,
-    mut sprites: Query<(&ChildOf, &mut Transform), With<BlobSprite>>,
+/// The target stretch of a body sprite: `MAX_MOVE_STRETCH` times the pace
+/// (speed over `top_speed`, at most 1) times the intent (the part of the input
+/// along the motion, 0 to 1). A cell that does not push, or pushes against its
+/// motion, does not stretch however fast it goes.
+pub fn move_stretch(velocity: Vec2, input: Vec2, top_speed: f32) -> f32 {
+    let speed = velocity.length();
+    if speed <= MOVE_SPEED_THRESHOLD || top_speed <= 0.0 {
+        return 0.0;
+    }
+    let pace = (speed / top_speed).min(1.0);
+    let intent = input.clamp_length_max(1.0).dot(velocity / speed).max(0.0);
+    MAX_MOVE_STRETCH * pace * intent
+}
+
+/// The scale of a stretch along (x) and across (y) the motion. The area stays
+/// the same.
+pub fn stretch_scale(stretch: f32) -> Vec2 {
+    let along = 1.0 + stretch.max(0.0);
+    Vec2::new(along, 1.0 / along)
+}
+
+/// One smoothing step of the stretch towards its target, and the new angle:
+/// the direction of motion while the cell moves, else the last angle (so the
+/// stretch relaxes along the axis it had). Exact for any `dt`.
+pub fn deform_step(deform: BodyDeform, target: f32, velocity: Vec2, dt: f32) -> BodyDeform {
+    let stretch = deform.stretch + (target - deform.stretch) * (1.0 - (-DEFORM_RATE * dt).exp());
+    let angle = if velocity.length() > MOVE_SPEED_THRESHOLD {
+        velocity.to_angle()
+    } else {
+        deform.angle
+    };
+    BodyDeform { stretch, angle }
+}
+
+/// The transform of the pivot at a snap offset, and the rotation of the sprite
+/// under it. The pivot turns to the motion and stretches; the sprite turns back,
+/// so only the shape changes. A stretch too small to see gives the identity.
+pub fn deform_transforms(snap: Vec2, deform: BodyDeform) -> (Transform, Quat) {
+    let pivot = Transform::from_translation(snap.extend(0.0));
+    if deform.stretch < MIN_VISIBLE_STRETCH {
+        return (pivot, Quat::IDENTITY);
+    }
+    let pivot = pivot
+        .with_rotation(Quat::from_rotation_z(deform.angle))
+        .with_scale(stretch_scale(deform.stretch).extend(1.0));
+    (pivot, Quat::from_rotation_z(-deform.angle))
+}
+
+/// Moves the stretch of each body sprite towards the target of its cell. The
+/// top speed is the terminal speed of the full thrust in the current drag.
+fn deform_body_sprite(
+    time: Res<Time>,
+    cells: Query<(&LinearVelocity, &MoveInput, &Proteome, &CellSize, &LinearDamping), With<Cell>>,
+    mut pivots: Query<(&ChildOf, &mut BodyDeform)>,
 ) {
-    for (parent, mut transform) in &mut sprites {
+    for (parent, mut deform) in &mut pivots {
+        let Ok((velocity, input, proteome, size, damping)) = cells.get(parent.parent()) else {
+            continue;
+        };
+        let top_speed = thrust_capacity(proteome) / (body_mass(size) * damping.0.max(f32::EPSILON));
+        let target = move_stretch(velocity.0, input.0, top_speed);
+        let next = deform_step(*deform, target, velocity.0, time.delta_secs());
+        if *deform != next {
+            *deform = next;
+        }
+    }
+}
+
+/// Puts the body sprite on a whole world pixel, so its pixels stay on the
+/// screen pixel grid while the physics body moves smoothly, and applies the
+/// stretch of the pivot.
+fn snap_body_sprite(
+    cells: Query<&Transform, (With<Cell>, Without<BodyDeform>, Without<BlobSprite>)>,
+    mut pivots: Query<(&ChildOf, &Children, &BodyDeform, &mut Transform), Without<BlobSprite>>,
+    mut sprites: Query<&mut Transform, (With<BlobSprite>, Without<BodyDeform>)>,
+) {
+    for (parent, children, deform, mut pivot) in &mut pivots {
         let Ok(cell) = cells.get(parent.parent()) else {
             continue;
         };
-        let position = cell.translation.truncate();
-        transform.translation = (snap_offset(position)).extend(0.0);
+        let (pivot_transform, rotation) = deform_transforms(snap_offset(cell.translation.truncate()), *deform);
+        *pivot = pivot_transform;
+        let mut children = sprites.iter_many_mut(children);
+        while let Some(mut sprite) = children.fetch_next() {
+            sprite.rotation = rotation;
+        }
     }
 }
 
@@ -319,6 +420,67 @@ mod tests {
         assert_eq!(heading_row(Vec2::new(0.0, 100.0), 3), 6);
         assert_eq!(heading_row(Vec2::new(1.0, 1.0), 3), 3);
         assert_eq!(heading_row(Vec2::ZERO, 5), 5);
+    }
+
+    #[test]
+    fn the_stretch_needs_both_speed_and_a_push_along_the_motion() {
+        let top = 100.0;
+        // Full speed, full push along the motion: the full stretch.
+        assert!((move_stretch(Vec2::new(100.0, 0.0), Vec2::X, top) - MAX_MOVE_STRETCH).abs() < 1e-6);
+        // Half the speed: half the stretch.
+        assert!((move_stretch(Vec2::new(50.0, 0.0), Vec2::X, top) - MAX_MOVE_STRETCH / 2.0).abs() < 1e-6);
+        // Faster than the top speed (a dash, a current) does not stretch more.
+        assert!((move_stretch(Vec2::new(300.0, 0.0), Vec2::X, top) - MAX_MOVE_STRETCH).abs() < 1e-6);
+        // Carried with no push, or pushing against the motion: no stretch.
+        assert_eq!(move_stretch(Vec2::new(100.0, 0.0), Vec2::ZERO, top), 0.0);
+        assert_eq!(move_stretch(Vec2::new(100.0, 0.0), -Vec2::X, top), 0.0);
+        // A push across the motion gives no stretch, a diagonal push a part.
+        assert!(move_stretch(Vec2::new(100.0, 0.0), Vec2::Y, top).abs() < 1e-6);
+        let diagonal = move_stretch(Vec2::new(100.0, 0.0), Vec2::ONE.normalize(), top);
+        assert!(diagonal > 0.0 && diagonal < MAX_MOVE_STRETCH);
+        // Still, or no top speed: no stretch.
+        assert_eq!(move_stretch(Vec2::new(1.0, 0.0), Vec2::X, top), 0.0);
+        assert_eq!(move_stretch(Vec2::new(100.0, 0.0), Vec2::X, 0.0), 0.0);
+    }
+
+    #[test]
+    fn the_stretch_keeps_the_area() {
+        for stretch in [0.0, 0.05, MAX_MOVE_STRETCH, 1.0] {
+            let scale = stretch_scale(stretch);
+            assert!((scale.x * scale.y - 1.0).abs() < 1e-6);
+            assert!(scale.x >= 1.0);
+        }
+        assert_eq!(stretch_scale(-1.0), Vec2::ONE);
+    }
+
+    #[test]
+    fn the_deform_step_does_not_depend_on_the_frame_length() {
+        let start = BodyDeform::default();
+        let v = Vec2::new(0.0, 80.0);
+        let one = deform_step(start, 0.1, v, 0.1);
+        let two = deform_step(deform_step(start, 0.1, v, 0.05), 0.1, v, 0.05);
+        assert!((one.stretch - two.stretch).abs() < 1e-6);
+        assert!((one.angle - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        // When the cell stops, the stretch relaxes along the last axis.
+        let relaxed = deform_step(one, 0.0, Vec2::ZERO, 10.0);
+        assert!(relaxed.stretch < 1e-6);
+        assert_eq!(relaxed.angle, one.angle);
+    }
+
+    #[test]
+    fn the_pivot_stretches_along_the_motion_and_the_frame_does_not_turn() {
+        // No stretch: the identity, so the still sprite stays on the pixel grid.
+        let (pivot, rotation) = deform_transforms(Vec2::new(0.25, -0.5), BodyDeform { stretch: 0.0, angle: 1.0 });
+        assert_eq!(pivot, Transform::from_xyz(0.25, -0.5, 0.0));
+        assert_eq!(rotation, Quat::IDENTITY);
+        // A stretch along +Y (up): the sprite is taller and thinner, not turned.
+        let deform = BodyDeform { stretch: 0.2, angle: std::f32::consts::FRAC_PI_2 };
+        let (pivot, rotation) = deform_transforms(Vec2::ZERO, deform);
+        let affine = pivot.to_matrix() * Transform::from_rotation(rotation).to_matrix();
+        let up = affine.transform_vector3(Vec3::Y);
+        let right = affine.transform_vector3(Vec3::X);
+        assert!((up - Vec3::Y * 1.2).length() < 1e-5, "{up}");
+        assert!((right - Vec3::X / 1.2).length() < 1e-5, "{right}");
     }
 
     #[test]

@@ -61,7 +61,11 @@ uv run --with numpy art/gen_sprites.py
    wall is made of.
 9. **Body deform is baked into frames.** The cells animate with frames, not with
    a transform scale (see "Animation"). There is no soft-body physics: the
-   deform is visual only.
+   deform is visual only. One exception: while a cell pushes in the direction
+   it moves, the game stretches its body sprite along the motion, up to
+   `MAX_MOVE_STRETCH` at full speed (area kept, see `world::player_body`). A
+   cell that a blow or a current carries does not stretch. The frame never
+   rotates.
 
 ## Sprite list
 
