@@ -207,7 +207,7 @@ fn source_letter(source: FlowSource) -> &'static str {
 
 /// The molecule icons that exist in `assets/sprites`. The others get a tinted
 /// stand-in (a test checks this list against the folder).
-pub const MOL_ICONS: [(Currency, &str); 10] = [
+pub const MOL_ICONS: [(Currency, &str); 13] = [
     (Currency::ATP, "sprites/mol_atp.png"),
     (Currency::ReducingPower, "sprites/mol_reducing_power.png"),
     (Currency::Pyruvate, "sprites/mol_pyruvate.png"),
@@ -218,10 +218,13 @@ pub const MOL_ICONS: [(Currency, &str); 10] = [
     (Currency::Metals, "sprites/mol_metals.png"),
     (Currency::Waste, "sprites/mol_waste.png"),
     (Currency::Minerals, "sprites/mol_minerals.png"),
+    (Currency::Pigments, "sprites/mol_pigments.png"),
+    (Currency::O2, "sprites/mol_o2.png"),
+    (Currency::ROS, "sprites/mol_ros.png"),
 ];
 
 /// The pathway icons that exist in `assets/sprites`.
-pub const PATHWAY_ICONS: [(BlockKind, &str); 7] = [
+pub const PATHWAY_ICONS: [(BlockKind, &str); 13] = [
     (BlockKind::Chemosynthesis, "sprites/pathway_icon_chemosynthesis.png"),
     (BlockKind::Fermentation, "sprites/pathway_icon_fermentation.png"),
     (BlockKind::AminoAcidBiosynthesis, "sprites/pathway_icon_amino_acid_biosynthesis.png"),
@@ -229,6 +232,12 @@ pub const PATHWAY_ICONS: [(BlockKind, &str); 7] = [
     (BlockKind::ProteinSynthesis, "sprites/pathway_icon_protein_synthesis.png"),
     (BlockKind::FatStorage, "sprites/pathway_icon_fat_storage.png"),
     (BlockKind::VesicleExport, "sprites/pathway_icon_vesicle_export.png"),
+    (BlockKind::LightCapture, "sprites/pathway_icon_light_capture.png"),
+    (BlockKind::Respiration, "sprites/pathway_icon_respiration.png"),
+    (BlockKind::Catalase, "sprites/pathway_icon_catalase.png"),
+    (BlockKind::Cuticle, "sprites/pathway_icon_cuticle.png"),
+    (BlockKind::NucleotideCofactorSynthesis, "sprites/pathway_icon_nucleotide_cofactor_synthesis.png"),
+    (BlockKind::SecondaryMetabolites, "sprites/pathway_icon_secondary_metabolites.png"),
 ];
 
 fn mol_icon(currency: Currency) -> Option<&'static str> {
@@ -1121,14 +1130,17 @@ mod tests {
     }
 
     fn snake(name: &str) -> String {
+        // A capital after a small letter starts a new word, so acronyms
+        // stay whole: ReducingPower -> reducing_power, ROS -> ros.
         let mut out = String::new();
-        for (i, c) in name.chars().enumerate() {
-            if c.is_uppercase() && i > 0 {
+        let mut prev_lower = false;
+        for c in name.chars() {
+            if c.is_uppercase() && prev_lower {
                 out.push('_');
             }
+            prev_lower = c.is_lowercase();
             out.push(c.to_ascii_lowercase());
         }
-        // The pool names that have a different file name.
-        if out == "a_t_p" { "atp".into() } else { out }
+        out
     }
 }
