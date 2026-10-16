@@ -1974,5 +1974,39 @@
       "fps": 8,
       "loop": true
     }
+  },
+  "enzyme": {
+    "frame_size": [
+      16,
+      16
+    ],
+    "anchor_px": [
+      8,
+      8
+    ],
+    "idle": {
+      "file": "enzyme_idle.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "ribosome": {
+    "frame_size": [
+      24,
+      24
+    ],
+    "anchor_px": [
+      12,
+      12
+    ],
+    "loop": {
+      "file": "ribosome_loop.png",
+      "columns": 8,
+      "rows": 1,
+      "fps": 8,
+      "loop": true
+    }
   }
 }

@@ -80,6 +80,14 @@ RAMPS = {
     "fusion": ramp("#3a3224", "#8a7a5a", "#c8b890", "#ecdcb8", "#fffaee"),  # ivory
     "receptor": ramp("#0e3050", "#2670b0", "#4aa4e8", "#92d0ff", "#e4f6ff"),  # sky
     "immune": ramp("#2a2630", "#6c6676", "#b8b2c0", "#e8e4ee", "#ffffff"),  # pearl: the colour is in the antigen
+    # Metabolism view: internal pools. Carbon, Minerals and Metals keep their resource
+    # ramps above, and Lipids use "head" and "tail". Gold-white stays for the gene reward.
+    "atp": ramp("#2c3200", "#6c7e08", "#b8cc18", "#e2f058", "#faffb0"),  # lime: energy
+    "reducing": ramp("#062a6a", "#0e5ee0", "#2a90ff", "#7cc4ff", "#e0f4ff"),  # electric blue: electrons
+    "pyruvate": ramp("#0a3440", "#1a6a78", "#40a8b0", "#8adcd8", "#e0fffa"),  # muted aqua
+    "amino": ramp("#1c3018", "#3c6a30", "#64a050", "#a0d088", "#e0f8c8"),  # sage
+    "nucleotide": ramp("#2e1038", "#6a2e8a", "#a458d0", "#d490f0", "#f4d8ff"),  # orchid
+    "waste": ramp("#1a1612", "#403a30", "#6a6252", "#948a74", "#c0b8a0"),  # murky olive-grey
 }
 
 # Deep-water backdrop, dark to light.
@@ -834,6 +842,350 @@ def vent_plume() -> Canvas:
     return c
 
 
+# --------------------------------------------------------------------------
+# Metabolism view: pool icons, enzymes, pathway plates, valves
+# --------------------------------------------------------------------------
+
+
+def shade_mask(c: Canvas, mask: np.ndarray, tones) -> None:
+    """Fill a mask with 3 tones, lit from the upper left, plus a highlight."""
+    ys, xs = np.nonzero(mask)
+    if len(xs) == 0:
+        return
+    cx, cy = xs.mean() + 0.5 - c.ox, ys.mean() + 0.5 - c.oy
+    r = max(np.sqrt(len(xs) / np.pi), 1.0)
+    s = ((c.X - cx) * 0.6 + (c.Y - cy) * 0.8) / r
+    c.paint(mask, tones[1])
+    c.paint(mask & (s < 0.15), tones[2])
+    c.paint(mask & (s < -0.35), tones[3])
+    c.paint(mask & (s < -0.8), tones[4])
+
+
+def ellipse_sdf(c: Canvas, cx, cy, rx, ry):
+    return (np.hypot((c.X - cx) / rx, (c.Y - cy) / ry) - 1.0) * min(rx, ry)
+
+
+def _rows_mask(c: Canvas, rows: dict[int, tuple[int, int]]) -> np.ndarray:
+    m = np.zeros((c.h, c.w), dtype=bool)
+    for y, (x0, x1) in rows.items():
+        m[y, x0 : x1 + 1] = True
+    return m
+
+
+MOL_NAMES = {  # Currency variant -> file name
+    "ATP": "atp", "ReducingPower": "reducing_power", "Pyruvate": "pyruvate",
+    "CarbonSkeletons": "carbon_skeletons", "AminoAcids": "amino_acids",
+    "Nucleotides": "nucleotides", "Lipids": "lipids", "Metals": "metals",
+    "Waste": "waste", "Minerals": "minerals",
+}
+
+
+def mol_icon(kind: str) -> Canvas:
+    """A 10x10 icon for an internal pool. The silhouette differs for every pool."""
+    c = Canvas(10, 10)
+    if kind == "atp":  # a coin with a ring
+        R = RAMPS["atp"]
+        c.lit_body(blob_sdf(c, 5, 5, 3.7), R, width=3.7)
+        d = np.hypot(c.X - 5, c.Y - 5)
+        c.paint((d >= 1.6) & (d < 2.6) & c.filled, R[1])
+        c.paint(d < 1.6, R[3])
+        c.spark([(3, 3), (4, 3)], R[4])
+    elif kind == "reducing_power":  # a bolt: electrons
+        R = RAMPS["reducing"]
+        shade_mask(c, _rows_mask(c, {1: (5, 8), 2: (4, 7), 3: (3, 6), 4: (2, 7), 5: (4, 8), 6: (4, 7), 7: (3, 6), 8: (3, 5)}), R)
+    elif kind == "pyruvate":  # a small tilted pill
+        R = RAMPS["pyruvate"]
+        c.lit_body(capsule_sdf(c, 3.2, 6.8, 6.8, 3.2, 2.3), R, width=2.3)
+        c.spark([(3, 5), (4, 4)], R[4])
+    elif kind == "carbon_skeletons":  # the flake of food_carbon
+        R = RAMPS["carbon"]
+        c.lit_body(blob_sdf(c, 5, 5, 3.3, [(3, 0.22, 0.4), (2, 0.15, 1.1)]), R, width=3.3)
+        c.spark([(3, 3), (4, 3)], R[4])
+    elif kind == "amino_acids":  # a block with a side group
+        R = RAMPS["amino"]
+        box = _rows_mask(c, {y: (2, 6) for y in range(4, 9)})
+        c.line(6, 4.5, 7.5, 2.5, R[2], 0.6)
+        ball = np.hypot(c.X - 7.5, c.Y - 2.6) < 1.7
+        shade_mask(c, box | ball, R)
+        c.paint(ball, R[3])
+        c.paint(ball & (c.X > 7.5), R[2])
+        c.spark([(7, 2)], R[4])
+    elif kind == "nucleotides":  # a base ring
+        R = RAMPS["nucleotide"]
+        hexa = c.poly([(5, 1.5), (8.4, 3.2), (8.4, 6.8), (5, 8.5), (1.6, 6.8), (1.6, 3.2)])
+        shade_mask(c, hexa, R)
+        c.paint(np.hypot(c.X - 5, c.Y - 5) < 1.4, R[0])
+    elif kind == "lipids":  # a head with two tails
+        for x in (3.5, 6.5):
+            for y in range(5, 9):
+                c.plot(x + (0.0 if (y // 2) % 2 else 1.0) - 0.5, y, RAMPS["tail"][3])
+        c.disc(5, 3.4, 2.5, RAMPS["head"])
+    elif kind == "metals":  # the Fe-S cube
+        R = RAMPS["metal"]
+        T, UR, LR, B, LL, UL, C = (5, 1.6), (8.4, 3.6), (8.4, 6.8), (5, 8.6), (1.6, 6.8), (1.6, 3.6), (5, 5.1)
+        c.paint(c.poly([T, UR, C, UL]), R[3])
+        c.paint(c.poly([UL, C, B, LL]), R[2])
+        c.paint(c.poly([C, UR, LR, B]), R[1])
+        c.spark([(4, 2), (5, 3)], R[4])
+    elif kind == "waste":  # a lumpy blob with dark flecks
+        R = RAMPS["waste"]
+        c.lit_body(blob_sdf(c, 5, 5, 3.4, [(3, 0.25, 0.2), (5, 0.12, 1.0)]), R, width=3.4)
+        c.spark([(6, 5), (4, 6), (6, 3)], R[0])
+        c.spark([(3, 3)], R[4])
+    elif kind == "minerals":  # the cyan shard of pickup_mineral
+        R = RAMPS["mineral"]
+        m = c.poly([(5, 1.5), (7.8, 3.5), (7.4, 6.8), (5, 8.5), (2.6, 6.8), (2.2, 3.5)])
+        c.paint(m, R[2])
+        c.paint(m & (c.X < 5), R[3])
+        c.paint(m & (c.X >= 5), R[1])
+        c.paint(m & (c.Y < 4) & (c.X >= 3.5) & (c.X <= 5.5), R[4])
+    else:
+        raise ValueError(kind)
+    c.outline({"lipids": RAMPS["tail"], "carbon_skeletons": RAMPS["carbon"], "metals": RAMPS["metal"],
+               "minerals": RAMPS["mineral"], "reducing_power": RAMPS["reducing"],
+               "amino_acids": RAMPS["amino"], "nucleotides": RAMPS["nucleotide"]}.get(kind, RAMPS.get(kind, RAMPS["waste"]))[0])
+    return c
+
+
+def enzyme(i: int = 0) -> Canvas:
+    """A protein body with a notched active site. Bobs by one pixel. Blue, so the
+    screen can tint it with a pathway accent."""
+    R = RAMPS["protein"]
+    c = Canvas(16, 16)
+    ph = 2 * np.pi * i / 8
+    dy = round(1.2 * np.sin(ph))
+    body = blob_sdf(c, 8, 8.6 + dy, 5.2, [(3, 0.06, 0.5)])
+    notch = np.hypot(c.X - 11.2, c.Y - (5.4 + dy)) - (2.3 + 0.5 * np.cos(ph))
+    sdf = np.maximum(body, -notch)
+    c.lit_body(sdf, R, width=4.5)
+    c.spark([(4, 7 + dy), (5, 6 + dy), (4, 8 + dy)], R[4])
+    rim = c.dilate(notch < 0) & (notch >= 0) & (body < 0)
+    c.paint(rim & c.filled, R[0])  # the dark mouth of the active site
+    c.outline(R[0])
+    return c
+
+
+def ribosome(i: int = 0) -> Canvas:
+    """Two subunits with an mRNA thread between them and a growing chain."""
+    L = RAMPS["nucleotide"]
+    S = [L[0], L[2], L[3], L[4], L[4]]  # the small subunit: one step lighter
+    c = Canvas(24, 24)
+    # The chain leaves the large subunit down and right, then runs off the sheet.
+    # It starts under the subunit, so a new bead seems to grow out of it.
+    step = (2.6, 1.8)
+    for k in range(-1, 6):
+        c.disc(13.5 + (k + i / 8) * step[0], 18.0 + (k + i / 8) * step[1], 1.5, RAMPS["amino"])
+    c.lit_body(ellipse_sdf(c, 10.5, 17.5, 9.0, 4.6), L, width=4.5)
+    c.outline(L[0])
+    c.lit_body(ellipse_sdf(c, 10.5 + round(np.sin(2 * np.pi * i / 8)), 7.0, 6.5, 3.6), S, width=3.6)
+    c.outline(L[0])
+    # The thread runs left through the gap between the subunits.
+    for x in range(24):
+        if (x + i) % 4 < 3:
+            c.plot(x, 12, RAMPS["granule"][3])
+    return c
+
+
+def _fold(v: np.ndarray, lo: int, hi: int) -> np.ndarray:
+    """Collapse the stretchable middle of a nine-slice to one pixel, so a pattern
+    does not change when the slice stretches."""
+    return np.where(v < lo, v, np.where(v >= hi, v - (hi - lo - 1), lo))
+
+
+PLATE = 24
+PLATE_BORDER = 8
+
+
+def pathway_plate(ghost: bool = False) -> Canvas:
+    """A nine-slice frame, 24x24 with an 8 px border. The middle of every edge is
+    the same along its length, so it stretches. The ghost is the same shape drawn
+    with a dither, for a pathway that the cell does not have yet."""
+    R = RAMPS["lytic"]
+    c = Canvas(PLATE, PLATE)
+    yy, xx = np.mgrid[0:PLATE, 0:PLATE]
+    q = np.stack([np.abs(xx + 0.5 - PLATE / 2) - (PLATE / 2 - 4), np.abs(yy + 0.5 - PLATE / 2) - (PLATE / 2 - 4)])
+    dist = np.hypot(np.maximum(q[0], 0), np.maximum(q[1], 0)) + np.minimum(np.maximum(q[0], q[1]), 0) - 4
+    depth = np.floor(-dist).astype(int)  # 0 = outermost ring
+    inside = dist < 0
+    dl, dr, dt, db = xx + 0.5, PLATE - xx - 0.5, yy + 0.5, PLATE - yy - 0.5
+    nearest = np.stack([dl, dt, dr, db]).argmin(axis=0)
+    lit = nearest < 2  # left and top sides catch the light
+    fx = _fold(xx, PLATE_BORDER, PLATE - PLATE_BORDER)
+    fy = _fold(yy, PLATE_BORDER, PLATE - PLATE_BORDER)
+    if not ghost:
+        c.paint(inside, RAMPS["rock"][1])
+        c.paint(inside & (depth >= 1) & (depth < 3), R[1])
+        c.paint(inside & (depth == 1) & lit, R[3])
+        c.paint(inside & (depth == 2) & lit, R[2])
+        c.paint(inside & (depth == 1) & ~lit, R[2])
+        c.paint(inside & (depth == 2) & ~lit, R[1])
+        c.paint(inside & (depth == 0), R[0])
+    else:
+        level = np.select([depth == 0, depth == 1, depth == 2, depth == 3], [0.95, 0.7, 0.45, 0.25], 0.0)
+        bayer = BAYER4[fy % 4, fx % 4]
+        on = inside & (level > bayer)
+        c.paint(on & (depth == 0), R[1])
+        c.paint(on & (depth >= 1) & lit, R[2])
+        c.paint(on & (depth >= 1) & ~lit, R[1])
+    return c
+
+
+PATHWAY_ICONS = {  # BlockKind with a block_spec -> file suffix
+    "Chemosynthesis": "chemosynthesis", "AminoAcidBiosynthesis": "amino_acid_biosynthesis",
+    "LipidMetabolism": "lipid_metabolism", "ProteinSynthesis": "protein_synthesis",
+    "Fermentation": "fermentation", "VesicleExport": "vesicle_export", "FatStorage": "fat_storage",
+}
+
+
+def pathway_icon(kind: str) -> Canvas:
+    c = Canvas(16, 16)
+    if kind == "chemosynthesis":  # vent flame over a mineral crystal
+        V, M = RAMPS["vent"], RAMPS["mineral"]
+        shade_mask(c, c.poly([(8, 1.5), (10.8, 5.5), (10.2, 8.8), (5.8, 8.8), (5.2, 5.5)]), V)
+        crystal = c.poly([(8, 8.2), (11.2, 10.2), (10.6, 13.6), (8, 14.6), (5.4, 13.6), (4.8, 10.2)])
+        c.paint(crystal, M[2])
+        c.paint(crystal & (c.X < 8), M[3])
+        c.paint(crystal & (c.X >= 8), M[1])
+        c.paint(crystal & (c.Y < 11) & (c.X > 6) & (c.X < 9), M[4])
+        c.outline(M[0])
+    elif kind == "amino_acid_biosynthesis":  # a block with a side group
+        A = RAMPS["amino"]
+        c.line(9.5, 6.5, 12, 3.5, A[2], 0.7)
+        shade_mask(c, _rows_mask(c, {y: (3, 10) for y in range(6, 14)}), A)
+        c.disc(12.2, 3.6, 2.2, A)
+        c.outline(A[0])
+    elif kind == "lipid_metabolism":  # a phospholipid
+        for x in (6.0, 10.0):
+            for y in range(8, 15):
+                c.plot(x + (0.0 if (y // 2) % 2 else 1.0) - 0.5, y, RAMPS["tail"][3])
+        c.disc(8, 5, 3.4, RAMPS["head"])
+        c.outline(RAMPS["tail"][0])
+    elif kind == "protein_synthesis":  # a ribosome with a chain
+        L = RAMPS["nucleotide"]
+        S = [L[0], L[2], L[3], L[4], L[4]]
+        for k in range(3):
+            c.disc(11 + k * 2.0, 12 + k * 1.6, 1.1, RAMPS["amino"], outline=False)
+        c.lit_body(ellipse_sdf(c, 7.5, 10.5, 6.2, 3.6), L, width=3.4)
+        c.lit_body(ellipse_sdf(c, 7.5, 5.5, 4.4, 2.8), S, width=2.8)
+        c.outline(L[0])
+    elif kind == "fermentation":  # a flask with bubbles
+        G, P = RAMPS["lytic"], RAMPS["pyruvate"]
+        body = c.poly([(6.5, 6), (9.5, 6), (13, 13.5), (3, 13.5)]) | _rows_mask(c, {y: (6, 9) for y in range(2, 7)})
+        shade_mask(c, body, G)
+        liquid = body & (c.Y > 9.5) & (c.Y < 13.5) & (c.X > 4) & (c.X < 12)
+        shade_mask(c, liquid, P)
+        c.paint(c.poly([(5.5, 2), (10.5, 2), (10.5, 3), (5.5, 3)]), G[3])
+        c.spark([(7, 11), (9, 12)], P[4])
+        c.spark([(8, 8), (9, 6)], G[4])
+        c.outline(G[0])
+    elif kind == "vesicle_export":  # a vesicle buds off the membrane
+        H, W = RAMPS["head"], RAMPS["waste"]
+        c.paint(_rows_mask(c, {y: (1, 3) for y in range(1, 15)}), H[2])
+        c.paint(_rows_mask(c, {y: (1, 1) for y in range(1, 15)}), H[3])
+        c.paint(_rows_mask(c, {y: (3, 3) for y in range(1, 15)}), H[1])
+        c.lit_body(blob_sdf(c, 8.6, 8, 3.8), W, band=1.0, width=3.8)
+        c.spark([(6, 6), (7, 6)], W[4])
+        c.spark([(12, 6), (13, 7), (14, 8), (13, 9), (12, 10)], RAMPS["lytic"][4])
+        c.outline(RAMPS["tail"][0])
+    elif kind == "fat_storage":  # lipid beads
+        B = RAMPS["bead"]
+        c.disc(6.5, 9.5, 4.5, B)
+        c.disc(11.8, 5.2, 3.0, B)
+        c.disc(12, 12, 2.6, B)
+        c.outline(B[0])
+    else:
+        raise ValueError(kind)
+    return c
+
+
+def slot_socket() -> Canvas:
+    """An empty socket on the bilayer: a collar around a dark pit. A protein sits
+    in it when the cell has one."""
+    w = 24
+    c = wall_membrane(w)
+    P = RAMPS["protein"]
+    cx, cy = w / 2, c.h / 2
+    dx, dy = c.X - cx, c.Y - cy
+    d = np.hypot(dx / 8.2, dy / 9.4)
+    c.paint(d < 1.0, P[2])
+    c.paint((d < 1.0) & (dx + dy < -4), P[3])
+    c.paint((d < 1.0) & (dx + dy > 4), P[1])
+    c.paint((d >= 0.94) & (d < 1.0), P[0])
+    pit = d < 0.62
+    c.paint(pit, RAMPS["rock"][0])
+    c.paint(pit & ((c.X + c.Y).astype(int) % 2 == 0) & (dy > 0), RAMPS["rock"][1])
+    c.paint((d >= 0.62) & (d < 0.7), P[0])
+    return c
+
+
+def badge_limit() -> Canvas:
+    """A cap on a pathway: a bar above a downward arrow, in a steel disc."""
+    R = RAMPS["lytic"]
+    c = Canvas(12, 12)
+    c.lit_body(blob_sdf(c, 6, 6, 5.0), R, width=5.0)
+    c.paint(_rows_mask(c, {3: (3, 8), 4: (3, 8)}), RAMPS["rock"][0])
+    c.paint(_rows_mask(c, {6: (5, 6), 7: (5, 6), 8: (4, 7), 9: (5, 6)}), RAMPS["rock"][0])
+    c.outline(R[0])
+    return c
+
+
+def valve(state: str) -> Canvas:
+    """A pipe with a gate: shut, a third open, open (the gate is lifted out)."""
+    R = RAMPS["lytic"]
+    c = Canvas(12, 12)
+    c.paint(_rows_mask(c, {y: (0, 11) for y in range(6, 11)}), R[2])
+    c.paint(_rows_mask(c, {6: (0, 11)}), R[3])
+    c.paint(_rows_mask(c, {10: (0, 11)}), R[1])
+    c.paint(_rows_mask(c, {y: (0, 11) for y in (7, 8, 9)}), RAMPS["rock"][0])
+    bottom = {"off": 9, "low": 8, "high": 4}[state]
+    gate = _rows_mask(c, {y: (4, 7) for y in range(3, bottom + 1)})
+    c.paint(gate, R[3])
+    c.paint(gate & (c.X < 5), R[4])
+    c.paint(gate & (c.X >= 7), R[2])
+    if state == "high":
+        c.paint(_rows_mask(c, {y: (5, 6) for y in range(7, 10)}), RAMPS["player"][2])  # flow
+    c.paint(_rows_mask(c, {1: (3, 8), 2: (3, 8)}), R[2])
+    c.paint(_rows_mask(c, {1: (3, 8)}), R[3])
+    c.outline(R[0])
+    return c
+
+
+METABOLISM_STATIC = {
+    **{f"mol_{n}": (lambda n=n: mol_icon(n)) for n in MOL_NAMES.values()},
+    **{f"pathway_icon_{n}": (lambda n=n: pathway_icon(n)) for n in PATHWAY_ICONS.values()},
+    "enzyme": lambda: enzyme(0),
+    "ribosome": lambda: ribosome(0),
+    "pathway_plate": lambda: pathway_plate(False),
+    "pathway_plate_ghost": lambda: pathway_plate(True),
+    "slot_socket": slot_socket,
+    "badge_limit": badge_limit,
+    "valve_off": lambda: valve("off"),
+    "valve_low": lambda: valve("low"),
+    "valve_high": lambda: valve("high"),
+}
+
+METABOLISM_ANIMS = {
+    "enzyme": dict(make=enzyme, size=16, clip="idle", fps=8),
+    "ribosome": dict(make=ribosome, size=24, clip="loop", fps=8),
+}
+
+
+def write_metabolism_anims() -> None:
+    path = ANIM_DIR / "manifest.json"
+    manifest = json.loads(path.read_text())
+    for name, spec in METABOLISM_ANIMS.items():
+        frames = [spec["make"](i) for i in range(FRAMES)]
+        write_png(ANIM_DIR / f"{name}_{spec['clip']}.png", np.concatenate([f.px for f in frames], axis=1))
+        manifest[name] = {
+            "frame_size": [spec["size"], spec["size"]],
+            "anchor_px": [spec["size"] // 2, spec["size"] // 2],
+            spec["clip"]: {"file": f"{name}_{spec['clip']}.png", "columns": FRAMES, "rows": 1,
+                           "fps": spec["fps"], "loop": True},
+        }
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+
 SPRITES = {
     "player_cell": player_cell,
     "prey_bacillus": prey_bacillus,
@@ -855,6 +1207,7 @@ SPRITES = {
     "overlay_toxin": lambda: overlay_toxin(0, 0, "idle"),
     "toxin_droplet": lambda: toxin_droplet(0),
     "gene_orb": lambda: gene_orb(0),
+    **METABOLISM_STATIC,
 }
 
 
@@ -2808,6 +3161,7 @@ def main() -> None:
     engulf = build_engulf()
     write_engulf(engulf)
     write_engulf_previews(engulf)
+    write_metabolism_anims()
     print("wrote", SPRITE_DIR, "and", PREVIEW_DIR)
 
 
