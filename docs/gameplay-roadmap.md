@@ -274,7 +274,7 @@ Notes:
 
 Done when: you can play a vent field, find minerals, and starve or burn.
 
-### M3. Genome damage - done (not committed yet)
+### M3. Genome damage - done, e3f54db
 
 Notes:
 - `Channel::Light` in `EnvGrid`. UV = light x `UvFraction` (1.0 in the
@@ -319,7 +319,7 @@ Original plan:
 Done when: light zones kill a cell without pigment, and a cell with pigment
 survives.
 
-### M4. Build and regulate - done (not committed yet)
+### M4. Build and regulate - done, c6d2ad4
 
 Notes:
 - Time rule in one pure function, `shelter::sim_paused(in_shelter, editor_open)`:
@@ -366,7 +366,7 @@ Original plan:
 Done when: you can plan a build in a shelter, see it get built in game time,
 and switch pathways during play. **Playtest** the time rules here.
 
-### M5. Living world (vent slice) - done (not committed yet)
+### M5. Living world (vent slice) - done, e0a3d48
 
 Notes:
 - **Slow tick.** `CellTick { every, phase, due }` on every cell. NPCs run every
@@ -438,7 +438,7 @@ Original plan:
 Done when: a full vent run can be won or lost. This is the **vertical
 slice**. Tune it before we build more stages.
 
-### M6. Run structure - done (not committed yet)
+### M6. Run structure - done, fe62ff4
 
 Notes:
 - **Stage data.** `LevelDef` (`level.rs`) holds everything a level needs: grid
@@ -497,7 +497,7 @@ Original plan:
 2. Codex: save obtained genes. Choose a starting genome with a budget.
 3. Some level variation (procedural layout of fixed parts).
 
-### M7. Shallow water - done (not committed yet)
+### M7. Shallow water - done, 6819cb7
 
 Notes:
 - **Photosynthesis** (`blocks/photosynthesis.rs`, gene `LightCapture`): Light
@@ -562,7 +562,7 @@ Original plan:
 3. Respiration gate cell (endosymbiosis).
 4. More tissue types.
 
-### M8. Land - done (not committed yet)
+### M8. Land - done, 4fd1330
 
 Notes:
 - **Respiration** (`blocks/respiration.rs`, `BlockKind::Respiration`): per turnover
