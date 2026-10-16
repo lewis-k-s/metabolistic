@@ -72,11 +72,15 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 17] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 21] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Prepare, None),
     (GameState::Run, None),
+    (GameState::Manage, None),
+    (GameState::Manage, None),
+    (GameState::Manage, None),
+    (GameState::Manage, None),
     (GameState::Manage, None),
     (GameState::Run, None),
     (GameState::Run, None),
@@ -95,21 +99,27 @@ const SEQUENCE: [(GameState, Option<MenuPage>); 17] = [
 /// Steps of the M4 checks.
 const STEP_RUN: usize = 3;
 const STEP_MANAGE: usize = 4;
-const STEP_RUN_AGAIN: usize = 5;
+/// The Manage checks: the side panel on a pathway, on a socket, a tooltip, and
+/// a limited pathway.
+const STEP_MANAGE_PANEL: usize = 5;
+const STEP_MANAGE_SOCKET: usize = 6;
+const STEP_MANAGE_TIP: usize = 7;
+const STEP_MANAGE_LIMIT: usize = 8;
+const STEP_RUN_AGAIN: usize = 9;
 /// The gate chamber view.
-const STEP_GATE_VIEW: usize = 6;
+const STEP_GATE_VIEW: usize = 10;
 /// The stage-complete screen. The run state moves to shallow water here.
-const STEP_STAGE_COMPLETE: usize = 7;
+const STEP_STAGE_COMPLETE: usize = 11;
 /// The shallow-water steps (M7).
-const STEP_SHALLOW: usize = 8;
-const STEP_SHALLOW_CATALASE: usize = 9;
-const STEP_SHALLOW_GATE: usize = 10;
+const STEP_SHALLOW: usize = 12;
+const STEP_SHALLOW_CATALASE: usize = 13;
+const STEP_SHALLOW_GATE: usize = 14;
 /// The second stage-complete screen. The run state moves to land here.
-const STEP_STAGE_COMPLETE_2: usize = 11;
+const STEP_STAGE_COMPLETE_2: usize = 15;
 /// The land steps (M8).
-const STEP_LAND: usize = 12;
-const STEP_LAND_DRY: usize = 13;
-const STEP_LAND_GATE: usize = 14;
+const STEP_LAND: usize = 16;
+const STEP_LAND_DRY: usize = 17;
+const STEP_LAND_GATE: usize = 18;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -149,6 +159,9 @@ pub fn plugin(app: &mut App) {
         run_start: None,
     })
     .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage))
+    // After the UI focus system, so that a pressed button stays pressed for the
+    // screen's own systems of this frame.
+    .add_systems(PreUpdate, smoke_manage.after(bevy::ui::UiSystems::Focus))
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
 }
@@ -611,6 +624,114 @@ fn smoke_land(
             if smoke.frames_in_step == 100 && !done[3] {
                 assert!(gates.iter().all(|g| g.held == 0.0), "smoke test: the player touched the gate cell");
                 done[3] = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What the Manage steps remember between frames.
+#[derive(Default)]
+struct ManageSmoke {
+    orders_before: usize,
+}
+
+/// The Manage checks. The picks are what a click and a hover send (the smoke
+/// test has no pointer), and the + press is a real button press, so the
+/// panel, the buttons and the messages are all exercised.
+fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
+    use crate::screens::manage::{SmokePick, smoke_hover, smoke_probe, smoke_press_plus, smoke_select};
+    if *world.resource::<State<GameState>>().get() != GameState::Manage {
+        return;
+    }
+    let (step, frame) = {
+        let smoke = world.resource::<SmokeTest>();
+        (smoke.step, smoke.frames_in_step)
+    };
+    if !(STEP_MANAGE_PANEL..=STEP_MANAGE_LIMIT).contains(&step) {
+        return;
+    }
+    let Some(cell) = world
+        .query_filtered::<&ControlledCell, With<LocalPlayer>>()
+        .iter(world)
+        .next()
+        .map(|c| c.0)
+    else {
+        return;
+    };
+    let orders = |world: &World| world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
+    match (step, frame) {
+        (STEP_MANAGE_PANEL, 5) => {
+            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+            memory.orders_before = orders(world);
+        }
+        (STEP_MANAGE_PANEL, 15) => {
+            let target = ProteinTarget::Enzyme(BlockKind::Chemosynthesis);
+            assert!(
+                smoke_probe(world).plus_buttons.contains(&target),
+                "smoke test: the panel of a pathway has no + button"
+            );
+            smoke_press_plus(world, target);
+        }
+        (STEP_MANAGE_PANEL, 40) => {
+            let probe = smoke_probe(world);
+            assert_eq!(probe.panel_title.as_deref(), Some("Chemosynthesis"), "smoke test: the panel did not open");
+            assert!(orders(world) > memory.orders_before, "smoke test: + queued no enzyme");
+            info!("smoke test: the panel of a pathway opened and + queued an enzyme");
+        }
+        (STEP_MANAGE_SOCKET, 5) => {
+            smoke_select(world, Some(SmokePick::Slot(0)));
+            memory.orders_before = orders(world);
+        }
+        (STEP_MANAGE_SOCKET, 15) => {
+            let target = ProteinTarget::Membrane(MembraneProtein::Toxin);
+            assert!(
+                smoke_probe(world).plus_buttons.contains(&target),
+                "smoke test: the panel of a socket has no + button"
+            );
+            smoke_press_plus(world, target);
+        }
+        (STEP_MANAGE_SOCKET, 40) => {
+            let probe = smoke_probe(world);
+            assert!(
+                probe.panel_title.as_deref().is_some_and(|t| t.starts_with("Membrane socket")),
+                "smoke test: the panel of a socket did not open: {:?}",
+                probe.panel_title
+            );
+            assert!(orders(world) > memory.orders_before, "smoke test: + queued no membrane protein");
+            info!("smoke test: the panel of a socket opened and + queued a protein");
+        }
+        (STEP_MANAGE_TIP, 5) => {
+            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Fermentation)));
+            smoke_hover(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+        }
+        (STEP_MANAGE_TIP, 40) => {
+            let probe = smoke_probe(world);
+            assert!(probe.tooltip_visible, "smoke test: no tooltip on hover");
+            assert!(
+                probe.tooltip_text.contains("Chemosynthesis") || probe.tooltip_text.contains("Chemo"),
+                "smoke test: the tooltip says {:?}",
+                probe.tooltip_text
+            );
+            info!("smoke test: tooltip: {:?}", probe.tooltip_text);
+        }
+        (STEP_MANAGE_LIMIT, 2) => {
+            smoke_hover(world, None);
+            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+        }
+        (STEP_MANAGE_LIMIT, 3..=60) => {
+            // No minerals: Chemosynthesis is starved.
+            if let Some(mut pools) = world.get_mut::<CurrencyPools>(cell) {
+                pools.set(Currency::Minerals, 0.0);
+            }
+            if frame == 60 {
+                let probe = smoke_probe(world);
+                info!("smoke test: badges {:?}, red pipes {}", probe.badges, probe.limiting_pipes);
+                assert!(
+                    probe.badges.contains(&BlockKind::Chemosynthesis),
+                    "smoke test: no limit badge on a starved pathway"
+                );
+                assert!(probe.limiting_pipes >= 1, "smoke test: no red pulse on a starved pathway");
             }
         }
         _ => {}
