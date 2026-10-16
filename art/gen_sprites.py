@@ -88,6 +88,8 @@ RAMPS = {
     "amino": ramp("#1c3018", "#3c6a30", "#64a050", "#a0d088", "#e0f8c8"),  # sage
     "nucleotide": ramp("#2e1038", "#6a2e8a", "#a458d0", "#d490f0", "#f4d8ff"),  # orchid
     "waste": ramp("#1a1612", "#403a30", "#6a6252", "#948a74", "#c0b8a0"),  # murky olive-grey
+    "o2": ramp("#0a3a34", "#1a7a64", "#2ec09a", "#7ae6c4", "#d8fff0"),  # sea green: oxygen
+    "ros": ramp("#3a0a3a", "#9a1a8a", "#e03ac8", "#ff80e8", "#ffe0fa"),  # hot magenta: a radical (never perforin red)
 }
 
 # Deep-water backdrop, dark to light.
@@ -876,8 +878,13 @@ MOL_NAMES = {  # Currency variant -> file name
     "ATP": "atp", "ReducingPower": "reducing_power", "Pyruvate": "pyruvate",
     "CarbonSkeletons": "carbon_skeletons", "AminoAcids": "amino_acids",
     "Nucleotides": "nucleotides", "Lipids": "lipids", "Metals": "metals",
-    "Waste": "waste", "Minerals": "minerals",
+    "Waste": "waste", "Minerals": "minerals", "Pigments": "pigments", "O2": "o2", "ROS": "ros",
 }
+
+
+def drop_mask(c: Canvas, cx, cy, r) -> np.ndarray:
+    tip = c.poly([(cx, cy - r * 2.0), (cx + r * 0.9, cy - r * 0.5), (cx - r * 0.9, cy - r * 0.5)])
+    return (np.hypot(c.X - cx, c.Y - cy) < r) | tip
 
 
 def mol_icon(kind: str) -> Canvas:
@@ -939,9 +946,21 @@ def mol_icon(kind: str) -> Canvas:
         c.paint(m & (c.X < 5), R[3])
         c.paint(m & (c.X >= 5), R[1])
         c.paint(m & (c.Y < 4) & (c.X >= 3.5) & (c.X <= 5.5), R[4])
+    elif kind == "pigments":  # a drop of carotenoid
+        R = RAMPS["pigment"]
+        shade_mask(c, drop_mask(c, 5, 6, 2.9), R)
+    elif kind == "o2":  # a dumbbell: two atoms
+        R = RAMPS["o2"]
+        c.disc(3.4, 6.4, 2.6, R)
+        c.disc(6.6, 3.6, 2.6, R)
+    elif kind == "ros":  # a spiky radical
+        R = RAMPS["ros"]
+        th = np.arctan2(c.Y - 5, c.X - 5)
+        rr = 1.9 + 2.3 * np.abs(np.cos(2 * th)) ** 4 + 1.0 * np.abs(np.sin(2 * th)) ** 6
+        shade_mask(c, np.hypot(c.X - 5, c.Y - 5) < rr, R)
     else:
         raise ValueError(kind)
-    c.outline({"lipids": RAMPS["tail"], "carbon_skeletons": RAMPS["carbon"], "metals": RAMPS["metal"],
+    c.outline({"pigments": RAMPS["pigment"], "o2": RAMPS["o2"], "ros": RAMPS["ros"], "lipids": RAMPS["tail"], "carbon_skeletons": RAMPS["carbon"], "metals": RAMPS["metal"],
                "minerals": RAMPS["mineral"], "reducing_power": RAMPS["reducing"],
                "amino_acids": RAMPS["amino"], "nucleotides": RAMPS["nucleotide"]}.get(kind, RAMPS.get(kind, RAMPS["waste"]))[0])
     return c
@@ -1034,6 +1053,9 @@ PATHWAY_ICONS = {  # BlockKind with a block_spec -> file suffix
     "Chemosynthesis": "chemosynthesis", "AminoAcidBiosynthesis": "amino_acid_biosynthesis",
     "LipidMetabolism": "lipid_metabolism", "ProteinSynthesis": "protein_synthesis",
     "Fermentation": "fermentation", "VesicleExport": "vesicle_export", "FatStorage": "fat_storage",
+    "LightCapture": "light_capture", "Respiration": "respiration", "Catalase": "catalase",
+    "Cuticle": "cuticle", "NucleotideCofactorSynthesis": "nucleotide_cofactor_synthesis",
+    "SecondaryMetabolites": "secondary_metabolites",
 }
 
 
@@ -1093,6 +1115,46 @@ def pathway_icon(kind: str) -> Canvas:
         c.disc(11.8, 5.2, 3.0, B)
         c.disc(12, 12, 2.6, B)
         c.outline(B[0])
+    elif kind == "light_capture":  # a sun
+        P = RAMPS["pigment"]
+        for a in range(8):
+            ang = a * np.pi / 4
+            c.line(8 + 4.2 * np.cos(ang), 8 + 4.2 * np.sin(ang), 8 + 6.6 * np.cos(ang), 8 + 6.6 * np.sin(ang), P[3], 0.55)
+        c.lit_body(blob_sdf(c, 8, 8, 3.8), P, width=3.8)
+        c.outline(P[0])
+    elif kind == "respiration":  # O2 in, ATP out
+        c.disc(4.2, 10.8, 2.6, RAMPS["o2"])
+        c.disc(7.4, 7.6, 2.6, RAMPS["o2"])
+        c.lit_body(blob_sdf(c, 11.4, 4.6, 3.3), RAMPS["atp"], width=3.3)
+        c.paint((np.hypot(c.X - 11.4, c.Y - 4.6) < 1.3) & c.filled, RAMPS["atp"][3])
+        c.outline(RAMPS["o2"][0])
+    elif kind == "catalase":  # a radical turns into oxygen
+        th = np.arctan2(c.Y - 8, c.X - 4)
+        rr = 1.6 + 2.0 * np.abs(np.cos(2 * th)) ** 4 + 0.8 * np.abs(np.sin(2 * th)) ** 6
+        shade_mask(c, np.hypot(c.X - 4, c.Y - 8) < rr, RAMPS["ros"])
+        c.disc(12, 8, 3.0, RAMPS["o2"])
+        c.paint(_rows_mask(c, {6: (7, 7), 7: (8, 8), 8: (9, 9), 9: (8, 8), 10: (7, 7)}), RAMPS["protein"][3])
+        c.outline(RAMPS["protein"][0])
+    elif kind == "cuticle":  # a tough layered wall
+        F = RAMPS["fusion"]
+        for k, (y, off) in enumerate([(2, 0), (6, 3), (10, 0)]):
+            for x0 in (-off, 6 - off, 12 - off):
+                x0 = max(x0, 0) if x0 < 0 else x0
+                shade_mask(c, _rows_mask(c, {yy: (max(x0 + 1, 1), min(x0 + 5, 14)) for yy in range(y, y + 3)}), F)
+        c.outline(F[0])
+    elif kind == "nucleotide_cofactor_synthesis":  # a base ring and a Fe-S cube
+        hexa = c.poly([(6, 2), (10.4, 4.2), (10.4, 8.6), (6, 10.8), (1.6, 8.6), (1.6, 4.2)])
+        shade_mask(c, hexa, RAMPS["nucleotide"])
+        c.paint(np.hypot(c.X - 6, c.Y - 6.4) < 1.5, RAMPS["nucleotide"][0])
+        M = RAMPS["metal"]
+        c.paint(c.poly([(12, 8.5), (14.4, 9.8), (12, 11), (9.6, 9.8)]), M[3])
+        c.paint(c.poly([(9.6, 9.8), (12, 11), (12, 14.4), (9.6, 13)]), M[2])
+        c.paint(c.poly([(12, 11), (14.4, 9.8), (14.4, 13), (12, 14.4)]), M[1])
+        c.outline(RAMPS["nucleotide"][0])
+    elif kind == "secondary_metabolites":  # two drops: a pigment and a toxin
+        shade_mask(c, drop_mask(c, 5.2, 10, 3.0), RAMPS["pigment"])
+        shade_mask(c, drop_mask(c, 11.2, 8, 2.6), RAMPS["toxin"])
+        c.outline(RAMPS["toxin"][0])
     else:
         raise ValueError(kind)
     return c
