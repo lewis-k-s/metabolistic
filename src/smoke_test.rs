@@ -51,7 +51,7 @@ use crate::npc::{Archetype, Npc};
 use crate::run::RunSummary;
 use crate::actions::{Level, PathwayLevels, UseSlot};
 use crate::blocks::genome::BlockKind;
-use crate::cell::Cell;
+use crate::cell::{Cell, CellSize, membrane_slots};
 use crate::environment::{Channel, LocalEnvironment};
 use crate::genome_damage::GenomeIntegrity;
 use crate::membrane::Membrane;
@@ -639,11 +639,18 @@ fn smoke_land(
 #[derive(Default)]
 struct ManageSmoke {
     orders_before: usize,
+    /// The empty socket that the socket check picked. `None`: every socket
+    /// is in use (a scenario cell can fill them), so the check is skipped.
+    empty_slot: Option<usize>,
+    /// What the codex check queues: a toxin, or an enzyme when every socket
+    /// is in use.
+    codex_target: Option<ProteinTarget>,
 }
 
 /// The Codex checks. The overlay opens with the key C on the Manage screen,
 /// shows one card for every gene and membrane protein, and a button press
-/// queues a membrane protein. The last step opens it from the menu.
+/// queues a protein (a membrane protein, or an enzyme when every socket is in
+/// use). The last step opens it from the menu.
 fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
     use crate::codex_catalog::{Edit, EntryId};
     use crate::screens::codex::{smoke_open, smoke_press_edit, smoke_probe, smoke_show};
@@ -665,18 +672,30 @@ fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
             let probe = smoke_probe(world);
             assert!(probe.open, "smoke test: C did not open the codex");
             assert_eq!(probe.cards, all, "smoke test: the codex has a card for every entry");
-            smoke_show(world, EntryId::Protein(MembraneProtein::Toxin));
             if let Some(cell) = world.query_filtered::<&ControlledCell, With<LocalPlayer>>().iter(world).next().map(|c| c.0) {
-                memory.orders_before = world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
+                // A full membrane refuses a membrane protein, so queue an enzyme then.
+                let (entry, target) = match first_free_socket(world, cell) {
+                    Some(_) => (
+                        EntryId::Protein(MembraneProtein::Toxin),
+                        ProteinTarget::Membrane(MembraneProtein::Toxin),
+                    ),
+                    None => (
+                        EntryId::Gene(BlockKind::Chemosynthesis),
+                        ProteinTarget::Enzyme(BlockKind::Chemosynthesis),
+                    ),
+                };
+                smoke_show(world, entry);
+                memory.codex_target = Some(target);
+                memory.orders_before = ordered(world, cell, target);
             }
         }
         (STEP_MANAGE_CODEX, 30, GameState::Manage) => {
-            let toxin = ProteinTarget::Membrane(MembraneProtein::Toxin);
+            let target = memory.codex_target.expect("smoke test: no codex target");
             assert!(
-                smoke_probe(world).edit_buttons.contains(&Edit::Queue(toxin)),
-                "smoke test: the codex detail panel has no queue button"
+                smoke_probe(world).edit_buttons.contains(&Edit::Queue(target)),
+                "smoke test: the codex detail panel has no queue button for {target:?}"
             );
-            smoke_press_edit(world, Edit::Queue(toxin));
+            smoke_press_edit(world, Edit::Queue(target));
         }
         (STEP_MANAGE_CODEX, 50, GameState::Manage) => {
             let cell = world
@@ -685,8 +704,13 @@ fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
                 .next()
                 .map(|c| c.0)
                 .expect("smoke test: a player cell");
-            let orders = world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
-            assert!(orders > memory.orders_before, "smoke test: the codex button queued no protein");
+            // Count the target in the queue and in the proteome: an order can
+            // finish between the two checks, so the queue length alone can go down.
+            let target = memory.codex_target.expect("smoke test: no codex target");
+            assert!(
+                ordered(world, cell, target) > memory.orders_before,
+                "smoke test: the codex button queued no {target:?}"
+            );
             info!("smoke test: the codex opened with C and queued a protein");
             smoke_show(world, EntryId::Gene(BlockKind::Respiration));
         }
@@ -699,6 +723,32 @@ fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
         }
         _ => {}
     }
+}
+
+/// Proteins of a target that a cell has ordered: in the synthesis queue or made.
+fn ordered(world: &World, cell: Entity, target: ProteinTarget) -> usize {
+    let queued = world
+        .get::<SynthesisQueue>(cell)
+        .map_or(0, |q| q.orders.iter().filter(|o| **o == target).count());
+    let made = world.get::<Proteome>(cell).map_or(0, |p| p.count(target) as usize);
+    queued + made
+}
+
+/// The first empty membrane socket of a cell. Sockets hold the proteome, then
+/// the queued membrane proteins, then empty ones (`slot_contents`). `None`: all
+/// sockets are in use or ordered.
+fn first_free_socket(world: &World, cell: Entity) -> Option<usize> {
+    let used = world.get::<Proteome>(cell).map_or(0, |p| {
+        MembraneProtein::ALL
+            .iter()
+            .map(|m| p.count(ProteinTarget::Membrane(*m)) as usize)
+            .sum::<usize>()
+    });
+    let queued = world.get::<SynthesisQueue>(cell).map_or(0, |q| {
+        q.orders.iter().filter(|o| matches!(o, ProteinTarget::Membrane(_))).count()
+    });
+    let slots = world.get::<CellSize>(cell).map_or(0, |s| membrane_slots(s) as usize);
+    (used + queued < slots).then_some(used + queued)
 }
 
 /// The Manage checks. The picks are what a click and a hover send (the smoke
@@ -745,9 +795,16 @@ fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
             info!("smoke test: the panel of a pathway opened and + queued an enzyme");
         }
         (STEP_MANAGE_SOCKET, 5) => {
-            smoke_select(world, Some(SmokePick::Slot(0)));
+            // A scenario cell can start with proteins, so pick the first empty
+            // socket, not socket 0.
+            memory.empty_slot = first_free_socket(world, cell);
+            match memory.empty_slot {
+                Some(slot) => smoke_select(world, Some(SmokePick::Slot(slot))),
+                None => info!("smoke test: every socket is in use, the socket check is skipped"),
+            }
             memory.orders_before = orders(world);
         }
+        (STEP_MANAGE_SOCKET, 15 | 40) if memory.empty_slot.is_none() => {}
         (STEP_MANAGE_SOCKET, 15) => {
             let target = ProteinTarget::Membrane(MembraneProtein::Toxin);
             assert!(
