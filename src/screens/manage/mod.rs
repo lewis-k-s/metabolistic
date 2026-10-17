@@ -7,7 +7,7 @@
 //!   (`diagram`, placed by `layout`);
 //! - the ribosome at the bottom, with the synthesis queue;
 //! - a small live inset of the run in the top right corner (`inset`);
-//! - the side panel and the tooltips (`panel`), and the action bar (keys 1-4).
+//! - the side panel and the tooltips (`panel`), and the action bar (keys 1-4 assign the mouse-button slots).
 //!
 //! Pathway levels (Off / Low / High) are set here, on the map: a click on the
 //! valve of a plate moves it to the next level, and the side panel of a
@@ -35,7 +35,7 @@ use bevy::window::PrimaryWindow;
 use super::label;
 use crate::GameState;
 use crate::actions::{
-    ActionBar, ActionState, Level, PathwayLevels, SLOT_COUNT, SetPathwayLevel, available_actions, next_assignment, slot_status,
+    ActionBar, ActionState, Level, PathwayLevels, SLOT_COUNT, SetPathwayLevel, available_actions, next_assignment, slot_line,
 };
 use crate::blocks::genome::{BlockKind, GeneState};
 use crate::cell::Cell;
@@ -325,7 +325,8 @@ fn manage_buttons(
     }
 }
 
-/// Keys 1-4 give the slot the next active skill of the cell.
+/// Keys 1-4 (or a click on the slot) give the slot the next active skill of the
+/// cell. On the Run screen the slots are on the mouse buttons.
 fn manage_keys(
     keys: Res<ButtonInput<KeyCode>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
@@ -445,7 +446,7 @@ fn update_action_bar(
         return;
     };
     for (slot, mut text) in &mut texts {
-        let line = format!("[{}] {}", slot.0 + 1, slot_status(bar.slots[slot.0], state, proteome));
+        let line = slot_line(slot.0, bar, state, proteome);
         if text.0 != line {
             text.0 = line;
         }
@@ -569,7 +570,7 @@ mod tests {
     #[test]
     fn cycling_a_slot_walks_the_options() {
         let mut proteome = Proteome::default();
-        proteome.add(ProteinTarget::Membrane(crate::proteins::MembraneProtein::Flagellum));
+        proteome.add(ProteinTarget::Membrane(crate::proteins::MembraneProtein::Toxin));
         let mut bar = ActionBar::default();
         let options = available_actions(&proteome);
         assert_eq!(options.len(), 2);

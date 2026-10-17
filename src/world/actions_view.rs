@@ -2,8 +2,11 @@
 //!
 //! The parts of the action bar that need graphics:
 //!
-//! - **Hotkeys** 1-4 use the slots on the Run screen. `SlotHeld` follows the
-//!   keys, for actions that need a hold (the pilus).
+//! - **Bindings** on the Run screen: the slots are on the mouse buttons (left,
+//!   right, back, forward; `SLOT_LABELS`), with keys 1-4 as a second binding.
+//!   `SlotHeld` follows them, for actions that need a hold (the pilus). Shift
+//!   fires the flagellum burst (`UseAction`), so WASD and the burst stay under
+//!   the left hand.
 //! - **Mouse aim**: the aim of the player's `ActionState` points from the cell
 //!   to the cursor (`aim_toward`). Without a cursor in the window, the old aim
 //!   (the last move direction) stays: the fallback for keyboard and gamepad.
@@ -11,7 +14,9 @@
 //! - **Membrane protein overlays** (`docs/art-direction.md`): one 56x56 sprite
 //!   for each protein, up to the caps of the display mode (`CellDisplay`), mounted on the rim at 0.95 x the radius and drawn above the cell. The
 //!   baked rows give the direction, so the game never turns or scales them.
-//!   They play `idle`; `use` once on the action; the adhesin loops `hold`.
+//!   A flagellum trails the heading (the move direction); the proteins of aimed
+//!   actions point at the cursor. They play `idle`; `use` once on the action;
+//!   the adhesin loops `hold`.
 //! - **Shelters**: a darker, calm disc on the water. It uses the water colours
 //!   of the art doc; the art owner may replace it with a sprite.
 
@@ -56,8 +61,17 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-// --- Hotkeys ---
+// --- Bindings ---
 
+/// The mouse button of each slot (see `SLOT_LABELS`).
+const SLOT_BUTTONS: [MouseButton; SLOT_COUNT] = [
+    MouseButton::Left,
+    MouseButton::Right,
+    MouseButton::Back,
+    MouseButton::Forward,
+];
+
+/// The second binding of each slot.
 const SLOT_KEYS: [KeyCode; SLOT_COUNT] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
@@ -65,26 +79,39 @@ const SLOT_KEYS: [KeyCode; SLOT_COUNT] = [
     KeyCode::Digit4,
 ];
 
-/// Presses and holds of the slot keys. Only the Run screen takes them: in
-/// Manage the keys are for the editor, so nothing is held.
+/// The keys of the flagellum burst.
+const BURST_KEYS: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
+
+/// Presses and holds of the slot buttons, and the burst key. Only the Run
+/// screen takes them: in Manage the mouse and keys are for the editor, so
+/// nothing is held.
 fn slot_hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     mut held: Query<&mut SlotHeld, With<Cell>>,
     mut orders: MessageWriter<UseSlot>,
+    mut direct: MessageWriter<UseAction>,
 ) {
     let on_run = *state.get() == GameState::Run;
     for controlled in &players {
         let mut now = [false; SLOT_COUNT];
-        for (slot, key) in SLOT_KEYS.iter().enumerate() {
-            now[slot] = on_run && keys.pressed(*key);
-            if on_run && keys.just_pressed(*key) {
+        for slot in 0..SLOT_COUNT {
+            let (button, key) = (SLOT_BUTTONS[slot], SLOT_KEYS[slot]);
+            now[slot] = on_run && (mouse.pressed(button) || keys.pressed(key));
+            if on_run && (mouse.just_pressed(button) || keys.just_pressed(key)) {
                 orders.write(UseSlot {
                     cell: controlled.0,
                     slot,
                 });
             }
+        }
+        if on_run && keys.any_just_pressed(BURST_KEYS) {
+            direct.write(UseAction {
+                cell: controlled.0,
+                kind: ActionKind::FlagellumBurst,
+            });
         }
         if let Ok(mut held) = held.get_mut(controlled.0)
             && held.0 != now
@@ -173,13 +200,23 @@ pub fn overlay_sprite(protein: MembraneProtein) -> Option<&'static str> {
     }
 }
 
+/// Does the overlay of a protein point at the cursor? These are the proteins
+/// of the aimed actions (`ActionKind::needs_aim`).
+pub fn tracks_aim(protein: MembraneProtein) -> bool {
+    matches!(
+        protein,
+        MembraneProtein::Toxin | MembraneProtein::Pilus | MembraneProtein::Injector | MembraneProtein::Lytic
+    )
+}
+
 /// Most overlays of one protein on a cell, under the caps of the display mode.
-/// The pilus and the injector point along the aim, so a second one would lie on
-/// the first.
+/// An overlay that points along the aim has one place, so a second one would
+/// lie on the first.
 pub fn max_overlays_of(protein: MembraneProtein, caps: OverlayCaps) -> u32 {
-    match protein {
-        MembraneProtein::Pilus | MembraneProtein::Injector => caps.per_protein.min(1),
-        _ => caps.per_protein,
+    if tracks_aim(protein) {
+        caps.per_protein.min(1)
+    } else {
+        caps.per_protein
     }
 }
 
@@ -238,12 +275,13 @@ pub fn overlay_clip(protein: MembraneProtein, state: &ActionState) -> &'static s
     }
 }
 
-/// The row of an overlay. A flagellum points away from where the cell goes. A
-/// pilus and an injector point along the aim.
-pub fn overlay_row(protein: MembraneProtein, index: usize, count: usize, aim: Vec2) -> usize {
+/// The row of an overlay. A flagellum trails the heading (it points away from
+/// where the cell goes). The proteins of aimed actions point at the cursor
+/// (`tracks_aim`). The others are spaced round the rim.
+pub fn overlay_row(protein: MembraneProtein, index: usize, count: usize, state: &ActionState) -> usize {
     match protein {
-        MembraneProtein::Flagellum => opposite_row(direction_row(aim)),
-        MembraneProtein::Pilus | MembraneProtein::Injector => direction_row(aim),
+        MembraneProtein::Flagellum => opposite_row(direction_row(state.heading)),
+        p if tracks_aim(p) => direction_row(state.aim),
         _ => spaced_row(index, count),
     }
 }
@@ -311,7 +349,7 @@ fn drive_overlays(
         let Ok((cell, size, state, plan)) = cells.get(parent.parent()) else {
             continue;
         };
-        let row = overlay_row(overlay.protein, overlay.index, plan.0.len(), state.aim);
+        let row = overlay_row(overlay.protein, overlay.index, plan.0.len(), state);
         animator.row = row;
         animator.play(overlay_clip(overlay.protein, state), &sheets);
         let mount = (row_direction(row) * MOUNT_FRACTION * world_radius(size)).round();
@@ -429,11 +467,43 @@ mod tests {
         }
     }
 
+    /// A state that moves east and aims north.
+    fn east_aim_north() -> ActionState {
+        ActionState {
+            heading: Vec2::X,
+            aim: Vec2::Y,
+            ..default()
+        }
+    }
+
     #[test]
-    fn a_flagellum_points_away_from_the_aim() {
-        // Aim east (row 0): the flagellum points west (row 4).
-        assert_eq!(overlay_row(MembraneProtein::Flagellum, 0, 1, Vec2::X), 4);
-        assert_eq!(overlay_row(MembraneProtein::Toxin, 0, 1, Vec2::X), spaced_row(0, 1));
+    fn a_flagellum_trails_the_heading_not_the_cursor() {
+        // Heading east (row 0): the flagellum points west (row 4).
+        let state = east_aim_north();
+        assert_eq!(overlay_row(MembraneProtein::Flagellum, 0, 1, &state), 4);
+        assert_eq!(overlay_row(MembraneProtein::Adhesin, 0, 1, &state), spaced_row(0, 1));
+    }
+
+    #[test]
+    fn aimed_proteins_point_at_the_cursor() {
+        let state = east_aim_north();
+        for protein in [
+            MembraneProtein::Toxin,
+            MembraneProtein::Pilus,
+            MembraneProtein::Injector,
+            MembraneProtein::Lytic,
+        ] {
+            assert_eq!(overlay_row(protein, 1, 3, &state), direction_row(Vec2::Y), "{protein:?}");
+            assert_eq!(max_overlays_of(protein, CAPS), 1, "{protein:?}");
+        }
+        assert!(!tracks_aim(MembraneProtein::Flagellum));
+        assert_eq!(max_overlays_of(MembraneProtein::Flagellum, CAPS), CAPS.per_protein);
+    }
+
+    #[test]
+    fn the_slot_bindings_have_one_label_each() {
+        assert_eq!(SLOT_BUTTONS.len(), SLOT_LABELS.len());
+        assert_eq!(SLOT_BUTTONS[0], MouseButton::Left);
     }
 
     #[test]
@@ -477,8 +547,10 @@ mod tests {
 
     #[test]
     fn a_pilus_and_an_injector_point_along_the_aim_with_one_overlay_each() {
-        assert_eq!(overlay_row(MembraneProtein::Pilus, 0, 3, Vec2::Y), direction_row(Vec2::Y));
-        assert_eq!(overlay_row(MembraneProtein::Injector, 2, 3, Vec2::NEG_X), direction_row(Vec2::NEG_X));
+        let north = ActionState { aim: Vec2::Y, ..default() };
+        let west = ActionState { aim: Vec2::NEG_X, ..default() };
+        assert_eq!(overlay_row(MembraneProtein::Pilus, 0, 3, &north), direction_row(Vec2::Y));
+        assert_eq!(overlay_row(MembraneProtein::Injector, 2, 3, &west), direction_row(Vec2::NEG_X));
         let plan = overlay_plan(&proteome(&[
             (MembraneProtein::Pilus, 3),
             (MembraneProtein::Injector, 2),

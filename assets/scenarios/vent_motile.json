@@ -3,7 +3,7 @@
   "seed": 1,
   "membrane": { "Flagellum": 3, "Transporter": 1 },
   "actions": [
-    "FlagellumBurst",
+    null,
     null,
     null,
     "InduceMutation"

@@ -5,7 +5,7 @@
   "enzymes": { "LightCapture": 1, "Catalase": 1 },
   "membrane": { "Flagellum": 1 },
   "actions": [
-    "FlagellumBurst",
+    null,
     null,
     null,
     "InduceMutation"

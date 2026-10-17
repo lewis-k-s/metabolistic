@@ -12,11 +12,18 @@
 //! (fat storage, protein synthesis, refill blocks) keep setting `Drive` on
 //! their own.
 //!
-//! **Action slots** (`ActionBar`): `SLOT_COUNT` hotkeys, for active skills
-//! only. A slot holds one `ActionKind`:
+//! **Action slots** (`ActionBar`): `SLOT_COUNT` slots on the mouse buttons
+//! (`SLOT_LABELS`: left, right and the two side buttons), for active skills
+//! only. A slot holds one `ActionKind`.
 //!
-//! - **Flagellum burst**: thrust x`BURST_THRUST_MULTIPLIER` for `BURST_SECONDS`,
-//!   then a cooldown. Needs a flagellum.
+//! **Flagellum burst** is not a slot: Shift fires it (`UseAction`). Thrust
+//! x`BURST_THRUST_MULTIPLIER` for `BURST_SECONDS`, then a cooldown. Needs a
+//! flagellum.
+//!
+//! **Two directions**: the `heading` is the move direction (WASD), and the
+//! `aim` is the cursor. The flagellum trails the heading; the aimed actions
+//! (toxin, pilus, injector, lyse) use the aim.
+//!
 //! - **Adhesin**: a toggle. While held, the body does not move (thrust is
 //!   ignored and damping is high) and the cell pays ATP each second. Needs an
 //!   adhesin.
@@ -52,6 +59,11 @@ use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 
 /// Number of action slots.
 pub const SLOT_COUNT: usize = 4;
+/// The binding of each slot, for the HUD and the editor: left and right mouse
+/// buttons, then the back (mouse 4) and forward (mouse 5) side buttons.
+pub const SLOT_LABELS: [&str; SLOT_COUNT] = ["LMB", "RMB", "M4", "M5"];
+/// The binding of the flagellum burst, for the HUD.
+pub const BURST_LABEL: &str = "Shift";
 /// Drive of a pathway at level Low.
 pub const LOW_LEVEL: f32 = 0.5;
 /// Drive of a pathway at level High.
@@ -196,8 +208,9 @@ pub fn set_pathway_level(
 
 // --- The bar ---
 
-/// What a slot can hold: an active skill. Pathway levels are not here (see
-/// `SetPathwayLevel`).
+/// An active skill. A slot can hold all of them except the flagellum burst,
+/// which has its own key (see `available_actions`). Pathway levels are not
+/// here (see `SetPathwayLevel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActionKind {
     FlagellumBurst,
@@ -251,8 +264,8 @@ pub struct ActionBar {
     pub slots: [Option<ActionKind>; SLOT_COUNT],
 }
 
-/// The bar of a new vent cell: induced mutation in slot 4. Slots 1-3 are free
-/// for the actions of membrane proteins.
+/// The bar of a new vent cell: induced mutation on the forward side button. The
+/// other slots are free for the actions of membrane proteins.
 pub fn starter_action_bar() -> ActionBar {
     ActionBar {
         slots: [None, None, None, Some(ActionKind::InduceMutation)],
@@ -260,11 +273,11 @@ pub fn starter_action_bar() -> ActionBar {
 }
 
 /// Everything the cell can put in a slot now: the actions of its membrane
-/// proteins, then induced mutation.
+/// proteins, then induced mutation. The flagellum burst is not in the list: it
+/// is on Shift.
 pub fn available_actions(proteome: &Proteome) -> Vec<ActionKind> {
     let mut out = Vec::new();
     for action in [
-        ActionKind::FlagellumBurst,
         ActionKind::Adhesin,
         ActionKind::Toxin,
         ActionKind::Pilus,
@@ -315,10 +328,13 @@ pub struct ActionState {
     pub injector_flash: f32,
     /// Seconds until the injector can fire again.
     pub injector_cooldown: f32,
-    /// The aim (a unit vector). Bursts, shots, the pilus and the injector use
+    /// The aim (a unit vector). Shots, lysis, the pilus and the injector use
     /// it. On the Run screen it follows the cursor (see `aim_toward`); without
     /// a cursor it is the last move direction.
     pub aim: Vec2,
+    /// The last move direction (a unit vector). The flagellum trails it, and a
+    /// burst without input goes along it.
+    pub heading: Vec2,
     /// True while the body touches a wall tile (set by `walls`).
     pub on_wall: bool,
 }
@@ -336,6 +352,7 @@ impl Default for ActionState {
             injector_flash: 0.0,
             injector_cooldown: 0.0,
             aim: Vec2::X,
+            heading: Vec2::X,
             on_wall: false,
         }
     }
@@ -389,10 +406,12 @@ impl ActionState {
         }
     }
 
-    /// Sets the aim from a move input. A zero input keeps the old aim.
-    pub fn aim_at(&mut self, input: Vec2) {
+    /// Sets the heading from a move input, and the aim too (the cursor then
+    /// overrides the aim). A zero input keeps both.
+    pub fn steer(&mut self, input: Vec2) {
         if input.length_squared() > 1e-6 {
-            self.aim = input.normalize();
+            self.heading = input.normalize();
+            self.aim = self.heading;
         }
     }
 
@@ -404,7 +423,7 @@ impl ActionState {
 }
 
 /// Which action slots the player holds down now. The Run screen sets it from the
-/// keys. Press actions use `UseSlot`; the pilus also reads the hold.
+/// mouse buttons. Press actions use `UseSlot`; the pilus also reads the hold.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotHeld(pub [bool; SLOT_COUNT]);
 
@@ -423,13 +442,14 @@ pub fn aim_toward(from: Vec2, cursor: Vec2, fallback: Vec2) -> Vec2 {
 }
 
 /// The thrust force of a body. A held adhesin ignores the input. During a burst
-/// the thrust is multiplied, and without input the burst goes along the aim.
+/// the thrust is multiplied, and without input the burst goes along the
+/// heading.
 pub fn action_thrust(input: Vec2, capacity: f32, state: &ActionState) -> Vec2 {
     if state.adhesin_held {
         return Vec2::ZERO;
     }
     let direction = if state.bursting() && input.length_squared() < 1e-6 {
-        state.aim
+        state.heading
     } else {
         input
     };
@@ -496,6 +516,23 @@ pub fn slot_status(
         ActionKind::InduceMutation => format!("{INDUCE_ATP} ATP, risky"),
     };
     format!("{}: {detail}", kind.name())
+}
+
+/// The HUD line of a slot: its binding and its status.
+pub fn slot_line(slot: usize, bar: &ActionBar, state: &ActionState, proteome: &Proteome) -> String {
+    let kind = bar.slots.get(slot).copied().flatten();
+    format!("[{}] {}", SLOT_LABELS[slot], slot_status(kind, state, proteome))
+}
+
+/// The HUD line of the flagellum burst. Empty without a flagellum.
+pub fn burst_line(state: &ActionState, proteome: &Proteome) -> String {
+    if !has_protein(proteome, MembraneProtein::Flagellum) {
+        return String::new();
+    }
+    format!(
+        "[{BURST_LABEL}] {}",
+        slot_status(Some(ActionKind::FlagellumBurst), state, proteome)
+    )
 }
 
 // --- Using a slot ---
@@ -628,6 +665,14 @@ pub struct SetPathwayLevel {
     pub level: Level,
 }
 
+/// Asks a cell to use an action that is not in a slot: the flagellum burst on
+/// Shift.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct UseAction {
+    pub cell: Entity,
+    pub kind: ActionKind,
+}
+
 /// A toxin shot. The world spawns a droplet.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct FireToxin {
@@ -654,10 +699,11 @@ pub struct ToxinDroplet {
     pub age: f32,
 }
 
-/// Applies `UseSlot` messages.
+/// Applies `UseSlot` and `UseAction` messages.
 #[allow(clippy::type_complexity)]
 pub fn use_slot_system(
     mut orders: MessageReader<UseSlot>,
+    mut direct: MessageReader<UseAction>,
     mut fired: MessageWriter<FireToxin>,
     mut lyse: MessageWriter<LyseOrder>,
     mut cells: Query<
@@ -674,9 +720,17 @@ pub fn use_slot_system(
         With<Cell>,
     >,
 ) {
-    for order in orders.read() {
+    let mut uses: Vec<(Entity, ActionKind)> = orders
+        .read()
+        .filter_map(|order| {
+            let (bar, ..) = cells.get(order.cell).ok()?;
+            Some((order.cell, bar.slots.get(order.slot).copied().flatten()?))
+        })
+        .collect();
+    uses.extend(direct.read().map(|order| (order.cell, order.kind)));
+    for (cell, kind) in uses {
         let Ok((
-            bar,
+            _,
             mut pools,
             mut ledger,
             mut state,
@@ -684,11 +738,8 @@ pub fn use_slot_system(
             mut induced,
             genome,
             proteome,
-        )) = cells.get_mut(order.cell)
+        )) = cells.get_mut(cell)
         else {
-            continue;
-        };
-        let Some(kind) = bar.slots.get(order.slot).copied().flatten() else {
             continue;
         };
         let before = pools.clone();
@@ -705,17 +756,17 @@ pub fn use_slot_system(
         match result {
             UseResult::Fired(direction) => {
                 fired.write(FireToxin {
-                    cell: order.cell,
+                    cell,
                     direction,
                 });
             }
             UseResult::Lyse(direction) => {
                 lyse.write(LyseOrder {
-                    cell: order.cell,
+                    cell,
                     direction,
                 });
             }
-            UseResult::Refused(why) => debug!("Slot {} refused: {why:?}", order.slot + 1),
+            UseResult::Refused(why) => debug!("{} refused: {why:?}", kind.name()),
             UseResult::Done => {}
         }
     }
@@ -792,6 +843,7 @@ pub struct ActionsPlugin;
 impl Plugin for ActionsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<UseSlot>()
+            .add_message::<UseAction>()
             .add_message::<SetPathwayLevel>()
             .add_message::<FireToxin>()
             .add_message::<LyseOrder>()
@@ -928,6 +980,8 @@ mod tests {
         let mut proteome = Proteome::default();
         assert_eq!(available_actions(&proteome), vec![ActionKind::InduceMutation]);
         proteome.add(ProteinTarget::Membrane(MembraneProtein::Toxin));
+        // The flagellum burst is on Shift, not in a slot.
+        proteome.add(ProteinTarget::Membrane(MembraneProtein::Flagellum));
         assert_eq!(
             available_actions(&proteome),
             vec![ActionKind::Toxin, ActionKind::InduceMutation]
@@ -1007,15 +1061,18 @@ mod tests {
     }
 
     #[test]
-    fn a_burst_without_input_goes_along_the_aim() {
+    fn a_burst_without_input_goes_along_the_heading_not_the_cursor() {
         let mut state = ActionState::default();
-        state.aim_at(Vec2::new(0.0, 5.0));
+        state.steer(Vec2::new(0.0, 5.0));
+        // The cursor is to the west; the cell last moved north.
+        state.aim_toward(Vec2::ZERO, Vec2::new(-100.0, 0.0));
         state.burst_left = 1.0;
         assert_eq!(action_thrust(Vec2::ZERO, 300.0, &state), Vec2::new(0.0, 900.0));
         state.burst_left = 0.0;
         assert_eq!(action_thrust(Vec2::ZERO, 300.0, &state), Vec2::ZERO);
-        state.aim_at(Vec2::ZERO);
-        assert_eq!(state.aim, Vec2::Y, "zero input keeps the aim");
+        state.steer(Vec2::ZERO);
+        assert_eq!(state.heading, Vec2::Y, "zero input keeps the heading");
+        assert_eq!(state.aim, Vec2::NEG_X, "zero input keeps the aim");
     }
 
     #[test]
@@ -1051,7 +1108,7 @@ mod tests {
         let mut rig = Rig::new();
         rig.proteome
             .add(ProteinTarget::Membrane(MembraneProtein::Toxin));
-        rig.state.aim_at(Vec2::NEG_X);
+        rig.state.aim_toward(Vec2::ZERO, Vec2::new(-50.0, 0.0));
         assert_eq!(
             rig.use_action(ActionKind::Toxin),
             UseResult::Fired(Vec2::NEG_X)
@@ -1079,6 +1136,18 @@ mod tests {
         state.burst_left = 0.0;
         state.burst_cooldown = 2.5;
         assert!(slot_status(burst, &state, &proteome).contains("cooldown 2.5"));
+    }
+
+    #[test]
+    fn hud_lines_name_the_binding() {
+        let state = ActionState::default();
+        let mut proteome = Proteome::default();
+        let bar = starter_action_bar();
+        assert_eq!(slot_line(0, &bar, &state, &proteome), "[LMB] empty");
+        assert!(slot_line(3, &bar, &state, &proteome).starts_with("[M5] Induce mutation"));
+        assert_eq!(burst_line(&state, &proteome), "", "no flagellum, no line");
+        proteome.add(ProteinTarget::Membrane(MembraneProtein::Flagellum));
+        assert!(burst_line(&state, &proteome).starts_with("[Shift] Flagellum burst: ready"));
     }
 
     #[test]
@@ -1118,8 +1187,9 @@ mod tests {
         state.aim_toward(Vec2::ZERO, Vec2::new(300.0, 400.0));
         assert_abs_diff_eq!(state.aim.length(), 1.0, epsilon = 1e-5);
         // Without a cursor, the move direction sets the aim (the fallback).
-        state.aim_at(Vec2::new(-1.0, 0.0));
+        state.steer(Vec2::new(-1.0, 0.0));
         assert_eq!(state.aim, Vec2::NEG_X);
+        assert_eq!(state.heading, Vec2::NEG_X);
     }
 
     #[test]

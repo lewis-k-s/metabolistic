@@ -3,9 +3,9 @@
   "seed": 1,
   "membrane": { "Flagellum": 2, "Pilus": 1, "Injector": 1 },
   "actions": [
-    "FlagellumBurst",
     "Pilus",
     "Injector",
+    null,
     "InduceMutation"
   ],
   "pools": { "ATP": 300, "Metals": 10 }

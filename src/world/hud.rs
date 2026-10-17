@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::actions::{ActionBar, ActionState, SLOT_COUNT, slot_status};
+use crate::actions::{ActionBar, ActionState, SLOT_COUNT, burst_line, slot_line};
 use crate::cell::Cell;
 use crate::desiccation::{CuticleShield, Hydration};
 use crate::level::CurrentLevel;
@@ -86,9 +86,13 @@ pub fn cuticle_line(shield: f32) -> String {
     format!("Cuticle    shield {:3.0}%", shield * 100.0)
 }
 
-/// One slot of the action bar (0-based).
+/// One line of the action bar: the burst, or a slot (0-based).
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-struct HudSlot(usize);
+enum HudSlot {
+    /// The flagellum burst on Shift. Empty without a flagellum.
+    Burst,
+    Slot(usize),
+}
 
 const LINES: [HudLine; 17] = [
     HudLine::Stage,
@@ -148,8 +152,9 @@ fn spawn_hud(mut commands: Commands) {
             DespawnOnExit(GameState::Run),
         ))
         .with_children(|parent| {
+            parent.spawn((HudSlot::Burst, label("", 18.0)));
             for slot in 0..SLOT_COUNT {
-                parent.spawn((HudSlot(slot), label("", 18.0)));
+                parent.spawn((HudSlot::Slot(slot), label("", 18.0)));
             }
         });
 }
@@ -214,8 +219,10 @@ fn update_hud(
         return;
     };
     for (slot, mut text) in &mut slots {
-        let kind = bar.slots.get(slot.0).copied().flatten();
-        text.0 = format!("[{}] {}", slot.0 + 1, slot_status(kind, actions, proteome));
+        text.0 = match slot {
+            HudSlot::Burst => burst_line(actions, proteome),
+            HudSlot::Slot(slot) => slot_line(*slot, bar, actions, proteome),
+        };
     }
     for (line, mut text) in &mut lines {
         text.0 = match line {

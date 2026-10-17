@@ -32,7 +32,7 @@
 //! | `genes`        | Gene states that replace the starter ones: `{"Catalase": "Expressed"}`.     |
 //! | `enzymes`      | Enzyme counts that replace the starter ones: `{"Catalase": 1}`.             |
 //! | `membrane`     | Membrane protein counts: `{"Flagellum": 3}`. The starter cell has none.     |
-//! | `actions`      | The action slots, 4 entries: `["FlagellumBurst", null]`. Default: starter bar. |
+//! | `actions`      | The action slots (LMB, RMB, M4, M5): `["Pilus", null]`. Default: starter bar. |
 //! | `pools`        | Pool values that replace the starter ones: `{"ATP": 400}`.                  |
 //! | `codex`        | Genes to put into the (in-memory) codex.                                    |
 //! | `invulnerable` | The cell cannot die or be engulfed.                                         |
@@ -479,7 +479,8 @@ mod tests {
     fn motile_preset_has_three_flagella() {
         let scenario = load(&resolve_path("vent_motile", &assets_dir())).unwrap();
         assert_eq!(scenario.carry().proteome.count(ProteinTarget::Membrane(MembraneProtein::Flagellum)), 3);
-        assert!(scenario.carry().action_bar.slots.contains(&Some(ActionKind::FlagellumBurst)));
+        // The burst is on Shift, not in a slot.
+        assert!(!scenario.carry().action_bar.slots.contains(&Some(ActionKind::FlagellumBurst)));
     }
 
     #[test]

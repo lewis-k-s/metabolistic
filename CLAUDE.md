@@ -20,7 +20,7 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `molecules.rs`: Currency system for the 9 internal pools
 - `envgrid.rs`: `EnvGrid`, the spatial grid (Heat, Minerals): pure diffusion, drift, source and decay steps, sampling
 - `exchange.rs`: grid <-> cell exchange (mineral uptake, heat damage, movement ATP cost) in the metabolic tick
-- `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold to reel, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on slot 2, injector on slot 3)
+- `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold to reel, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on the left mouse button, injector on the right). Bindings on the Run screen: WASD moves, Shift is the flagellum burst, the four action slots are the left, right, back and forward mouse buttons (keys 1-4 also work). The flagellum trails the move direction (`ActionState::heading`); aimed proteins point at the cursor (`aim`)
 - `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
 - `level.rs`: the hand-built vent field
 - `run.rs`: death detection and `RunSummary`

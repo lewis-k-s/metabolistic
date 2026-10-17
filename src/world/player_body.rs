@@ -135,7 +135,8 @@ pub fn attach_body_for(
     ));
 }
 
-/// WASD sets the wanted direction on the Run screen, and the aim of the actions.
+/// WASD sets the wanted direction on the Run screen, and the heading of the
+/// actions.
 /// In Manage, time may run but the keys are for the editor, so the cell stops
 /// pushing.
 pub fn read_move_input(
@@ -157,7 +158,7 @@ pub fn read_move_input(
     for controlled in &players {
         if let Ok((mut input, mut actions)) = inputs.get_mut(controlled.0) {
             input.0 = direction;
-            actions.aim_at(direction);
+            actions.steer(direction);
         }
     }
 }

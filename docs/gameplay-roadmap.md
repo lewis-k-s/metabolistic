@@ -85,9 +85,11 @@ reaches zero.
 - Regulation is fast, like gene expression. Pathway levels (Off / Low /
   High) are set on the metabolic map (Manage screen): click the valve on a
   plate, or use the level buttons in the side panel. Each change has a short
-  ramp time and a small ATP cost. About **4 action slots** with hotkeys hold
-  active skills only (flagellum burst, toxin, adhesin, pilus, injector, lyse,
-  induced mutation). (2026-10-17: pathways moved out of the slots.)
+  ramp time and a small ATP cost. **4 action slots** on the mouse buttons
+  (left, right, back, forward) hold active skills only (toxin, adhesin, pilus,
+  injector, lyse, induced mutation). Shift is the flagellum burst. (2026-10-17:
+  pathways moved out of the slots. 2026-10-18: slots moved from keys 1-4 to
+  the mouse buttons, burst to Shift.)
 
 ### Pathway competition (solver change)
 
@@ -348,10 +350,13 @@ Notes:
   `Enhanced` (x1.25; repair of integrity leaves it, but a later mutation, UV or induced, turns it to `Mutated`, and repair then gives `Expressed`: the bonus is lost). UV mutations never enhance.
 - Since 2026-10-17 a pathway level is not a slot: `SetPathwayLevel` from the
   map sets it, and a pathway with no level set runs at High.
-- Starter bar: slot 4 Induce mutation, slots 1-3 empty. Hotkeys 1-4 on
-  Run; in Manage they re-assign the slot. Overlays: flagellum, adhesin, toxin,
+- Starter bar: Induce mutation on the forward side button (slot 4), the other
+  slots empty. On Run the slots are the left, right, back and forward mouse
+  buttons (keys 1-4 also work); Shift is the flagellum burst, not a slot. In
+  Manage keys 1-4 re-assign the slot. Overlays: flagellum, adhesin, toxin,
   mineral transporter (idle only), max 2 of a kind and 6 in all. The flagellum
-  points away from the aim.
+  trails the heading (the move direction). Toxin, pilus, injector and lytic
+  overlays point at the cursor, one of each.
 - Editor ETA uses the last tick's synthesis rate, or the ribosome estimate
   when the queue was empty.
 

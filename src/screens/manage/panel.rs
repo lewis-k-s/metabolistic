@@ -206,7 +206,7 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
             title: "Cell map".into(),
             lines: vec![
                 line(
-                    "Click a pathway plate for its rates, enzymes and level, or a socket in the membrane to add proteins. Click the valve on a plate to turn the pathway Off, Low or High. Keys 1-4 put active skills in the action slots.",
+                    "Click a pathway plate for its rates, enzymes and level, or a socket in the membrane to add proteins. Click the valve on a plate to turn the pathway Off, Low or High. Keys 1-4 (or a click on a slot) put active skills in the action slots: left, right, back and forward mouse buttons on the Run screen. Shift is the flagellum burst.",
                     TEXT,
                 ),
                 line(

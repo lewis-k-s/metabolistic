@@ -3,9 +3,9 @@
   "seed": 1,
   "membrane": { "Flagellum": 3, "Adhesin": 1, "Toxin": 1, "Transporter": 1 },
   "actions": [
-    "FlagellumBurst",
-    "Adhesin",
     "Toxin",
+    "Adhesin",
+    null,
     "InduceMutation"
   ],
   "pools": { "ATP": 500, "AminoAcids": 60, "Lipids": 60 }
