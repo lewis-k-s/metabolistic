@@ -29,7 +29,7 @@ use crate::GameState;
 use crate::cell::{Cell, CellSize, membrane_slots};
 use crate::codex::Codex;
 use crate::codex_catalog::{
-    Badge, CodexContext, CodexEntry, Edit, EditMode, EntryId, EntryState, Filter, Icon, badge,
+    Badge, Category, CodexContext, CodexEntry, Edit, EditMode, EntryId, EntryState, Filter, Icon, badge,
     edit_options, entry, entry_state, grouped,
 };
 use crate::blocks::genome::Genome;
@@ -54,6 +54,8 @@ pub(super) fn plugin(app: &mut App) {
                 redraw_grid,
                 redraw_detail,
                 hover_cards,
+                highlight_cards,
+                scroll_grid,
                 codex_buttons,
             )
                 .chain(),
@@ -94,7 +96,7 @@ enum CodexAction {
 
 // --- Colours ---
 
-const BG: Color = Color::srgba(0.02, 0.03, 0.07, 0.97);
+const BG: Color = Color::srgb(0.02, 0.03, 0.07);
 const CARD_BG: Color = Color::srgb(0.1, 0.12, 0.16);
 const CARD_BG_UNKNOWN: Color = Color::srgb(0.06, 0.06, 0.08);
 const BUTTON_BG: Color = Color::srgb(0.15, 0.15, 0.15);
@@ -103,9 +105,15 @@ const DIM: Color = Color::srgb(0.55, 0.58, 0.62);
 const GOOD: Color = Color::srgb(0.45, 0.85, 0.5);
 const BAD: Color = Color::srgb(0.9, 0.4, 0.35);
 const GOLD: Color = Color::srgb(0.95, 0.8, 0.35);
-const CARD_W: f32 = 88.0;
-const CARD_H: f32 = 92.0;
-const CARDS_PER_ROW: f32 = 5.0;
+const CARD_BG_PLANNED: Color = Color::srgb(0.09, 0.08, 0.12);
+const CARD_SELECTED: Color = Color::srgb(0.2, 0.26, 0.36);
+const OUTLINE_UNKNOWN: Color = Color::srgba(0.55, 0.58, 0.62, 0.35);
+const PLANNED_EDGE: Color = Color::srgb(0.5, 0.42, 0.7);
+const CARD_W: f32 = 132.0;
+const CARD_H: f32 = 156.0;
+/// The icon is drawn at a whole multiple of its 16 px art, so pixels stay crisp.
+const CARD_ICON: f32 = 80.0;
+const DETAIL_ICON: f32 = 96.0;
 
 fn badge_color(badge: Badge) -> Color {
     match badge {
@@ -334,19 +342,19 @@ fn lifecycle(ui: Res<CodexUi>, roots: Query<Entity, With<CodexRoot>>, mut comman
                     GridBox,
                     Node {
                         flex_grow: 1.0,
-                        flex_wrap: FlexWrap::Wrap,
-                        align_content: AlignContent::FlexStart,
-                        align_items: AlignItems::FlexStart,
-                        column_gap: Val::Px(18.0),
+                        flex_basis: Val::Px(0.0),
+                        flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(10.0),
-                        overflow: Overflow::clip(),
+                        overflow: Overflow::scroll_y(),
                         ..default()
                     },
+                    ScrollPosition::default(),
                 ));
                 body.spawn((
                     DetailBox,
                     Node {
-                        width: Val::Px(400.0),
+                        width: Val::Px(360.0),
+                        flex_shrink: 0.0,
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(5.0),
                         padding: UiRect::all(Val::Px(12.0)),
@@ -393,7 +401,8 @@ fn icon_image(icon: Icon, server: &AssetServer, sheets: Option<&Sheets>) -> Opti
     }
 }
 
-/// An icon box: the image, a silhouette (unknown), or a labelled tile (no art).
+/// An icon box: the image, a dim outline with "?" (unknown), or a labelled
+/// tile (no art). `size` is a whole multiple of the art, so pixels stay crisp.
 fn spawn_icon(
     parent: &mut ChildSpawnerCommands,
     entry: &CodexEntry,
@@ -403,17 +412,19 @@ fn spawn_icon(
     sheets: Option<&Sheets>,
 ) {
     let node = Node { width: Val::Px(size), height: Val::Px(size), ..default() };
-    match icon_image(entry.icon, server, sheets) {
-        Some(mut image) => {
-            // An unknown entry is a black silhouette.
-            image.color = if known { Color::WHITE } else { Color::BLACK };
+    let planned = entry.category == Category::Planned;
+    let image = if known { icon_image(entry.icon, server, sheets) } else { None };
+    match image {
+        Some(image) => {
             parent.spawn((node, image));
         }
         None => {
-            let text: String = if known {
-                entry.name.chars().take(3).collect::<String>().to_uppercase()
+            let (text, edge, color) = if !known {
+                ("?".to_string(), OUTLINE_UNKNOWN, OUTLINE_UNKNOWN)
+            } else if planned {
+                (entry.name.chars().take(3).collect::<String>().to_uppercase(), PLANNED_EDGE, PLANNED_EDGE)
             } else {
-                "?".to_string()
+                (entry.name.chars().take(3).collect::<String>().to_uppercase(), DIM, DIM)
             };
             parent.spawn((
                 Node {
@@ -422,12 +433,12 @@ fn spawn_icon(
                     align_items: AlignItems::Center,
                     ..node
                 },
-                BorderColor::all(DIM),
-                BackgroundColor(Color::srgb(0.05, 0.05, 0.07)),
+                BorderColor::all(edge),
+                BackgroundColor(Color::NONE),
                 children![(
                     Text::new(text),
                     TextFont { font_size: FontSize::Px(size * 0.4), ..default() },
-                    TextColor(DIM),
+                    TextColor(color),
                 )],
             ));
         }
@@ -460,12 +471,7 @@ fn redraw_grid(
     for grid in &grids {
         commands.entity(grid).despawn_children().with_children(|grid| {
             for (category, entries) in grouped(ui.filter, &data.0) {
-                grid.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
-                    max_width: Val::Px(CARDS_PER_ROW * (CARD_W + 4.0)),
-                    ..default()
-                })
+                grid.spawn(Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(4.0), ..default() })
                 .with_children(|group| {
                     group.spawn((
                         Text::new(category.name()),
@@ -473,7 +479,7 @@ fn redraw_grid(
                         TextColor(GOLD),
                     ));
                     group
-                        .spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), ..default() })
+                        .spawn(Node { flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(6.0), row_gap: Val::Px(6.0), ..default() })
                         .with_children(|row| {
                             for e in &entries {
                                 let state = entry_state(e.id, &data.0);
@@ -503,25 +509,82 @@ fn spawn_card(
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
             justify_content: JustifyContent::SpaceBetween,
-            padding: UiRect::all(Val::Px(4.0)),
+            padding: UiRect::all(Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
-        BackgroundColor(if state.known { CARD_BG } else { CARD_BG_UNKNOWN }),
+        BackgroundColor(card_color(entry, state.known, false)),
+        BorderColor::all(if entry.category == Category::Planned { PLANNED_EDGE } else { Color::NONE }),
     ))
     .with_children(|card| {
-        spawn_icon(card, entry, state.known, 40.0, server, sheets);
+        spawn_icon(card, entry, state.known, CARD_ICON, server, sheets);
         card.spawn((
             Text::new(card_name(entry, state)),
-            TextFont { font_size: FontSize::Px(11.0), ..default() },
+            TextFont { font_size: FontSize::Px(14.0), ..default() },
             TextColor(if state.known { TEXT } else { DIM }),
             TextLayout::justify(Justify::Center),
         ));
         card.spawn((
             Text::new(badge_text(entry, state)),
-            TextFont { font_size: FontSize::Px(11.0), ..default() },
+            TextFont { font_size: FontSize::Px(14.0), ..default() },
             TextColor(badge_color(b)),
         ));
     });
+}
+
+fn card_color(entry: &CodexEntry, known: bool, selected: bool) -> Color {
+    if selected {
+        CARD_SELECTED
+    } else if entry.category == Category::Planned {
+        CARD_BG_PLANNED
+    } else if known {
+        CARD_BG
+    } else {
+        CARD_BG_UNKNOWN
+    }
+}
+
+/// The mouse wheel scrolls the card grid.
+fn scroll_grid(
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut grids: Query<(&mut ScrollPosition, &ComputedNode), With<GridBox>>,
+) {
+    use bevy::input::mouse::MouseScrollUnit;
+    let dy: f32 = wheel
+        .read()
+        .map(|w| match w.unit {
+            MouseScrollUnit::Line => w.y * 40.0,
+            MouseScrollUnit::Pixel => w.y,
+        })
+        .sum();
+    if dy == 0.0 {
+        return;
+    }
+    for (mut pos, node) in &mut grids {
+        let max = ((node.content_size().y - node.size().y) * node.inverse_scale_factor()).max(0.0);
+        pos.y = (pos.y - dy).clamp(0.0, max);
+    }
+}
+
+/// The shown card gets a light fill and a gold border.
+fn highlight_cards(
+    shown: Res<CodexShown>,
+    data: Res<CodexData>,
+    mut cards: Query<(&CodexCard, &mut BackgroundColor, &mut BorderColor)>,
+) {
+    for (card, mut bg, mut border) in &mut cards {
+        let e = entry(card.0);
+        let selected = shown.0 == Some(card.0);
+        let known = entry_state(card.0, &data.0).known;
+        bg.0 = card_color(&e, known, selected);
+        *border = BorderColor::all(if selected {
+            GOLD
+        } else if e.category == Category::Planned {
+            PLANNED_EDGE
+        } else {
+            Color::NONE
+        });
+    }
 }
 
 /// Builds the detail panel again when the entry or the data changes.
@@ -547,7 +610,7 @@ fn redraw_detail(
             };
             let e = entry(id);
             let state = entry_state(id, &data.0);
-            spawn_icon(panel, &e, state.known, 64.0, &server, sheets.as_deref());
+            spawn_icon(panel, &e, state.known, DETAIL_ICON, &server, sheets.as_deref());
             for (text, tone) in detail_lines(&e, &state) {
                 let (size, color) = match tone {
                     Tone::Title => (26.0, TEXT),
