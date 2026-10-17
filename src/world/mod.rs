@@ -17,6 +17,8 @@
 //! - `interior_view`: interior pieces of a cell (genome and pathways), display mode key.
 //! - `npc_view`: NPC bodies, particle sprites, death, engulf and victory clips.
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
+//! - `shader_cells`: spike, off by default: the player's body as an SDF shader
+//!   on a low-res canvas (F7).
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -44,6 +46,7 @@ pub mod interior_view;
 pub mod npc_view;
 pub mod pilus_view;
 pub mod player_body;
+pub mod shader_cells;
 pub mod walls_view;
 
 /// Collision layers of the world. Cells collide with the field walls and vents
@@ -90,6 +93,7 @@ pub fn plugin(app: &mut App) {
             interior_view::plugin,
             walls_view::plugin,
             npc_view::plugin,
+            shader_cells::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
         .add_systems(OnExit(InRun), (remove_grid, reset_background));

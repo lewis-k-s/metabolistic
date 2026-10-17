@@ -127,20 +127,25 @@ fn slot_hotkeys(
 fn cursor_world(
     windows: &Query<&Window>,
     cameras: &Query<(&Camera, &GlobalTransform), With<crate::screens::RunCamera>>,
+    canvas: &crate::world::shader_cells::Canvas,
 ) -> Option<Vec2> {
-    let cursor = windows.single().ok()?.cursor_position()?;
+    let window = windows.single().ok()?;
     let (camera, transform) = cameras.single().ok()?;
-    camera.viewport_to_world_2d(transform, cursor).ok()
+    if canvas.is_open() {
+        return crate::world::shader_cells::canvas_cursor_world(window, transform);
+    }
+    camera.viewport_to_world_2d(transform, window.cursor_position()?).ok()
 }
 
 /// Points the aim of the player's cell at the cursor.
 fn mouse_aim(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<crate::screens::RunCamera>>,
+    canvas: Res<crate::world::shader_cells::Canvas>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     mut cells: Query<(&Transform, &mut ActionState), With<Cell>>,
 ) {
-    let Some(cursor) = cursor_world(&windows, &cameras) else {
+    let Some(cursor) = cursor_world(&windows, &cameras, &canvas) else {
         return;
     };
     for controlled in &players {
