@@ -162,22 +162,10 @@ fn the_gate_gene_comes_with_one_free_enzyme_if_it_has_a_block() {
     assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 0);
     grant_gate_enzyme(&mut carry, BlockKind::LightCapture);
     assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1);
-    // The pathway is in the first empty action slot.
-    let action = ActionKind::Pathway(BlockKind::LightCapture);
-    assert_eq!(carry.action_bar.slots.iter().filter(|s| **s == Some(action)).count(), 1);
-    assert_eq!(carry.action_bar.slots[2], Some(action), "starter bar: slots 1 and 2 are taken");
-    // A second grant adds an enzyme but no second slot.
+    // The action bar is for active skills: the pathway does not go there.
+    assert_eq!(carry.action_bar, starter_carry(&BTreeSet::new()).action_bar);
     grant_gate_enzyme(&mut carry, BlockKind::LightCapture);
     assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 2);
-    assert_eq!(carry.action_bar.slots.iter().filter(|s| **s == Some(action)).count(), 1);
-    // A full bar stays as it is.
-    let mut full = starter_carry(&BTreeSet::new());
-    for slot in full.action_bar.slots.iter_mut() {
-        *slot = Some(ActionKind::InduceMutation);
-    }
-    grant_gate_enzyme(&mut full, BlockKind::LightCapture);
-    assert!(!full.action_bar.slots.contains(&Some(action)));
-    assert_eq!(full.proteome.count(ProteinTarget::Enzyme(BlockKind::LightCapture)), 1);
     // A gene with no block (Multicellularity) gets nothing.
     grant_gate_enzyme(&mut carry, BlockKind::Multicellularity);
     assert_eq!(carry.proteome.count(ProteinTarget::Enzyme(BlockKind::Multicellularity)), 0);

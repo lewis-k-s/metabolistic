@@ -49,7 +49,7 @@ use crate::engulf::Invulnerable;
 use crate::gate::GateProgress;
 use crate::npc::{Archetype, Npc};
 use crate::run::RunSummary;
-use crate::actions::{Level, PathwayLevels, UseSlot};
+use crate::actions::{Level, PathwayLevels};
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellSize, membrane_slots};
 use crate::environment::{Channel, LocalEnvironment};
@@ -321,7 +321,8 @@ fn release_forward(mut keys: ResMut<ButtonInput<KeyCode>>) {
     keys.release(KeyCode::KeyW);
 }
 
-/// The M4 checks: overlays, the editor queue, and a slot use.
+/// The M4 checks: overlays, the editor queue, and the pathway level set on the
+/// map (see `smoke_manage`).
 #[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
 fn smoke_actions(
     smoke: Res<SmokeTest>,
@@ -329,7 +330,6 @@ fn smoke_actions(
     players: Query<&ControlledCell, With<LocalPlayer>>,
     mut cells: Query<(&mut Proteome, &SynthesisQueue, &PathwayLevels, &CurrencyPools), With<Cell>>,
     mut queue: MessageWriter<QueueProtein>,
-    mut slots: MessageWriter<UseSlot>,
     npcs: Query<&Npc>,
     gates: Query<&GateProgress>,
     summary: Res<RunSummary>,
@@ -386,16 +386,14 @@ fn smoke_actions(
                 !order_queue.is_empty() || proteome.enzymes(BlockKind::Chemosynthesis) > 2,
                 "smoke test: the queued enzyme is neither in the queue nor built"
             );
-            let atp = pools.get(Currency::ATP);
-            slots.write(UseSlot { cell, slot: 0 });
             done[2] = true;
-            info!("smoke test: used slot 1 at ATP {atp:.1}");
+            info!("smoke test: back in the run at ATP {:.1}", pools.get(Currency::ATP));
         }
         STEP_RUN_AGAIN if done[2] && smoke.frames_in_step == 40 => {
             assert_eq!(
                 levels.level(BlockKind::Chemosynthesis),
-                Level::Off,
-                "smoke test: slot 1 did not switch the pathway off"
+                Level::Low,
+                "smoke test: the level set on the map did not stay in the run"
             );
         }
         STEP_GATE_VIEW if !done[4] && smoke.frames_in_step >= 2 => {
@@ -755,7 +753,9 @@ fn first_free_socket(world: &World, cell: Entity) -> Option<usize> {
 /// test has no pointer), and the + press is a real button press, so the
 /// panel, the buttons and the messages are all exercised.
 fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
-    use crate::screens::manage::{SmokePick, smoke_hover, smoke_probe, smoke_press_plus, smoke_select};
+    use crate::screens::manage::{
+        SmokePick, smoke_hover, smoke_press_level, smoke_probe, smoke_press_plus, smoke_select,
+    };
     if *world.resource::<State<GameState>>().get() != GameState::Manage {
         return;
     }
@@ -788,11 +788,23 @@ fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
             );
             smoke_press_plus(world, target);
         }
+        (STEP_MANAGE_PANEL, 20) => {
+            // Low, not Off: the limit check below needs the pathway to run.
+            assert!(
+                smoke_press_level(world, BlockKind::Chemosynthesis, Level::Low),
+                "smoke test: the panel of a pathway has no level buttons"
+            );
+        }
         (STEP_MANAGE_PANEL, 40) => {
             let probe = smoke_probe(world);
             assert_eq!(probe.panel_title.as_deref(), Some("Chemosynthesis"), "smoke test: the panel did not open");
             assert!(orders(world) > memory.orders_before, "smoke test: + queued no enzyme");
-            info!("smoke test: the panel of a pathway opened and + queued an enzyme");
+            assert_eq!(
+                world.get::<PathwayLevels>(cell).map(|l| l.level(BlockKind::Chemosynthesis)),
+                Some(Level::Low),
+                "smoke test: the Low button did not set the level"
+            );
+            info!("smoke test: the panel of a pathway opened, + queued an enzyme, Low set the level");
         }
         (STEP_MANAGE_SOCKET, 5) => {
             // A scenario cell can start with proteins, so pick the first empty

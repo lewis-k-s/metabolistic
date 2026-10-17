@@ -1,15 +1,20 @@
 //! # Live control: the action bar
 //!
-//! Regulation is fast, like gene expression. A cell has `SLOT_COUNT` action
-//! slots (`ActionBar`). A slot holds one `ActionKind`:
+//! Regulation is fast, like gene expression. There are two controls:
 //!
-//! - **Pathway**: an expressed block. Using the slot cycles its level
-//!   Off -> Low -> High -> Off (`Level`). The level is the target of the block's
-//!   `Throttle`, which ramps to it at `RAMP_PER_SEC` (capped at the gap, so it
-//!   never overshoots and does not depend on the tick length). Each level
-//!   change costs `LEVEL_CHANGE_ATP`; with too little ATP it does not happen.
-//!   The `Throttle` multiplies the solver's drive, so regulated blocks (fat
-//!   storage, protein synthesis, refill blocks) keep setting `Drive` on their own.
+//! **Pathway levels** (`PathwayLevels`): each expressed block runs at Off, Low
+//! or High (`Level`). The player sets the level on the metabolic map of the
+//! Manage screen (`SetPathwayLevel`), not with a hotkey. The level is the target
+//! of the block's `Throttle`, which ramps to it at `RAMP_PER_SEC` (capped at the
+//! gap, so it never overshoots and does not depend on the tick length). Each
+//! level change costs `LEVEL_CHANGE_ATP`; with too little ATP it does not
+//! happen. The `Throttle` multiplies the solver's drive, so regulated blocks
+//! (fat storage, protein synthesis, refill blocks) keep setting `Drive` on
+//! their own.
+//!
+//! **Action slots** (`ActionBar`): `SLOT_COUNT` hotkeys, for active skills
+//! only. A slot holds one `ActionKind`:
+//!
 //! - **Flagellum burst**: thrust x`BURST_THRUST_MULTIPLIER` for `BURST_SECONDS`,
 //!   then a cooldown. Needs a flagellum.
 //! - **Adhesin**: a toggle. While held, the body does not move (thrust is
@@ -24,8 +29,6 @@
 //! - **Lyse**: cuts the wall tile in contact (`walls`). 5 ATP. Needs a lytic protein.
 //! - **Induce mutation**: costs ATP, adds 1.0 to the `MutationLoad`, so a gene
 //!   mutates. It has a chance to give an `Enhanced` gene (see `genome_damage`).
-//!
-//! Passive pathway effects stay: only the drive level uses a slot.
 //!
 //! The rules are pure functions and methods. The systems fetch data and call
 //! them. The hotkeys and the droplet sprites are in `world` (full builds).
@@ -94,7 +97,7 @@ pub const INDUCE_LOAD: f32 = 1.0;
 
 // --- Levels ---
 
-/// The level of a pathway slot.
+/// The level of a pathway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Level {
     Off,
@@ -112,7 +115,7 @@ impl Level {
         }
     }
 
-    /// The level after a use of the slot: Off -> Low -> High -> Off.
+    /// The next level when the player clicks the valve: Off -> Low -> High -> Off.
     pub fn next(self) -> Level {
         match self {
             Level::Off => Level::Low,
@@ -131,24 +134,13 @@ impl Level {
 }
 
 /// The level that the player set for each pathway. A pathway with no entry is
-/// at High (normal). A pathway that is not in a slot always runs at High (see
-/// `effective_level`), so it cannot be stuck at Off.
+/// at High (normal).
 #[derive(Component, Default, Debug, Clone, PartialEq)]
 pub struct PathwayLevels(pub HashMap<BlockKind, Level>);
 
 impl PathwayLevels {
     pub fn level(&self, kind: BlockKind) -> Level {
         self.0.get(&kind).copied().unwrap_or(Level::High)
-    }
-}
-
-/// The level a pathway runs at: the level that the player set, if the pathway
-/// is in a slot of the bar. Otherwise High.
-pub fn effective_level(levels: &PathwayLevels, bar: &ActionBar, kind: BlockKind) -> Level {
-    if bar.slots.contains(&Some(ActionKind::Pathway(kind))) {
-        levels.level(kind)
-    } else {
-        Level::High
     }
 }
 
@@ -175,19 +167,39 @@ pub fn ramp(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
     }
 }
 
-/// A level change if the cell can pay for it: the new level and the ATP cost.
-/// `None` if there is too little ATP (the level stays).
-pub fn change_level(level: Level, atp: f32) -> Option<(Level, f32)> {
-    (atp >= LEVEL_CHANGE_ATP).then(|| (level.next(), LEVEL_CHANGE_ATP))
+/// Sets the level of a pathway and returns the ATP cost. The same level again
+/// is free. Refused if the gene is missing, silent or mutated, or if there is
+/// too little ATP (then nothing changes).
+pub fn set_pathway_level(
+    levels: &mut PathwayLevels,
+    pools: &mut CurrencyPools,
+    genome: &Genome,
+    kind: BlockKind,
+    level: Level,
+) -> Result<f32, Refused> {
+    if !matches!(
+        genome.get_gene_state(&kind),
+        Some(GeneState::Expressed | GeneState::Enhanced)
+    ) {
+        return Err(Refused::NoGene);
+    }
+    if levels.level(kind) == level {
+        return Ok(0.0);
+    }
+    if pools.get(Currency::ATP) < LEVEL_CHANGE_ATP {
+        return Err(Refused::NotEnoughAtp);
+    }
+    levels.0.insert(kind, level);
+    pools.modify(Currency::ATP, -LEVEL_CHANGE_ATP);
+    Ok(LEVEL_CHANGE_ATP)
 }
 
 // --- The bar ---
 
-/// What a slot can hold.
+/// What a slot can hold: an active skill. Pathway levels are not here (see
+/// `SetPathwayLevel`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActionKind {
-    /// An expressed block: Off / Low / High.
-    Pathway(BlockKind),
     FlagellumBurst,
     Adhesin,
     Toxin,
@@ -222,7 +234,6 @@ impl ActionKind {
 
     pub fn name(self) -> String {
         match self {
-            ActionKind::Pathway(kind) => format!("{kind:?}"),
             ActionKind::FlagellumBurst => "Flagellum burst".into(),
             ActionKind::Adhesin => "Adhesin".into(),
             ActionKind::Toxin => "Toxin".into(),
@@ -240,33 +251,18 @@ pub struct ActionBar {
     pub slots: [Option<ActionKind>; SLOT_COUNT],
 }
 
-/// The bar of a new vent cell: chemosynthesis in slot 1, induced mutation in
-/// slot 2.
+/// The bar of a new vent cell: induced mutation in slot 4. Slots 1-3 are free
+/// for the actions of membrane proteins.
 pub fn starter_action_bar() -> ActionBar {
     ActionBar {
-        slots: [
-            Some(ActionKind::Pathway(BlockKind::Chemosynthesis)),
-            Some(ActionKind::InduceMutation),
-            None,
-            None,
-        ],
+        slots: [None, None, None, Some(ActionKind::InduceMutation)],
     }
 }
 
-/// Everything the cell can put in a slot now: its expressed blocks (in block
-/// order), then the actions of its membrane proteins, then induced mutation.
-pub fn available_actions(genome: &Genome, proteome: &Proteome) -> Vec<ActionKind> {
-    let mut kinds: Vec<BlockKind> = genome
-        .table
-        .iter()
-        .filter(|(kind, state)| {
-            crate::blocks::block_spec(**kind).is_some()
-                && matches!(state, GeneState::Expressed | GeneState::Enhanced)
-        })
-        .map(|(kind, _)| *kind)
-        .collect();
-    kinds.sort();
-    let mut out: Vec<ActionKind> = kinds.into_iter().map(ActionKind::Pathway).collect();
+/// Everything the cell can put in a slot now: the actions of its membrane
+/// proteins, then induced mutation.
+pub fn available_actions(proteome: &Proteome) -> Vec<ActionKind> {
+    let mut out = Vec::new();
     for action in [
         ActionKind::FlagellumBurst,
         ActionKind::Adhesin,
@@ -286,7 +282,7 @@ pub fn available_actions(genome: &Genome, proteome: &Proteome) -> Vec<ActionKind
 
 /// The next content of a slot when the player cycles it: empty, then each
 /// option in order, then empty again. A content that is not in the options
-/// (for example a pathway that mutated) goes to the first option.
+/// (for example the action of a recycled protein) is cleared.
 pub fn next_assignment(current: Option<ActionKind>, options: &[ActionKind]) -> Option<ActionKind> {
     match current {
         None => options.first().copied(),
@@ -459,11 +455,10 @@ pub fn droplet_alpha(age: f32) -> f32 {
     (1.0 - age / TOXIN_LIFETIME).clamp(0.0, 1.0)
 }
 
-/// One line of text for a slot: what it holds and its level or cooldown. For the
-/// HUD and the editor.
+/// One line of text for a slot: what it holds and its cooldown. For the HUD and
+/// the editor.
 pub fn slot_status(
     kind: Option<ActionKind>,
-    levels: &PathwayLevels,
     state: &ActionState,
     proteome: &Proteome,
 ) -> String {
@@ -476,7 +471,6 @@ pub fn slot_status(
         return format!("{}: no protein", kind.name());
     }
     let detail = match kind {
-        ActionKind::Pathway(block) => levels.level(block).name().to_string(),
         ActionKind::FlagellumBurst if state.bursting() => format!("BURST {:.1}s", state.burst_left),
         ActionKind::FlagellumBurst if state.burst_cooldown > 0.0 => {
             format!("cooldown {:.1}s", state.burst_cooldown)
@@ -509,7 +503,6 @@ pub fn slot_status(
 /// Why a use was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refused {
-    EmptySlot,
     /// The cell has no protein for the action.
     NoProtein,
     /// The gene of the pathway is missing, silent or mutated.
@@ -537,7 +530,6 @@ pub enum UseResult {
 pub struct ActionTarget<'a> {
     pub pools: &'a mut CurrencyPools,
     pub state: &'a mut ActionState,
-    pub levels: &'a mut PathwayLevels,
     pub load: &'a mut MutationLoad,
     pub induced: &'a mut InducedMutations,
     pub genome: &'a Genome,
@@ -557,21 +549,6 @@ pub fn use_action(kind: ActionKind, target: &mut ActionTarget) -> UseResult {
     }
     let atp = target.pools.get(Currency::ATP);
     match kind {
-        ActionKind::Pathway(block) => {
-            if !matches!(
-                target.genome.get_gene_state(&block),
-                Some(GeneState::Expressed | GeneState::Enhanced)
-            ) {
-                return UseResult::Refused(Refused::NoGene);
-            }
-            let level = target.levels.level(block);
-            let Some((next, cost)) = change_level(level, atp) else {
-                return UseResult::Refused(Refused::NotEnoughAtp);
-            };
-            target.levels.0.insert(block, next);
-            target.pools.modify(Currency::ATP, -cost);
-            UseResult::Done
-        }
         ActionKind::FlagellumBurst => {
             if !target.state.can_burst() {
                 return UseResult::Refused(Refused::Cooldown);
@@ -642,6 +619,15 @@ pub struct UseSlot {
     pub slot: usize,
 }
 
+/// Asks a cell to set the level of a pathway. The metabolic map of the Manage
+/// screen sends it.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct SetPathwayLevel {
+    pub cell: Entity,
+    pub kind: BlockKind,
+    pub level: Level,
+}
+
 /// A toxin shot. The world spawns a droplet.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct FireToxin {
@@ -680,7 +666,6 @@ pub fn use_slot_system(
             &mut CurrencyPools,
             &mut FlowLedger,
             &mut ActionState,
-            &mut PathwayLevels,
             &mut MutationLoad,
             &mut InducedMutations,
             &Genome,
@@ -695,7 +680,6 @@ pub fn use_slot_system(
             mut pools,
             mut ledger,
             mut state,
-            mut levels,
             mut load,
             mut induced,
             genome,
@@ -711,7 +695,6 @@ pub fn use_slot_system(
         let mut target = ActionTarget {
             pools: &mut pools,
             state: &mut state,
-            levels: &mut levels,
             load: &mut load,
             induced: &mut induced,
             genome,
@@ -738,6 +721,23 @@ pub fn use_slot_system(
     }
 }
 
+/// Applies `SetPathwayLevel` messages.
+pub fn set_pathway_level_system(
+    mut orders: MessageReader<SetPathwayLevel>,
+    mut cells: Query<(&mut PathwayLevels, &mut CurrencyPools, &mut FlowLedger, &Genome), With<Cell>>,
+) {
+    for order in orders.read() {
+        let Ok((mut levels, mut pools, mut ledger, genome)) = cells.get_mut(order.cell) else {
+            continue;
+        };
+        let before = pools.clone();
+        if let Err(why) = set_pathway_level(&mut levels, &mut pools, genome, order.kind, order.level) {
+            debug!("Level of {:?} refused: {why:?}", order.kind);
+        }
+        ledger.record_diff(FlowSource::Action, &before, &pools);
+    }
+}
+
 /// Moves the action timers on, in fixed steps (the same clock as the physics).
 pub fn advance_action_state_system(time: Res<Time>, mut cells: Query<&mut ActionState, With<Cell>>) {
     for mut state in &mut cells {
@@ -745,21 +745,21 @@ pub fn advance_action_state_system(time: Res<Time>, mut cells: Query<&mut Action
     }
 }
 
-/// Moves each block's throttle towards the level of its slot's pathway.
+/// Moves each block's throttle towards the level of its pathway.
 pub fn throttle_ramp_system(
     timing: Res<FlowmapTimingConfig>,
-    cells: Query<(&PathwayLevels, &ActionBar, &CellTick), With<Cell>>,
+    cells: Query<(&PathwayLevels, &CellTick), With<Cell>>,
     mut blocks: Query<(&OwnedBy, &MetabolicNode, &mut Throttle)>,
 ) {
     for (owner, node, mut throttle) in &mut blocks {
-        let Ok((levels, bar, tick)) = cells.get(owner.0) else {
+        let Ok((levels, tick)) = cells.get(owner.0) else {
             continue;
         };
         if !tick.due {
             continue;
         }
         let dt = tick.dt(timing.target_delta());
-        let level = effective_level(levels, bar, node.kind);
+        let level = levels.level(node.kind);
         let next = ramp(throttle.0, level.value(), RAMP_PER_SEC, dt);
         if next != throttle.0 {
             throttle.0 = next;
@@ -792,9 +792,10 @@ pub struct ActionsPlugin;
 impl Plugin for ActionsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<UseSlot>()
+            .add_message::<SetPathwayLevel>()
             .add_message::<FireToxin>()
             .add_message::<LyseOrder>()
-            .add_systems(Update, use_slot_system)
+            .add_systems(Update, (use_slot_system, set_pathway_level_system))
             .add_systems(FixedUpdate, advance_action_state_system)
             .add_systems(
                 crate::metabolism::MetabolicSchedule,
@@ -821,7 +822,6 @@ mod tests {
     struct Rig {
         pools: CurrencyPools,
         state: ActionState,
-        levels: PathwayLevels,
         load: MutationLoad,
         induced: InducedMutations,
         genome: Genome,
@@ -833,7 +833,6 @@ mod tests {
             Self {
                 pools: pools(100.0, 5.0),
                 state: ActionState::default(),
-                levels: PathwayLevels::default(),
                 load: MutationLoad::default(),
                 induced: InducedMutations::default(),
                 genome: crate::blocks::genome::create_starter_genome(),
@@ -847,7 +846,6 @@ mod tests {
                 &mut ActionTarget {
                     pools: &mut self.pools,
                     state: &mut self.state,
-                    levels: &mut self.levels,
                     load: &mut self.load,
                     induced: &mut self.induced,
                     genome: &self.genome,
@@ -858,13 +856,8 @@ mod tests {
     }
 
     #[test]
-    fn a_pathway_outside_the_bar_runs_at_high() {
-        let mut levels = PathwayLevels::default();
-        levels.0.insert(BlockKind::Chemosynthesis, Level::Off);
-        let mut bar = starter_action_bar();
-        assert_eq!(effective_level(&levels, &bar, BlockKind::Chemosynthesis), Level::Off);
-        bar.slots[0] = Some(ActionKind::Toxin);
-        assert_eq!(effective_level(&levels, &bar, BlockKind::Chemosynthesis), Level::High);
+    fn a_pathway_without_a_level_runs_at_high() {
+        assert_eq!(PathwayLevels::default().level(BlockKind::Chemosynthesis), Level::High);
     }
 
     #[test]
@@ -880,25 +873,34 @@ mod tests {
     #[test]
     fn a_level_change_costs_atp_and_needs_atp() {
         let mut rig = Rig::new();
-        let chemo = ActionKind::Pathway(BlockKind::Chemosynthesis);
-        assert_eq!(rig.use_action(chemo), UseResult::Done);
-        assert_eq!(rig.levels.level(BlockKind::Chemosynthesis), Level::Off);
+        let chemo = BlockKind::Chemosynthesis;
+        let mut levels = PathwayLevels::default();
+        let set = |levels: &mut PathwayLevels, rig: &mut Rig, level| {
+            set_pathway_level(levels, &mut rig.pools, &rig.genome, chemo, level)
+        };
+        assert_eq!(set(&mut levels, &mut rig, Level::Off), Ok(LEVEL_CHANGE_ATP));
+        assert_eq!(levels.level(chemo), Level::Off);
+        assert_abs_diff_eq!(rig.pools.get(Currency::ATP), 100.0 - LEVEL_CHANGE_ATP);
+        // The same level again is free.
+        assert_eq!(set(&mut levels, &mut rig, Level::Off), Ok(0.0));
         assert_abs_diff_eq!(rig.pools.get(Currency::ATP), 100.0 - LEVEL_CHANGE_ATP);
 
         rig.pools.set(Currency::ATP, 0.5);
-        assert_eq!(rig.use_action(chemo), UseResult::Refused(Refused::NotEnoughAtp));
-        assert_eq!(rig.levels.level(BlockKind::Chemosynthesis), Level::Off);
+        assert_eq!(set(&mut levels, &mut rig, Level::Low), Err(Refused::NotEnoughAtp));
+        assert_eq!(levels.level(chemo), Level::Off);
         assert_eq!(rig.pools.get(Currency::ATP), 0.5, "nothing is paid");
     }
 
     #[test]
-    fn a_silent_gene_cannot_take_a_slot_use() {
+    fn a_silent_gene_has_no_level() {
         let mut rig = Rig::new();
+        let mut levels = PathwayLevels::default();
         // Fermentation is in the starter genome but silent.
         assert_eq!(
-            rig.use_action(ActionKind::Pathway(BlockKind::Fermentation)),
-            UseResult::Refused(Refused::NoGene)
+            set_pathway_level(&mut levels, &mut rig.pools, &rig.genome, BlockKind::Fermentation, Level::Off),
+            Err(Refused::NoGene)
         );
+        assert_eq!(levels.level(BlockKind::Fermentation), Level::High);
     }
 
     #[test]
@@ -922,16 +924,14 @@ mod tests {
     }
 
     #[test]
-    fn available_actions_follow_the_genome_and_the_proteome() {
-        let genome = crate::blocks::genome::create_starter_genome();
+    fn available_actions_follow_the_proteome() {
         let mut proteome = Proteome::default();
-        let options = available_actions(&genome, &proteome);
-        assert!(options.contains(&ActionKind::Pathway(BlockKind::Chemosynthesis)));
-        assert!(!options.contains(&ActionKind::Pathway(BlockKind::Fermentation)));
-        assert!(!options.contains(&ActionKind::Toxin));
-        assert_eq!(options.last(), Some(&ActionKind::InduceMutation));
+        assert_eq!(available_actions(&proteome), vec![ActionKind::InduceMutation]);
         proteome.add(ProteinTarget::Membrane(MembraneProtein::Toxin));
-        assert!(available_actions(&genome, &proteome).contains(&ActionKind::Toxin));
+        assert_eq!(
+            available_actions(&proteome),
+            vec![ActionKind::Toxin, ActionKind::InduceMutation]
+        );
     }
 
     #[test]
@@ -1066,22 +1066,19 @@ mod tests {
     }
 
     #[test]
-    fn slot_text_names_the_level_cooldown_or_missing_protein() {
-        let levels = PathwayLevels::default();
+    fn slot_text_names_the_cooldown_or_missing_protein() {
         let mut state = ActionState::default();
         let mut proteome = Proteome::default();
-        let chemo = Some(ActionKind::Pathway(BlockKind::Chemosynthesis));
-        assert_eq!(slot_status(None, &levels, &state, &proteome), "empty");
-        assert!(slot_status(chemo, &levels, &state, &proteome).ends_with("High"));
+        assert_eq!(slot_status(None, &state, &proteome), "empty");
         let burst = Some(ActionKind::FlagellumBurst);
-        assert!(slot_status(burst, &levels, &state, &proteome).contains("no protein"));
+        assert!(slot_status(burst, &state, &proteome).contains("no protein"));
         proteome.add(ProteinTarget::Membrane(MembraneProtein::Flagellum));
-        assert!(slot_status(burst, &levels, &state, &proteome).contains("ready"));
+        assert!(slot_status(burst, &state, &proteome).contains("ready"));
         state.burst_left = 1.0;
-        assert!(slot_status(burst, &levels, &state, &proteome).contains("BURST"));
+        assert!(slot_status(burst, &state, &proteome).contains("BURST"));
         state.burst_left = 0.0;
         state.burst_cooldown = 2.5;
-        assert!(slot_status(burst, &levels, &state, &proteome).contains("cooldown 2.5"));
+        assert!(slot_status(burst, &state, &proteome).contains("cooldown 2.5"));
     }
 
     #[test]

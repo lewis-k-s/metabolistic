@@ -5,9 +5,9 @@
   "enzymes": { "LightCapture": 1, "Catalase": 1, "Respiration": 1 },
   "membrane": { "Flagellum": 1 },
   "actions": [
-    { "Pathway": "LightCapture" },
-    { "Pathway": "Catalase" },
-    { "Pathway": "Respiration" },
-    "FlagellumBurst"
+    "FlagellumBurst",
+    null,
+    null,
+    "InduceMutation"
   ]
 }

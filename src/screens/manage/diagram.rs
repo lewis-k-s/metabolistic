@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::sprite::{Anchor, BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
 
 use super::layout::{self, Layout, Router};
-use super::{BAD, GOOD, MapEntity, MapLayout, Pick, make_pickable, map_layer};
+use super::{BAD, GOOD, MapEntity, MapLayout, Pick, make_pickable, make_valve_clickable, map_layer};
 use crate::GameState;
 use crate::actions::{HIGH_LEVEL, LOW_LEVEL};
 use crate::blocks::genome::BlockKind;
@@ -566,7 +566,7 @@ fn spawn_map(
                     Visibility::Hidden,
                     map_layer(),
                 ));
-                plate.spawn((
+                let mut valve = plate.spawn((
                     Valve(kind),
                     Sprite {
                         image: server.load("sprites/valve_high.png"),
@@ -577,6 +577,7 @@ fn spawn_map(
                     Visibility::Hidden,
                     map_layer(),
                 ));
+                make_valve_clickable(&mut valve, kind);
             });
     }
 

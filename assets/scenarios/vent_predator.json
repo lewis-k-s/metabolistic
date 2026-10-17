@@ -3,10 +3,10 @@
   "seed": 1,
   "membrane": { "Flagellum": 2, "Pilus": 1, "Injector": 1 },
   "actions": [
-    { "Pathway": "Chemosynthesis" },
     "FlagellumBurst",
     "Pilus",
-    "Injector"
+    "Injector",
+    "InduceMutation"
   ],
   "pools": { "ATP": 300, "Metals": 10 }
 }

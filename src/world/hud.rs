@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::actions::{ActionBar, ActionState, PathwayLevels, SLOT_COUNT, slot_status};
+use crate::actions::{ActionBar, ActionState, SLOT_COUNT, slot_status};
 use crate::cell::Cell;
 use crate::desiccation::{CuticleShield, Hydration};
 use crate::level::CurrentLevel;
@@ -192,7 +192,6 @@ fn update_hud(
             &GenomeIntegrity,
             &InShelter,
             &ActionBar,
-            &PathwayLevels,
             &ActionState,
             &Proteome,
             &Hydration,
@@ -208,7 +207,7 @@ fn update_hud(
     mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
     mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
 ) {
-    let Some((pools, membrane, env, genome, shelter, bar, levels, actions, proteome, hydration, cuticle)) = players
+    let Some((pools, membrane, env, genome, shelter, bar, actions, proteome, hydration, cuticle)) = players
         .iter()
         .find_map(|controlled| cells.get(controlled.0).ok())
     else {
@@ -216,7 +215,7 @@ fn update_hud(
     };
     for (slot, mut text) in &mut slots {
         let kind = bar.slots.get(slot.0).copied().flatten();
-        text.0 = format!("[{}] {}", slot.0 + 1, slot_status(kind, levels, actions, proteome));
+        text.0 = format!("[{}] {}", slot.0 + 1, slot_status(kind, actions, proteome));
     }
     for (line, mut text) in &mut lines {
         text.0 = match line {

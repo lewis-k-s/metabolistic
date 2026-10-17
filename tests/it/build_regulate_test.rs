@@ -40,6 +40,11 @@ fn use_slot(app: &mut App, cell: Entity, slot: usize) {
     app.update();
 }
 
+fn set_level(app: &mut App, cell: Entity, kind: BlockKind, level: Level) {
+    app.world_mut().write_message(SetPathwayLevel { cell, kind, level });
+    app.update();
+}
+
 fn set_bar(app: &mut App, cell: Entity, slots: [Option<ActionKind>; SLOT_COUNT]) {
     app.world_mut().entity_mut(cell).insert(ActionBar { slots });
 }
@@ -60,11 +65,6 @@ fn fermenting_cell(ticks_per_second: f32) -> (App, Entity) {
             (Currency::ReducingPower, 1000.0),
         ],
     );
-    set_bar(
-        &mut app,
-        cell,
-        [Some(ActionKind::Pathway(BlockKind::Fermentation)), None, None, None],
-    );
     app.update();
     (app, cell)
 }
@@ -73,28 +73,38 @@ fn ticks_for(seconds: f32, ticks_per_second: f32) -> usize {
     (seconds * ticks_per_second).round() as usize
 }
 
-// --- Slots: pathway levels ---
+// --- Pathway levels (set on the metabolic map) ---
 
 #[test]
-fn a_slot_use_costs_one_atp_and_sets_the_level() {
+fn a_level_change_costs_one_atp_and_sets_the_level() {
     let (mut app, cell) = fermenting_cell(5.0);
     let atp = pool(&app, cell, Currency::ATP);
-    use_slot(&mut app, cell, 0);
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::Off);
     assert_abs_diff_eq!(pool(&app, cell, Currency::ATP), atp - LEVEL_CHANGE_ATP, epsilon = 1e-4);
     let levels = app.world().get::<PathwayLevels>(cell).unwrap();
     assert_eq!(levels.level(BlockKind::Fermentation), Level::Off);
-    // Off -> Low -> High -> Off
-    use_slot(&mut app, cell, 0);
-    use_slot(&mut app, cell, 0);
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::High);
     let levels = app.world().get::<PathwayLevels>(cell).unwrap();
     assert_eq!(levels.level(BlockKind::Fermentation), Level::High);
+    assert_abs_diff_eq!(pool(&app, cell, Currency::ATP), atp - 2.0 * LEVEL_CHANGE_ATP, epsilon = 1e-4);
+}
+
+#[test]
+fn a_pathway_level_needs_no_action_slot() {
+    let (mut app, cell) = fermenting_cell(5.0);
+    set_bar(&mut app, cell, [None; SLOT_COUNT]);
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::Low);
+    for _ in 0..ticks_for(2.0, 5.0) {
+        sim_step(&mut app);
+    }
+    assert_eq!(throttle_of(&app, cell, BlockKind::Fermentation), 0.5);
 }
 
 #[test]
 fn with_too_little_atp_the_level_does_not_change() {
     let (mut app, cell) = fermenting_cell(5.0);
     set_pools(&mut app, cell, &[(Currency::ATP, 0.5)]);
-    use_slot(&mut app, cell, 0);
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::Off);
     assert_eq!(pool(&app, cell, Currency::ATP), 0.5);
     let levels = app.world().get::<PathwayLevels>(cell).unwrap();
     assert_eq!(levels.level(BlockKind::Fermentation), Level::High);
@@ -109,7 +119,7 @@ fn off_stops_the_flux_of_a_block_after_the_ramp() {
     let waste = pool(&app, cell, Currency::Waste);
     assert!(waste > 0.0, "fermentation runs at the start");
 
-    use_slot(&mut app, cell, 0); // Off
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::Off);
     // The ramp takes a second at 5 ticks per second; after 2 s it is done.
     for _ in 0..ticks_for(2.0, 5.0) {
         sim_step(&mut app);
@@ -128,8 +138,7 @@ fn off_stops_the_flux_of_a_block_after_the_ramp() {
 fn the_throttle_ramps_without_overshoot_and_does_not_depend_on_the_tick_length() {
     for rate in [5.0, 10.0, 20.0, 50.0] {
         let (mut app, cell) = fermenting_cell(rate);
-        use_slot(&mut app, cell, 0); // Off: the target is 0
-        use_slot(&mut app, cell, 0); // Low: the target is 0.5
+        set_level(&mut app, cell, BlockKind::Fermentation, Level::Low); // the target is 0.5
         let mut previous = 1.0;
         // After 0.2 s the throttle is 0.8, whatever the tick length.
         for _ in 0..ticks_for(0.2, rate) {
@@ -155,8 +164,7 @@ fn low_runs_the_block_at_half_rate() {
     sim_step(&mut app);
     let full = pool(&app, cell, Currency::Waste) - before;
 
-    use_slot(&mut app, cell, 0);
-    use_slot(&mut app, cell, 0); // Low
+    set_level(&mut app, cell, BlockKind::Fermentation, Level::Low);
     for _ in 0..ticks_for(2.0, 5.0) {
         sim_step(&mut app);
     }
@@ -519,21 +527,6 @@ fn a_held_adhesin_pays_atp_each_second_and_lets_go_when_empty() {
     set_pools(&mut app, cell, &[(Currency::ATP, 0.0)]);
     sim_step(&mut app);
     assert!(!app.world().get::<ActionState>(cell).unwrap().adhesin_held);
-}
-
-#[test]
-fn a_pathway_cycled_out_of_the_bar_returns_to_high() {
-    let (mut app, cell) = fermenting_cell(5.0);
-    use_slot(&mut app, cell, 0); // Off
-    for _ in 0..ticks_for(2.0, 5.0) {
-        sim_step(&mut app);
-    }
-    assert_eq!(throttle_of(&app, cell, BlockKind::Fermentation), 0.0);
-    set_bar(&mut app, cell, [None, None, None, None]);
-    for _ in 0..ticks_for(2.0, 5.0) {
-        sim_step(&mut app);
-    }
-    assert_eq!(throttle_of(&app, cell, BlockKind::Fermentation), 1.0);
 }
 
 #[test]

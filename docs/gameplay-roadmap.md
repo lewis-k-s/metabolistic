@@ -82,10 +82,12 @@ reaches zero.
 - Structure (genes, enzyme and membrane allocation) is slow, like protein
   synthesis. The editor makes a synthesis queue, and your metabolism builds it
   in game time.
-- Regulation is fast, like gene expression. About **4 action slots**. A slot
-  holds a pathway (Off / Low / High) or a membrane protein action (flagellum
-  burst, toxin, adhesin). Each change has a short ramp time and a small ATP
-  cost. Passive effects of pathways always apply; only actions use slots.
+- Regulation is fast, like gene expression. Pathway levels (Off / Low /
+  High) are set on the metabolic map (Manage screen): click the valve on a
+  plate, or use the level buttons in the side panel. Each change has a short
+  ramp time and a small ATP cost. About **4 action slots** with hotkeys hold
+  active skills only (flagellum burst, toxin, adhesin, pilus, injector, lyse,
+  induced mutation). (2026-10-17: pathways moved out of the slots.)
 
 ### Pathway competition (solver change)
 
@@ -344,9 +346,9 @@ Notes:
 - Induced mutation: 10 ATP, +1.0 `MutationLoad` and +1 `InducedMutations`.
   When the unit turns into a mutation, 15% (`ENHANCE_CHANCE`, `GeneRng`) become
   `Enhanced` (x1.25; repair of integrity leaves it, but a later mutation, UV or induced, turns it to `Mutated`, and repair then gives `Expressed`: the bonus is lost). UV mutations never enhance.
-- A pathway that is not in any slot runs at High, so a level cannot get stuck
-  at Off after the slot changes (`effective_level`).
-- Starter bar: slot 1 Chemosynthesis, slot 2 Induce mutation. Hotkeys 1-4 on
+- Since 2026-10-17 a pathway level is not a slot: `SetPathwayLevel` from the
+  map sets it, and a pathway with no level set runs at High.
+- Starter bar: slot 4 Induce mutation, slots 1-3 empty. Hotkeys 1-4 on
   Run; in Manage they re-assign the slot. Overlays: flagellum, adhesin, toxin,
   mineral transporter (idle only), max 2 of a kind and 6 in all. The flagellum
   points away from the aim.

@@ -38,7 +38,7 @@ The player must see, at a glance:
 |---|---|
 | Run view while the editor is open | Full-screen cross-section, plus a **small live inset of the run** in a corner. The inset edge flashes red when the cell takes damage. Time still runs outside a shelter. |
 | Which pathways the map shows | **Fixed map with ghosts.** Each pathway has a fixed place, like a textbook map. A pathway gene that the cell does not have is a dim outline. Its name shows only if the codex has the gene; otherwise it shows "?". |
-| How to edit | **Click a node, side panel.** A click on a pathway or a slot opens a side panel: +/- (queue, recycle), rates in and out, the limit. Hover shows a short tooltip. |
+| How to edit | **Click a node, side panel.** A click on a pathway or a slot opens a side panel: +/- (queue, recycle), the level buttons Off / Low / High (pathways), rates in and out, the limit. Hover shows a short tooltip. |
 | Rendering | World-space pixel sprites on their own render layer and camera. Bevy UI only for the header, the side panel, tooltips and the action bar. |
 | Layout | Hand-placed, in `layout.rs`. Not computed from the graph. |
 
@@ -52,7 +52,7 @@ colour means role, dithered glow).
 | Pool | the molecule icon of the currency, with a short level gauge | Level (log scale). Flashes red below a low mark. Number in the tooltip. |
 | Pathway | a plate with the pathway icon | Gene state: Silent = grey, Mutated = cracked plate, Enhanced = gold rim. Ghost = dithered outline. |
 | Enzyme | small enzyme sprites on the plate, one for each enzyme (more than 6: one sprite with "xN") | They bob at a speed that follows the pathway activity. |
-| Throttle | a valve icon on the plate (Off / Low / High) | The action slot level. |
+| Throttle | a valve icon on the plate (Off / Low / High) | The pathway level. A click on the valve moves it to the next level (1 ATP). |
 | Pipe | a dotted pixel line from pool to pathway, and from pathway to pool | Width tier (1-3) from the flux. |
 | Flow | molecule specks (the pool icon, small) that move along the pipe | Spawn rate follows the flux (log scale). No flux, no specks. |
 | Cofactor | a dashed pin from the pool to the plate, no specks | The cofactor is needed but not used up. |

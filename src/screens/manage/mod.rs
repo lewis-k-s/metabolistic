@@ -9,12 +9,18 @@
 //! - a small live inset of the run in the top right corner (`inset`);
 //! - the side panel and the tooltips (`panel`), and the action bar (keys 1-4).
 //!
+//! Pathway levels (Off / Low / High) are set here, on the map: a click on the
+//! valve of a plate moves it to the next level, and the side panel of a
+//! pathway has a button for each level. The action bar holds active skills
+//! only.
+//!
 //! The map is world-space sprites on their own render layer and camera
 //! (`MAP_LAYER`); Bevy UI draws only the header, the side panel, the tooltip
 //! and the action bar. The sprites are spawned once and then updated from
 //! `LocalMetabolismView` each frame. The screen never computes a flow: the
 //! data layer in `metabolism::view` does. A click on a plate or a socket
-//! opens the side panel, which sends `QueueProtein` and `RecycleProtein`.
+//! opens the side panel, which sends `QueueProtein`, `RecycleProtein` and
+//! `SetPathwayLevel`.
 //!
 //! Game time keeps running here, except in a shelter (see `shelter`). The edit
 //! rules are in `proteins` and `actions`; this screen only sends messages and
@@ -28,8 +34,10 @@ use bevy::window::PrimaryWindow;
 
 use super::label;
 use crate::GameState;
-use crate::actions::{ActionBar, ActionState, PathwayLevels, SLOT_COUNT, available_actions, next_assignment, slot_status};
-use crate::blocks::genome::{BlockKind, GeneState, Genome};
+use crate::actions::{
+    ActionBar, ActionState, Level, PathwayLevels, SLOT_COUNT, SetPathwayLevel, available_actions, next_assignment, slot_status,
+};
+use crate::blocks::genome::{BlockKind, GeneState};
 use crate::cell::Cell;
 use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
@@ -122,6 +130,45 @@ pub(super) fn make_pickable(entity: &mut EntityCommands, pick: Pick) {
             move |click: On<Pointer<Click>>, mut selection: ResMut<Selection>| {
                 if click.button == PointerButton::Primary {
                     selection.0 = Some(pick);
+                }
+            },
+        );
+}
+
+/// Makes the valve of a plate a control: hover shows the pathway tooltip, a
+/// left click opens the pathway's panel and moves its level on (Off -> Low ->
+/// High -> Off, see `Level::next`).
+pub(super) fn make_valve_clickable(entity: &mut EntityCommands, kind: BlockKind) {
+    let pick = Pick::Pathway(kind);
+    entity
+        .insert(Pickable::default())
+        .observe(move |_: On<Pointer<Over>>, mut hovered: ResMut<Hovered>| {
+            hovered.0 = Some(pick);
+        })
+        .observe(
+            move |_: On<Pointer<Out>>, mut hovered: ResMut<Hovered>| {
+                if hovered.0 == Some(pick) {
+                    hovered.0 = None;
+                }
+            },
+        )
+        .observe(
+            move |click: On<Pointer<Click>>,
+                  mut selection: ResMut<Selection>,
+                  players: Query<&ControlledCell, With<LocalPlayer>>,
+                  cells: Query<&PathwayLevels, With<Cell>>,
+                  mut orders: MessageWriter<SetPathwayLevel>| {
+                if click.button != PointerButton::Primary {
+                    return;
+                }
+                selection.0 = Some(pick);
+                let Some(cell) = local_cell(&players) else { return };
+                if let Ok(levels) = cells.get(cell) {
+                    orders.write(SetPathwayLevel {
+                        cell,
+                        kind,
+                        level: levels.level(kind).next(),
+                    });
                 }
             },
         );
@@ -240,15 +287,17 @@ pub(super) enum ManageAction {
     Queue(ProteinTarget),
     Recycle(ProteinTarget),
     CycleSlot(usize),
+    SetLevel(BlockKind, Level),
 }
 
 #[allow(clippy::type_complexity)]
 fn manage_buttons(
     buttons: Query<(&Interaction, &ManageAction), Changed<Interaction>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    mut cells: Query<(&mut ActionBar, &Genome, &Proteome), With<Cell>>,
+    mut cells: Query<(&mut ActionBar, &Proteome), With<Cell>>,
     mut queue: MessageWriter<QueueProtein>,
     mut recycle: MessageWriter<RecycleProtein>,
+    mut levels: MessageWriter<SetPathwayLevel>,
 ) {
     let Some(cell) = local_cell(&players) else {
         return;
@@ -265,19 +314,22 @@ fn manage_buttons(
                 recycle.write(RecycleProtein { cell, target });
             }
             ManageAction::CycleSlot(slot) => {
-                if let Ok((mut bar, genome, proteome)) = cells.get_mut(cell) {
-                    cycle_slot(&mut bar, slot, genome, proteome);
+                if let Ok((mut bar, proteome)) = cells.get_mut(cell) {
+                    cycle_slot(&mut bar, slot, proteome);
                 }
+            }
+            ManageAction::SetLevel(kind, level) => {
+                levels.write(SetPathwayLevel { cell, kind, level });
             }
         }
     }
 }
 
-/// Keys 1-4 give the slot the next thing the cell can do.
+/// Keys 1-4 give the slot the next active skill of the cell.
 fn manage_keys(
     keys: Res<ButtonInput<KeyCode>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    mut cells: Query<(&mut ActionBar, &Genome, &Proteome), With<Cell>>,
+    mut cells: Query<(&mut ActionBar, &Proteome), With<Cell>>,
 ) {
     const SLOT_KEYS: [KeyCode; SLOT_COUNT] =
         [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
@@ -286,16 +338,16 @@ fn manage_keys(
     };
     for (slot, key) in SLOT_KEYS.iter().enumerate() {
         if keys.just_pressed(*key)
-            && let Ok((mut bar, genome, proteome)) = cells.get_mut(cell)
+            && let Ok((mut bar, proteome)) = cells.get_mut(cell)
         {
-            cycle_slot(&mut bar, slot, genome, proteome);
+            cycle_slot(&mut bar, slot, proteome);
         }
     }
 }
 
-fn cycle_slot(bar: &mut ActionBar, slot: usize, genome: &Genome, proteome: &Proteome) {
+fn cycle_slot(bar: &mut ActionBar, slot: usize, proteome: &Proteome) {
     if let Some(content) = bar.slots.get_mut(slot) {
-        *content = next_assignment(*content, &available_actions(genome, proteome));
+        *content = next_assignment(*content, &available_actions(proteome));
     }
 }
 
@@ -385,15 +437,15 @@ fn update_header(
 
 fn update_action_bar(
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    cells: Query<(&ActionBar, &PathwayLevels, &ActionState, &Proteome), With<Cell>>,
+    cells: Query<(&ActionBar, &ActionState, &Proteome), With<Cell>>,
     mut texts: Query<(&ActionSlotText, &mut Text)>,
 ) {
-    let Some((bar, levels, state, proteome)) = local_cell(&players).and_then(|c| cells.get(c).ok())
+    let Some((bar, state, proteome)) = local_cell(&players).and_then(|c| cells.get(c).ok())
     else {
         return;
     };
     for (slot, mut text) in &mut texts {
-        let line = format!("[{}] {}", slot.0 + 1, slot_status(bar.slots[slot.0], levels, state, proteome));
+        let line = format!("[{}] {}", slot.0 + 1, slot_status(bar.slots[slot.0], state, proteome));
         if text.0 != line {
             text.0 = line;
         }
@@ -448,19 +500,30 @@ pub fn smoke_hover(world: &mut World, pick: Option<SmokePick>) {
     world.resource_mut::<Hovered>().0 = pick.map(Pick::from);
 }
 
-/// Presses the + button of a protein in the panel, for one frame. Call it
-/// after the UI focus system (`PreUpdate`), so the press is kept. Returns
-/// false if the panel has no such button.
-pub fn smoke_press_plus(world: &mut World, target: ProteinTarget) -> bool {
+/// Presses the level button of a pathway in the panel, for one frame. Call it
+/// after the UI focus system (`PreUpdate`). Returns false if the panel has no
+/// such button.
+pub fn smoke_press_level(world: &mut World, kind: BlockKind, level: Level) -> bool {
+    press(world, ManageAction::SetLevel(kind, level))
+}
+
+fn press(world: &mut World, wanted: ManageAction) -> bool {
     let mut found = false;
     let mut buttons = world.query::<(&ManageAction, &mut Interaction)>();
     for (action, mut interaction) in buttons.iter_mut(world) {
-        if *action == ManageAction::Queue(target) {
+        if *action == wanted {
             *interaction = Interaction::Pressed;
             found = true;
         }
     }
     found
+}
+
+/// Presses the + button of a protein in the panel, for one frame. Call it
+/// after the UI focus system (`PreUpdate`), so the press is kept. Returns
+/// false if the panel has no such button.
+pub fn smoke_press_plus(world: &mut World, target: ProteinTarget) -> bool {
+    press(world, ManageAction::Queue(target))
 }
 
 pub fn smoke_probe(world: &mut World) -> SmokeProbe {
@@ -488,7 +551,6 @@ pub fn smoke_probe(world: &mut World) -> SmokeProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::genome::create_starter_genome;
 
     #[test]
     fn every_gene_state_has_its_own_text() {
@@ -506,17 +568,18 @@ mod tests {
 
     #[test]
     fn cycling_a_slot_walks_the_options() {
-        let genome = create_starter_genome();
-        let proteome = Proteome::default();
+        let mut proteome = Proteome::default();
+        proteome.add(ProteinTarget::Membrane(crate::proteins::MembraneProtein::Flagellum));
         let mut bar = ActionBar::default();
-        let options = available_actions(&genome, &proteome);
+        let options = available_actions(&proteome);
+        assert_eq!(options.len(), 2);
         for expected in &options {
-            cycle_slot(&mut bar, 2, &genome, &proteome);
+            cycle_slot(&mut bar, 2, &proteome);
             assert_eq!(bar.slots[2], Some(*expected));
         }
-        cycle_slot(&mut bar, 2, &genome, &proteome);
+        cycle_slot(&mut bar, 2, &proteome);
         assert_eq!(bar.slots[2], None);
         // A slot out of range does nothing.
-        cycle_slot(&mut bar, 9, &genome, &proteome);
+        cycle_slot(&mut bar, 9, &proteome);
     }
 }

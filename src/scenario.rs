@@ -37,7 +37,8 @@
 //! | `codex`        | Genes to put into the (in-memory) codex.                                    |
 //! | `invulnerable` | The cell cannot die or be engulfed.                                         |
 //!
-//! A pathway action is written `{"Pathway": "Chemosynthesis"}`.
+//! Slots hold active skills only. Pathway levels are set on the metabolic map
+//! during the run.
 //!
 //! ## Add a preset
 //!
@@ -374,7 +375,7 @@ mod tests {
     fn carry_round_trips_through_json() {
         let carry = Scenario::from_json(
             r#"{"genes":{"Catalase":"Expressed","Fermentation":"Mutated"},"enzymes":{"Catalase":2},
-                "membrane":{"Flagellum":2,"Toxin":1},"actions":["FlagellumBurst",{"Pathway":"Catalase"}]}"#,
+                "membrane":{"Flagellum":2,"Toxin":1},"actions":["FlagellumBurst","Toxin"]}"#,
         )
         .unwrap()
         .carry();
@@ -390,7 +391,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<Proteome>(&text).unwrap(), proteome);
 
         let bar = ActionBar {
-            slots: [Some(ActionKind::Lyse), None, Some(ActionKind::Pathway(BlockKind::Respiration)), Some(ActionKind::InduceMutation)],
+            slots: [Some(ActionKind::Lyse), None, Some(ActionKind::Pilus), Some(ActionKind::InduceMutation)],
         };
         let text = serde_json::to_string(&bar).unwrap();
         assert_eq!(serde_json::from_str::<ActionBar>(&text).unwrap(), bar);

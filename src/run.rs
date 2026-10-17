@@ -97,18 +97,11 @@ pub fn carry_over(genome: &Genome, proteome: &Proteome, action_bar: &ActionBar) 
 
 /// The reward of a gate cell: if its gene has a block, the carry gets one free
 /// enzyme for it, so the next stage starts with the pathway working, slowly.
-/// A gene with no block (Multicellularity) gets nothing. The pathway
-/// also goes into the first empty action slot (if one is free), so the player
-/// can turn it Off or Low at once: photosynthesis makes ROS.
+/// A gene with no block (Multicellularity) gets nothing. The player can turn
+/// the pathway Off or Low on the metabolic map: photosynthesis makes ROS.
 pub fn grant_gate_enzyme(carry: &mut Carry, gene: BlockKind) {
     if crate::blocks::block_spec(gene).is_some() {
         carry.proteome.add(ProteinTarget::Enzyme(gene));
-        let action = crate::actions::ActionKind::Pathway(gene);
-        if !carry.action_bar.slots.contains(&Some(action))
-            && let Some(slot) = carry.action_bar.slots.iter_mut().find(|s| s.is_none())
-        {
-            *slot = Some(action);
-        }
     }
 }
 

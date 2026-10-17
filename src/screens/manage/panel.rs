@@ -3,7 +3,8 @@
 //! A click on a plate or a socket (`Selection`) opens the panel in the right
 //! column, under the run inset:
 //!
-//! - a pathway: its gene state, enzymes with + and - (`QueueProtein` and
+//! - a pathway: its gene state, the level buttons Off / Low / High
+//!   (`SetPathwayLevel`), enzymes with + and - (`QueueProtein` and
 //!   `RecycleProtein`), the rates in and out, and the limit in words;
 //! - a socket: the membrane proteins with + and -, and the slots used;
 //! - a pool: its level and the flows in and out.
@@ -21,7 +22,7 @@ use super::diagram::{pool_name, source_name, spaced_name};
 use super::inset;
 use super::{BAD, DIM, GOLD, GOOD, Hovered, ManageAction, Pick, Selection};
 use crate::GameState;
-use crate::actions::{HIGH_LEVEL, LOW_LEVEL};
+use crate::actions::{HIGH_LEVEL, LEVEL_CHANGE_ATP, LOW_LEVEL, Level, PathwayLevels};
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellSize, membrane_slots};
 use crate::environment::Channel;
@@ -132,6 +133,8 @@ pub struct Row {
 pub struct Content {
     pub title: String,
     pub lines: Vec<Line>,
+    /// The level buttons of an expressed pathway, and the level set now.
+    pub level: Option<(BlockKind, Level)>,
     pub rows: Vec<Row>,
 }
 
@@ -140,6 +143,7 @@ pub struct CellData<'a> {
     pub proteome: &'a Proteome,
     pub queue: &'a SynthesisQueue,
     pub slots: u32,
+    pub levels: &'a PathwayLevels,
 }
 
 fn line(text: impl Into<String>, color: Color) -> Line {
@@ -202,7 +206,7 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
             title: "Cell map".into(),
             lines: vec![
                 line(
-                    "Click a pathway plate for its rates and enzymes, or a socket in the membrane to add proteins. Keys 1-4 set the action slots.",
+                    "Click a pathway plate for its rates, enzymes and level, or a socket in the membrane to add proteins. Click the valve on a plate to turn the pathway Off, Low or High. Keys 1-4 put active skills in the action slots.",
                     TEXT,
                 ),
                 line(
@@ -210,7 +214,7 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
                     DIM,
                 ),
             ],
-            rows: Vec::new(),
+            ..default()
         },
         Some(Pick::Pathway(kind)) => pathway_content(kind, view, cell),
         Some(Pick::Slot(index)) => slot_content(index, cell),
@@ -238,7 +242,7 @@ pub fn build_content(pick: Option<Pick>, view: &MetabolismView, cell: &CellData)
             Content {
                 title: pool_name(currency).to_string(),
                 lines,
-                rows: Vec::new(),
+                ..default()
             }
         }
     }
@@ -260,7 +264,7 @@ fn pathway_content(kind: BlockKind, view: &MetabolismView, cell: &CellData) -> C
         } else {
             lines.push(line("The codex does not know it yet.", DIM));
         }
-        return Content { title, lines, rows: Vec::new() };
+        return Content { title, lines, ..default() };
     }
     let (state, color) = status_text(p.state);
     let mut lines = vec![
@@ -314,9 +318,11 @@ fn pathway_content(kind: BlockKind, view: &MetabolismView, cell: &CellData) -> C
         if matches!(p.limit, Limit::None) { GOOD } else { BAD },
     ));
     lines.extend(queue_lines(cell));
+    let expressed = matches!(p.state, Some(BlockStatus::Active | BlockStatus::Enhanced));
     Content {
         title,
         lines,
+        level: expressed.then(|| (kind, cell.levels.level(kind))),
         rows: vec![Row {
             target: ProteinTarget::Enzyme(kind),
             count: p.enzymes,
@@ -356,6 +362,7 @@ fn slot_content(index: usize, cell: &CellData) -> Content {
     Content {
         title: format!("Membrane socket {}", index + 1),
         lines,
+        level: None,
         rows,
     }
 }
@@ -376,13 +383,19 @@ pub fn tooltip_text(pick: Pick, view: &MetabolismView, cell: &CellData) -> Strin
                     "? (unknown pathway)".to_string()
                 }
             }
-            Some(p) => format!(
-                "{}: {} enzymes, {:.0}%\n{}",
-                spaced_name(kind),
-                p.enzymes,
-                p.activity * 100.0,
-                limit_words(p.limit)
-            ),
+            Some(p) => {
+                let mut tip = format!(
+                    "{}: {} enzymes, {:.0}%\n{}",
+                    spaced_name(kind),
+                    p.enzymes,
+                    p.activity * 100.0,
+                    limit_words(p.limit)
+                );
+                if matches!(p.state, Some(BlockStatus::Active | BlockStatus::Enhanced)) {
+                    tip.push_str(&format!("\nLevel {} (click the valve)", cell.levels.level(kind).name()));
+                }
+                tip
+            }
             None => spaced_name(kind),
         },
         Pick::Slot(index) => {
@@ -494,11 +507,11 @@ fn refresh_panel(
     view: Res<LocalMetabolismView>,
     mut state: ResMut<PanelState>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    cells: Query<(&Proteome, &SynthesisQueue, &CellSize), With<Cell>>,
+    cells: Query<(&Proteome, &SynthesisQueue, &CellSize, &PathwayLevels), With<Cell>>,
     body: Query<(Entity, Option<&Children>), With<PanelBody>>,
 ) {
     let Some(view) = &view.0 else { return };
-    let Some((proteome, queue, size)) = super::local_cell(&players).and_then(|c| cells.get(c).ok())
+    let Some((proteome, queue, size, levels)) = super::local_cell(&players).and_then(|c| cells.get(c).ok())
     else {
         return;
     };
@@ -506,6 +519,7 @@ fn refresh_panel(
         proteome,
         queue,
         slots: membrane_slots(size),
+        levels,
     };
     let content = build_content(selection.0, view, &cell);
     if state.shown.as_ref() == Some(&content) {
@@ -519,6 +533,9 @@ fn refresh_panel(
         panel.spawn(super::label(content.title.clone(), 22.0));
         for Line(text, color) in &content.lines {
             panel.spawn(text_line(text, *color));
+        }
+        if let Some((kind, level)) = content.level {
+            spawn_level_row(panel, kind, level);
         }
         for row in &content.rows {
             spawn_row(panel, row);
@@ -562,6 +579,38 @@ fn spawn_row(panel: &mut ChildSpawnerCommands, row: &Row) {
         });
 }
 
+/// The row of level buttons: the level set now is lit.
+fn spawn_level_row(panel: &mut ChildSpawnerCommands, kind: BlockKind, current: Level) {
+    panel
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            margin: UiRect::top(Val::Px(4.0)),
+            ..default()
+        })
+        .with_children(|r| {
+            r.spawn(text_line("Level", TEXT));
+            for level in [Level::Off, Level::Low, Level::High] {
+                let lit = level == current;
+                r.spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                        ..default()
+                    },
+                    if lit {
+                        BackgroundColor(Color::srgb(0.2, 0.42, 0.25))
+                    } else {
+                        BUTTON_BG
+                    },
+                    ManageAction::SetLevel(kind, level),
+                    children![text_line(level.name(), if lit { Color::WHITE } else { DIM })],
+                ));
+            }
+            r.spawn(text_line(&format!("{LEVEL_CHANGE_ATP} ATP"), DIM));
+        });
+}
+
 fn small_button(text: &str, action: Option<ManageAction>) -> impl Bundle {
     let enabled = action.is_some();
     (
@@ -594,7 +643,7 @@ fn update_tooltip(
     view: Res<LocalMetabolismView>,
     window: Query<&Window, With<PrimaryWindow>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    cells: Query<(&Proteome, &SynthesisQueue, &CellSize), With<Cell>>,
+    cells: Query<(&Proteome, &SynthesisQueue, &CellSize, &PathwayLevels), With<Cell>>,
     mut tooltip: Query<(&mut Node, &mut Visibility), With<Tooltip>>,
     mut text: Query<&mut Text, With<TooltipText>>,
 ) {
@@ -609,7 +658,7 @@ fn update_tooltip(
     let cursor = window
         .cursor_position()
         .unwrap_or(Vec2::new(window.width() * 0.3, window.height() * 0.4));
-    let (cursor, Some((proteome, queue, size))) = (
+    let (cursor, Some((proteome, queue, size, levels))) = (
         cursor,
         super::local_cell(&players).and_then(|c| cells.get(c).ok()),
     ) else {
@@ -620,6 +669,7 @@ fn update_tooltip(
         proteome,
         queue,
         slots: membrane_slots(size),
+        levels,
     };
     let line = tooltip_text(pick, view, &cell);
     if text.0 != line {
@@ -678,7 +728,8 @@ mod tests {
     }
 
     fn cell<'a>(proteome: &'a Proteome, queue: &'a SynthesisQueue) -> CellData<'a> {
-        CellData { proteome, queue, slots: 6 }
+        let levels: &'static PathwayLevels = Box::leak(Box::default());
+        CellData { proteome, queue, slots: 6, levels }
     }
 
     #[test]
@@ -711,6 +762,7 @@ mod tests {
         assert_eq!(content.rows.len(), 1);
         assert_eq!(content.rows[0].target, ProteinTarget::Enzyme(BlockKind::Fermentation));
         assert_eq!(content.rows[0].count, 2);
+        assert_eq!(content.level, Some((BlockKind::Fermentation, Level::High)));
     }
 
     #[test]
@@ -718,6 +770,7 @@ mod tests {
         let (proteome, queue) = (Proteome::default(), SynthesisQueue::default());
         let content = build_content(Some(Pick::Pathway(BlockKind::Respiration)), &view(), &cell(&proteome, &queue));
         assert!(content.rows.is_empty());
+        assert_eq!(content.level, None, "no gene, no level buttons");
         assert_eq!(content.title, "Unknown pathway");
     }
 
