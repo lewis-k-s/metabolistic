@@ -141,11 +141,20 @@ pub enum GeneState {
 /// Resource/Component containing the entire chromosome of gene tiles
 /// Each `Cell` entity owns one `Genome` component. It is the only source of truth
 /// for which metabolic blocks the cell has.
-#[derive(Component, Default, Clone, Debug)]
+#[derive(Component, Default, Clone, Debug, Serialize, Deserialize)]
+#[serde(into = "GenomeSaveData", from = "GenomeSaveData")]
 pub struct Genome {
     pub table: HashMap<BlockKind, GeneState>,
     /// Track previous state for diff computation
     previous_table: HashMap<BlockKind, GeneState>,
+}
+
+/// Two genomes are equal when their gene tables are equal (the previous table
+/// is only change tracking).
+impl PartialEq for Genome {
+    fn eq(&self, other: &Self) -> bool {
+        self.table == other.table
+    }
 }
 
 /// Serializable representation of a gene
@@ -153,6 +162,7 @@ pub struct Genome {
 pub struct GeneRecord {
     pub kind: BlockKind,
     pub state: GeneState,
+    #[serde(default)]
     pub description: String,
 }
 
@@ -174,6 +184,12 @@ impl From<&Genome> for GenomeSaveData {
             })
             .collect();
         Self { genes }
+    }
+}
+
+impl From<Genome> for GenomeSaveData {
+    fn from(genome: Genome) -> Self {
+        Self::from(&genome)
     }
 }
 

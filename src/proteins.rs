@@ -18,6 +18,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellSize, membrane_slots};
@@ -35,7 +36,7 @@ pub const RECYCLE_FRACTION: f32 = 0.5;
 
 /// A protein that sits in the membrane and gives the cell an action or a
 /// passive effect. Actions come in later milestones.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum MembraneProtein {
     /// Moves substances between the outside and the cell.
     Transporter,
@@ -89,7 +90,8 @@ pub enum ProteinTarget {
 
 /// The finished proteins of a cell. This is the only source of truth for
 /// enzyme counts: the solver reads them by block kind.
-#[derive(Component, Default, Debug, Clone, PartialEq)]
+#[derive(Component, Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Proteome {
     pub enzymes: HashMap<BlockKind, u32>,
     pub membrane: HashMap<MembraneProtein, u32>,

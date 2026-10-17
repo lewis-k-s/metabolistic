@@ -55,6 +55,13 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
 - Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
 
+### Scenario Launch (fast testing)
+- `METABOLISTIC_SCENARIO=vent_motile cargo run` (or `cargo run -- --scenario vent_motile`) opens directly in a Run with a prepared cell. It skips Menu and Prepare. A bare name is `assets/scenarios/<name>.json`; a name with `/` or `.json` is a path. A bad file stops the game with the parse error.
+- A scenario file sets stage, seed, spawn, genes, enzymes, membrane proteins, action slots, pools, codex genes and `invulnerable`. All fields are optional (`{"stage":"Vent","membrane":{"Flagellum":3}}` is valid). Format and rules: the doc comment of `src/scenario.rs`.
+- Presets: `vent_motile` (3 flagella, transporter, burst), `vent_hunter` (flagella, adhesin, toxin, high ATP), `shallow_start` (light capture, catalase), `land_start`. To add one, put a JSON file in `assets/scenarios/`; the test `every_preset_loads_and_builds_a_cell` checks it.
+- F9 in a run writes the cell's current state as a scenario to `scenario-dump.json` in the save dir. A scenario run never writes the real codex file.
+- The scenario launch does not work together with `METABOLISTIC_SMOKE_TEST`.
+
 ### Testing
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.

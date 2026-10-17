@@ -1,0 +1,13 @@
+{
+  "stage": "ShallowWater",
+  "seed": 1,
+  "genes": { "LightCapture": "Expressed", "Catalase": "Expressed" },
+  "enzymes": { "LightCapture": 1, "Catalase": 1 },
+  "membrane": { "Flagellum": 1 },
+  "actions": [
+    { "Pathway": "Chemosynthesis" },
+    { "Pathway": "LightCapture" },
+    { "Pathway": "Catalase" },
+    "FlagellumBurst"
+  ]
+}
