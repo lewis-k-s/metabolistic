@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 273602da8c6c1128a9e43b3d1b25d6f4e351d734d8f9ece9c67dec6c52e8f135 # shrinks to blocks = [one block, FluxProfile {Waste: -3.554}, enzymes 5.27, k_half 1.40, not mutated], pools = all 0 except Waste 0.5589, total = 0.05, splits = 3

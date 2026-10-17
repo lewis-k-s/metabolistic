@@ -27,6 +27,9 @@
 //!
 //! ## Tick length
 //!
+//! Each sub-step uses the midpoint method (see `step_rates`), because the
+//! saturation `S / (K + S)` falls fast when a pool drains.
+//!
 //! `solve_tick` splits a tick into equal sub-steps of at most `MAX_SUBSTEP`
 //! seconds. Ticks of 0.1 s, 0.2 s or 0.8 s all use 0.05 s steps, so the result
 //! does not depend on the tick length.
@@ -159,8 +162,21 @@ fn pool_fractions(
 /// The rates (turnovers per second) of all blocks for a step of `h` seconds,
 /// after shared pools are divided in proportion to demand.
 pub fn block_rates(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32) -> Vec<f32> {
-    let demand: Vec<f32> = blocks.iter().map(|b| block_demand(pools, b)).collect();
-    let fraction = pool_fractions(pools, blocks, &demand, h);
+    rates_at(pools, pools, blocks, h)
+}
+
+/// Like `block_rates`, but the demand is read from `seen` and the pools that
+/// the step may spend are `have`. The midpoint step uses this: it asks what
+/// the blocks want at the middle of the step, and caps that by the pools at
+/// the start of the step.
+fn rates_at(
+    seen: &HashMap<Currency, f32>,
+    have: &HashMap<Currency, f32>,
+    blocks: &[BlockInput],
+    h: f32,
+) -> Vec<f32> {
+    let demand: Vec<f32> = blocks.iter().map(|b| block_demand(seen, b)).collect();
+    let fraction = pool_fractions(have, blocks, &demand, h);
 
     blocks
         .iter()
@@ -253,7 +269,11 @@ pub fn block_limit(pools: &HashMap<Currency, f32>, block: &BlockInput) -> Limit 
         return Limit::Off; // an outside factor of 0 with no channel to name
     }
     let (limit, value) = own_limit(pools, block);
-    if value < LIMIT_THRESHOLD { limit } else { Limit::None }
+    if value < LIMIT_THRESHOLD {
+        limit
+    } else {
+        Limit::None
+    }
 }
 
 /// The limit of each block, including `Shared`. `h` is the step length of
@@ -288,7 +308,11 @@ pub fn block_limits(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f3
                         .zip(&demand)
                         .filter(|(b, bd)| **bd > 0.0 && b.profile.has_demand_for(c))
                         .count();
-                    if demanders > 1 { Limit::Shared(c) } else { Limit::Input(c) }
+                    if demanders > 1 {
+                        Limit::Shared(c)
+                    } else {
+                        Limit::Input(c)
+                    }
                 }
                 _ => own,
             }
@@ -300,6 +324,35 @@ pub fn block_limits(pools: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f3
 fn substeps(dt: f32) -> u32 {
     // The small margin stops float error from adding a step (0.2 / 0.05 > 4).
     ((dt / MAX_SUBSTEP) - 1e-4).ceil().max(1.0) as u32
+}
+
+/// The rates for one sub-step of `h` seconds. The rate law is not linear
+/// (`S / (K + S)`), so a rate from the start of the step is too high when a
+/// pool falls fast. Thus the step uses the midpoint method: a half step gives
+/// the pools at the middle of the step, and the demand there is the rate for
+/// the whole step. The error is then second order in `h`, and a long tick and
+/// many short ticks agree. Pools never go negative: the shares are capped by
+/// the pools at the start of the step.
+///
+/// If a pool cannot pay the whole step, the step empties it (the share rule
+/// sets the rates), and the plain rates are used: the midpoint would only
+/// leave a rest in the pool.
+fn step_rates(working: &HashMap<Currency, f32>, blocks: &[BlockInput], h: f32) -> Vec<f32> {
+    let plain = block_rates(working, blocks, h);
+    let exhausts = blocks
+        .iter()
+        .zip(&plain)
+        .any(|(block, &rate)| rate < block_demand(working, block));
+    if exhausts {
+        return plain;
+    }
+    let mut middle = working.clone();
+    for (block, rate) in blocks.iter().zip(&plain) {
+        for (&c, &flow) in &block.profile.0 {
+            *middle.entry(c).or_insert(0.0) += flow * rate * h / 2.0;
+        }
+    }
+    rates_at(&middle, working, blocks, h)
 }
 
 /// Runs one tick of `dt` seconds over `blocks`. See the module docs.
@@ -316,7 +369,7 @@ pub fn solve_tick(pools: &CurrencyPools, blocks: &[BlockInput], dt: f32) -> Tick
     let n = substeps(dt);
     let h = dt / n as f32;
     for _ in 0..n {
-        let rates = block_rates(&working, blocks, h);
+        let rates = step_rates(&working, blocks, h);
         for ((block, rate), total) in blocks.iter().zip(&rates).zip(&mut turnover) {
             if *rate <= 0.0 {
                 continue;
@@ -511,6 +564,30 @@ mod tests {
         // Equal up to float summation order.
         assert!((ab.turnover[0] - ba.turnover[1]).abs() < 1e-6);
         assert!((ab.turnover[1] - ba.turnover[0]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn long_tick_matches_short_ticks_when_saturation_is_steep() {
+        // Waste is only consumed, at S / (K + S) with a small K and a high
+        // rate. One Euler step of 0.05 s over-drains the pool; the midpoint
+        // step must match three shorter steps.
+        let p = profile(&[(Currency::Waste, -3.554)]);
+        let block = BlockInput::new(&p, 5.27).with_k_half(1.4);
+        let start = pools(&[(Currency::Waste, 0.5589)]);
+        let once = start.get(Currency::Waste)
+            + solve_tick(&start, &[block], 0.05).deltas[&Currency::Waste];
+        let mut stepped = start.clone();
+        for _ in 0..3 {
+            let r = solve_tick(&stepped, &[block], 0.05 / 3.0);
+            stepped.modify(Currency::Waste, r.deltas[&Currency::Waste]);
+        }
+        let diff = (once - stepped.get(Currency::Waste)).abs();
+        // Forward Euler differed by 0.031 here.
+        assert!(
+            diff < 0.01,
+            "one tick {once} vs three ticks {}",
+            stepped.get(Currency::Waste)
+        );
     }
 
     #[test]
