@@ -13,7 +13,8 @@
 //! - **One-shot clips**: the death of an NPC, the engulf of prey or a symbiont by
 //!   the player (`engulf`, then `digest_end`, with the player's own sprite hidden
 //!   because the frames hold the engulfer), and the victory clip of the gate
-//!   cell. The gate cell goes when it is won.
+//!   cell. The gate cell goes when it is won. The engulf clip follows the
+//!   engulfer, because the cell keeps its motion while the clip plays.
 //! - **Engulf key**: Space sets `EngulfIntent` of the player's cell.
 
 use bevy::prelude::*;
@@ -38,9 +39,11 @@ const EFFECT_Z: f32 = 1.0;
 #[derive(Component)]
 pub struct OneShot;
 
-/// The engulf effect: `engulf`, then `digest_end`.
+/// The engulf effect: `engulf`, then `digest_end`. It follows the engulfer.
 #[derive(Component)]
-pub struct EngulfFx;
+pub struct EngulfFx {
+    pub engulfer: Entity,
+}
 
 pub fn plugin(app: &mut App) {
     app.add_observer(food_sprite)
@@ -55,6 +58,12 @@ pub fn plugin(app: &mut App) {
                 (spawn_death_fx, spawn_engulf_fx, spawn_victory_fx).before(SpriteSystems::Animate),
                 (advance_fx, fade_droplets, hide_body_during_engulf).after(SpriteSystems::Animate),
             )
+                .run_if(in_state(InRun)),
+        )
+        .add_systems(
+            PostUpdate,
+            follow_engulfer
+                .before(TransformSystems::Propagate)
                 .run_if(in_state(InRun)),
         );
 }
@@ -191,7 +200,7 @@ fn spawn_engulf_fx(
         };
         commands.spawn((
             Name::new("Engulf"),
-            EngulfFx,
+            EngulfFx { engulfer: event.engulfer },
             bundle,
             Transform::from_translation(event.position.round().extend(EFFECT_Z)),
             DespawnOnExit(InRun),
@@ -232,6 +241,22 @@ fn advance_fx(
             animator.play(clip::DIGEST_END, &sheets);
         } else if engulf || one_shot {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Keeps the engulf clip on the engulfer, at the whole pixel that the body
+/// sprite snaps to. Physics moves the cell after `Update`, so this runs late.
+fn follow_engulfer(
+    cells: Query<&Transform, (With<Cell>, Without<EngulfFx>)>,
+    mut fx: Query<(&EngulfFx, &mut Transform)>,
+) {
+    for (engulf, mut transform) in &mut fx {
+        if let Ok(cell) = cells.get(engulf.engulfer) {
+            let wanted = cell.translation.truncate().round().extend(EFFECT_Z);
+            if transform.translation != wanted {
+                transform.translation = wanted;
+            }
         }
     }
 }
