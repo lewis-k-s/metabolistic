@@ -17,6 +17,10 @@
 //!   adhesin.
 //! - **Toxin**: fires a droplet in the aim direction (`FireToxin`). Costs ATP and
 //!   Metals. Needs a toxin. There are no targets until M5.
+//! - **Pilus**: a type IV pilus (see `pilus`). Press shoots it along the aim, hold
+//!   reels it in, release lets go. Needs a pilus.
+//! - **Injector**: a type VI secretion spear (see `stun`). Stuns a cell in
+//!   contact, in a cone round the aim. Needs an injector.
 //! - **Lyse**: cuts the wall tile in contact (`walls`). 5 ATP. Needs a lytic protein.
 //! - **Induce mutation**: costs ATP, adds 1.0 to the `MutationLoad`, so a gene
 //!   mutates. It has a chance to give an `Enhanced` gene (see `genome_damage`).
@@ -187,17 +191,30 @@ pub enum ActionKind {
     FlagellumBurst,
     Adhesin,
     Toxin,
+    Pilus,
+    Injector,
     Lyse,
     InduceMutation,
 }
 
 impl ActionKind {
+    /// Does the action use the aim? The Run screen shows the aim line while
+    /// such a slot is held.
+    pub fn needs_aim(self) -> bool {
+        matches!(
+            self,
+            ActionKind::Toxin | ActionKind::Pilus | ActionKind::Injector | ActionKind::Lyse
+        )
+    }
+
     /// The membrane protein that the action needs, if any.
     pub fn required_protein(self) -> Option<MembraneProtein> {
         match self {
             ActionKind::FlagellumBurst => Some(MembraneProtein::Flagellum),
             ActionKind::Adhesin => Some(MembraneProtein::Adhesin),
             ActionKind::Toxin => Some(MembraneProtein::Toxin),
+            ActionKind::Pilus => Some(MembraneProtein::Pilus),
+            ActionKind::Injector => Some(MembraneProtein::Injector),
             ActionKind::Lyse => Some(MembraneProtein::Lytic),
             _ => None,
         }
@@ -209,6 +226,8 @@ impl ActionKind {
             ActionKind::FlagellumBurst => "Flagellum burst".into(),
             ActionKind::Adhesin => "Adhesin".into(),
             ActionKind::Toxin => "Toxin".into(),
+            ActionKind::Pilus => "Pilus".into(),
+            ActionKind::Injector => "Injector".into(),
             ActionKind::Lyse => "Lyse".into(),
             ActionKind::InduceMutation => "Induce mutation".into(),
         }
@@ -252,6 +271,8 @@ pub fn available_actions(genome: &Genome, proteome: &Proteome) -> Vec<ActionKind
         ActionKind::FlagellumBurst,
         ActionKind::Adhesin,
         ActionKind::Toxin,
+        ActionKind::Pilus,
+        ActionKind::Injector,
         ActionKind::Lyse,
     ] {
         let protein = action.required_protein().expect("these actions need a protein");
@@ -290,7 +311,17 @@ pub struct ActionState {
     pub held_for: f32,
     /// Seconds left of the toxin overlay's `use` clip.
     pub toxin_flash: f32,
-    /// The last move direction (a unit vector). Bursts and shots use it.
+    /// Seconds left of the pilus overlay's `use` clip (the extension).
+    pub pilus_flash: f32,
+    /// True while a pilus is attached and held (the overlay loops `hold`).
+    pub pilus_taut: bool,
+    /// Seconds left of the injector overlay's `use` clip.
+    pub injector_flash: f32,
+    /// Seconds until the injector can fire again.
+    pub injector_cooldown: f32,
+    /// The aim (a unit vector). Bursts, shots, the pilus and the injector use
+    /// it. On the Run screen it follows the cursor (see `aim_toward`); without
+    /// a cursor it is the last move direction.
     pub aim: Vec2,
     /// True while the body touches a wall tile (set by `walls`).
     pub on_wall: bool,
@@ -304,6 +335,10 @@ impl Default for ActionState {
             adhesin_held: false,
             held_for: 0.0,
             toxin_flash: 0.0,
+            pilus_flash: 0.0,
+            pilus_taut: false,
+            injector_flash: 0.0,
+            injector_cooldown: 0.0,
             aim: Vec2::X,
             on_wall: false,
         }
@@ -350,6 +385,9 @@ impl ActionState {
         }
         self.burst_cooldown = (self.burst_cooldown - rest).max(0.0);
         self.toxin_flash = (self.toxin_flash - dt).max(0.0);
+        self.pilus_flash = (self.pilus_flash - dt).max(0.0);
+        self.injector_flash = (self.injector_flash - dt).max(0.0);
+        self.injector_cooldown = (self.injector_cooldown - dt).max(0.0);
         if self.adhesin_held {
             self.held_for += dt;
         }
@@ -360,6 +398,31 @@ impl ActionState {
         if input.length_squared() > 1e-6 {
             self.aim = input.normalize();
         }
+    }
+
+    /// Points the aim from `from` to the world position `cursor`. A cursor too
+    /// close to `from` keeps the old aim.
+    pub fn aim_toward(&mut self, from: Vec2, cursor: Vec2) {
+        self.aim = aim_toward(from, cursor, self.aim);
+    }
+}
+
+/// Which action slots the player holds down now. The Run screen sets it from the
+/// keys. Press actions use `UseSlot`; the pilus also reads the hold.
+#[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlotHeld(pub [bool; SLOT_COUNT]);
+
+/// Cursor distance in pixels below which the aim does not change.
+pub const AIM_DEAD_ZONE: f32 = 2.0;
+
+/// The unit aim from `from` to `cursor`, or `fallback` if the cursor is in the
+/// dead zone.
+pub fn aim_toward(from: Vec2, cursor: Vec2, fallback: Vec2) -> Vec2 {
+    let offset = cursor - from;
+    if offset.length() < AIM_DEAD_ZONE {
+        fallback
+    } else {
+        offset.normalize()
     }
 }
 
@@ -422,6 +485,19 @@ pub fn slot_status(
         ActionKind::Adhesin if state.adhesin_held => "HOLDING".into(),
         ActionKind::Adhesin => "ready".into(),
         ActionKind::Toxin => format!("{TOXIN_ATP} ATP + {TOXIN_METALS} Metals"),
+        ActionKind::Pilus if state.pilus_taut => "REELING".into(),
+        ActionKind::Pilus => format!(
+            "press to shoot ({} ATP), hold to reel",
+            crate::pilus::PILUS_EXTEND_ATP
+        ),
+        ActionKind::Injector if state.injector_cooldown > 0.0 => {
+            format!("cooldown {:.1}s", state.injector_cooldown)
+        }
+        ActionKind::Injector => format!(
+            "ready ({} ATP + {} Metals)",
+            crate::stun::INJECTOR_ATP,
+            crate::stun::INJECTOR_METALS
+        ),
         ActionKind::Lyse => format!("{} ATP", crate::walls::LYSE_ATP),
         ActionKind::InduceMutation => format!("{INDUCE_ATP} ATP, risky"),
     };
@@ -533,6 +609,9 @@ pub fn use_action(kind: ActionKind, target: &mut ActionTarget) -> UseResult {
             target.state.toxin_flash = TOXIN_FLASH_SECONDS;
             UseResult::Fired(target.state.aim)
         }
+        // The pilus and the injector need positions, so `pilus` and `stun` do
+        // these uses. They read the same `UseSlot` message.
+        ActionKind::Pilus | ActionKind::Injector => UseResult::Done,
         ActionKind::Lyse => {
             if atp < crate::walls::LYSE_ATP {
                 return UseResult::Refused(Refused::NotEnoughAtp);
@@ -1027,5 +1106,45 @@ mod tests {
             UseResult::Refused(Refused::NotEnoughAtp)
         );
         assert_eq!(rig.induced.0, 1);
+    }
+
+    #[test]
+    fn the_aim_follows_the_cursor_and_keeps_the_old_aim_in_the_dead_zone() {
+        let mut state = ActionState::default();
+        state.aim_toward(Vec2::new(10.0, 10.0), Vec2::new(10.0, 60.0));
+        assert_abs_diff_eq!(state.aim.x, 0.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(state.aim.y, 1.0, epsilon = 1e-6);
+        // A cursor on the cell: the aim stays.
+        state.aim_toward(Vec2::new(10.0, 10.0), Vec2::new(10.5, 10.5));
+        assert_abs_diff_eq!(state.aim.y, 1.0, epsilon = 1e-6);
+        // A cursor far away still gives a unit vector.
+        state.aim_toward(Vec2::ZERO, Vec2::new(300.0, 400.0));
+        assert_abs_diff_eq!(state.aim.length(), 1.0, epsilon = 1e-5);
+        // Without a cursor, the move direction sets the aim (the fallback).
+        state.aim_at(Vec2::new(-1.0, 0.0));
+        assert_eq!(state.aim, Vec2::NEG_X);
+    }
+
+    #[test]
+    fn only_aimed_actions_show_the_aim_line() {
+        assert!(ActionKind::Pilus.needs_aim());
+        assert!(ActionKind::Injector.needs_aim());
+        assert!(ActionKind::Toxin.needs_aim());
+        assert!(!ActionKind::Adhesin.needs_aim());
+        assert!(!ActionKind::InduceMutation.needs_aim());
+    }
+
+    #[test]
+    fn the_injector_timers_run_down() {
+        let mut state = ActionState {
+            injector_cooldown: 1.0,
+            injector_flash: 0.3,
+            pilus_flash: 0.3,
+            ..default()
+        };
+        state.advance(0.5);
+        assert_abs_diff_eq!(state.injector_cooldown, 0.5, epsilon = 1e-6);
+        state.advance(5.0);
+        assert_eq!((state.injector_cooldown, state.injector_flash, state.pilus_flash), (0.0, 0.0, 0.0));
     }
 }

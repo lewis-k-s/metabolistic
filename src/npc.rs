@@ -43,6 +43,7 @@ use crate::particles::spawn_food;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 use crate::shelter::{Shelter, Shelters, point_in_shelter};
+use crate::stun::Stunned;
 
 // --- Tuning. All of these need **playtest**. ---
 
@@ -435,6 +436,7 @@ pub fn npc_steering_system(
             &Proteome,
             &mut MoveInput,
             &mut NpcBrain,
+            Has<Stunned>,
         ),
         With<Cell>,
     >,
@@ -456,7 +458,14 @@ pub fn npc_steering_system(
             )
         });
     let mut neighbours: Vec<Neighbour> = Vec::new();
-    for (entity, npc, transform, size, proteome, mut input, mut brain) in &mut npcs {
+    for (entity, npc, transform, size, proteome, mut input, mut brain, stunned) in &mut npcs {
+        // A stunned NPC does not think or push. Its AI is paused.
+        if stunned {
+            if input.0 != Vec2::ZERO {
+                input.0 = Vec2::ZERO;
+            }
+            continue;
+        }
         brain.think_in -= dt;
         if brain.think_in > 0.0 {
             continue;

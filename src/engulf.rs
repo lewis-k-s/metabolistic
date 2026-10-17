@@ -225,6 +225,7 @@ pub fn engulf_system(
             Has<Invulnerable>,
             Has<Engulfed>,
             &InShelter,
+            Has<crate::stun::Stunned>,
         ),
         With<Cell>,
     >,
@@ -246,14 +247,15 @@ pub fn engulf_system(
     let player_cells: Vec<Entity> = players.iter().map(|c| c.0).collect();
     let bodies: Vec<Body> = snapshot
         .iter()
-        .map(|(entity, transform, size, intent, gate, invulnerable, engulfed, shelter)| Body {
+        .map(|(entity, transform, size, intent, gate, invulnerable, engulfed, shelter, stunned)| Body {
             sheltered: shelter.0,
             player: player_cells.contains(&entity),
             ..Body::new(
                 entity,
                 transform.translation.truncate(),
                 world_radius(size),
-                intent.0,
+                // A stunned cell cannot act, so it cannot engulf.
+                intent.0 && !stunned,
                 !gate && !invulnerable && !engulfed,
             )
         })

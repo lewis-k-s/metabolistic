@@ -50,15 +50,21 @@ pub enum MembraneProtein {
     Receptor,
     /// Cuts world membranes (the action Lyse).
     Lytic,
+    /// A type IV pilus: shoots out, sticks, and reels in (see `pilus`).
+    Pilus,
+    /// A type VI secretion spear: stuns a cell in contact (see `stun`).
+    Injector,
 }
 
 impl MembraneProtein {
     /// Every membrane protein, in the order that screens list them.
-    pub const ALL: [MembraneProtein; 6] = [
+    pub const ALL: [MembraneProtein; 8] = [
         MembraneProtein::Transporter,
         MembraneProtein::Flagellum,
         MembraneProtein::Adhesin,
         MembraneProtein::Toxin,
+        MembraneProtein::Pilus,
+        MembraneProtein::Injector,
         MembraneProtein::Lytic,
         MembraneProtein::Receptor,
     ];
@@ -75,6 +81,8 @@ pub fn overlay_sheet(protein: MembraneProtein) -> &'static str {
         MembraneProtein::Adhesin => "overlay_adhesin",
         MembraneProtein::Toxin => "overlay_toxin",
         MembraneProtein::Lytic => "overlay_lytic",
+        MembraneProtein::Pilus => "overlay_pilus",
+        MembraneProtein::Injector => "overlay_injector",
         MembraneProtein::Receptor => "overlay_receptor",
     }
 }

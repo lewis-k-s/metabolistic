@@ -29,6 +29,8 @@ use crate::exchange::{BASE_UPTAKE_PER_SEC, TRANSPORTER_UPTAKE_PER_SEC};
 use crate::molecules::Currency;
 use crate::movement::FLAGELLUM_THRUST;
 use crate::prepare::{START_BUDGET, can_add, gene_cost, is_selectable};
+use crate::pilus::{PILUS_EXTEND_ATP, PILUS_RANGE, PILUS_RETRACT_ATP_PER_SEC, PILUS_RETRACT_SPEED};
+use crate::stun::{INJECTOR_ATP, INJECTOR_COOLDOWN, INJECTOR_METALS, STUN_SECONDS};
 use crate::proteins::{
     AMINO_ACIDS_PER_UNIT, ATP_PER_UNIT, MembraneProtein, ProteinTarget, Proteome, SynthesisQueue,
     UNITS_PER_PROTEIN, membrane_slot_usage, overlay_sheet,
@@ -394,6 +396,26 @@ fn protein_facts(protein: MembraneProtein) -> (Facts, String) {
             ),
             "Fires a droplet that damages the cell that it hits.".to_string(),
         ),
+        MembraneProtein::Pilus => (
+            facts(
+                "Type IV pilus",
+                Motility,
+                "Myxococcus and Bdellovibrio extend a type IV pilus (the ATPase PilB adds subunits). The tip sticks to a surface or to prey. The ATPase PilT then removes subunits, the fibre shrinks, and it pulls with a force of many piconewtons. This is twitching motility.",
+            ),
+            format!(
+                "Press to shoot along the aim (range {PILUS_RANGE} px). Hold to reel in at {PILUS_RETRACT_SPEED} px per second. A smaller cell comes to you, so you can engulf it. A bigger cell or a wall pulls you to it. Release to let go."
+            ),
+        ),
+        MembraneProtein::Injector => (
+            facts(
+                "Contractile injector",
+                Interaction,
+                "The type VI secretion system is a spear. A sheath contracts and pushes a tube with toxic effectors into a cell that touches it. Many bacteria use it against rivals and prey.",
+            ),
+            format!(
+                "Needs contact, in a cone round the aim. Stuns the cell for {STUN_SECONDS} s: no thrust, no AI, no engulfing. Cooldown {INJECTOR_COOLDOWN} s. Stunned prey cannot escape you."
+            ),
+        ),
         MembraneProtein::Lytic => (
             facts(
                 "Lytic protein",
@@ -466,6 +488,14 @@ fn protein_entry(protein: MembraneProtein) -> CodexEntry {
             cost.per_use.push((Currency::Metals, TOXIN_METALS));
         }
         MembraneProtein::Lytic => cost.per_use.push((Currency::ATP, LYSE_ATP)),
+        MembraneProtein::Pilus => {
+            cost.per_use.push((Currency::ATP, PILUS_EXTEND_ATP));
+            cost.per_second.push((Currency::ATP, PILUS_RETRACT_ATP_PER_SEC));
+        }
+        MembraneProtein::Injector => {
+            cost.per_use.push((Currency::ATP, INJECTOR_ATP));
+            cost.per_use.push((Currency::Metals, INJECTOR_METALS));
+        }
         MembraneProtein::Transporter | MembraneProtein::Receptor => {}
     }
     CodexEntry {
