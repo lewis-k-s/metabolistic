@@ -3207,6 +3207,282 @@ def vent_scene(sprites: dict[str, Canvas]) -> np.ndarray:
     return scene.px
 
 
+# --------------------------------------------------------------------------
+# Interior pieces
+# --------------------------------------------------------------------------
+#
+# One small piece for each expressed pathway, drawn inside the membrane (see
+# "Interior pieces" in docs/art-direction.md). A spot piece has a 16x16 frame with
+# the anchor at the centre; the game puts it in one of 8 slots. A ring piece has the
+# frame of the player body (64x64, centre 32 / 32.5) and fills the body. Each piece
+# has two clips: idle (the gene works) and glitch (the gene is mutated: dim, with
+# jumping rows and dropped pixels). A silent gene has no piece.
+# To add a piece: write a make(i) function and add one entry to INTERIORS, then add
+# one line to PIECES in src/interior.rs.
+
+INTERIOR_SPOT = 16
+INTERIOR_RING = 64
+INTERIOR_RING_CENTRE = (32.0, 32.5)
+INTERIOR_KINDS = {"idle": dict(fps=5, loop=True), "glitch": dict(fps=8, loop=True)}
+
+RAMPS["sulfur"] = ramp("#4a4a06", "#a0a014", "#e8e024", "#f8f470", "#ffffd0")  # Beggiatoa yellow
+RAMPS["thylakoid"] = ramp("#0e3a1a", "#1f7a30", "#3cc050", "#8ae878", "#d8ffc0")  # grass green
+RAMPS["phb"] = ramp("#4a4a40", "#a0a090", "#dcdccc", "#f2f2e4", "#ffffff")  # pale storage polymer
+
+
+def _spot(spot=INTERIOR_SPOT) -> Canvas:
+    return Canvas(spot, spot)
+
+
+def interior_sulfur(i: int = 0) -> Canvas:
+    """Three bright sulfur granules. A sparkle runs over them."""
+    c = _spot()
+    ph = 2 * np.pi * i / FRAMES
+    beads = [(5.0, 9.0, 2.4), (10.5, 8.0, 2.1), (7.5, 4.5, 2.0)]
+    for k, (x, y, r) in enumerate(beads):
+        c.disc(x, y + round(0.6 * np.sin(ph + k * 2.1)), r, RAMPS["sulfur"])
+    k = (i // 3) % 3
+    x, y, r = beads[k]
+    if i % 3 == 0:
+        c.plot(x - 0.4, y - r * 0.5 - 0.6, RAMPS["sulfur"][4])
+        c.plot(x - 0.4, y - r * 0.5 + 0.4, RAMPS["sulfur"][4])
+    return c
+
+
+def interior_thylakoid(i: int = 0) -> Canvas:
+    """A stack of four green lamellae. A bright band of light runs along them."""
+    c = _spot()
+    T = RAMPS["thylakoid"]
+    for k in range(4):
+        y = 3.6 + k * 2.9
+        c.lit_body(ellipse_sdf(c, 8, y, 4.8, 1.4), T, width=1.4)
+    c.outline(T[0])
+    # The light band: two bright pixels step along each lamella, offset per lamella.
+    for k in range(4):
+        x = 4 + (i + k * 2) % 8
+        c.plot(x, 3 + k * 2.9, T[4])
+    return c
+
+
+def interior_lipid(i: int = 0) -> Canvas:
+    """Pale lipid droplets (PHB-like), two sizes. They bob slowly."""
+    c = _spot()
+    ph = 2 * np.pi * i / FRAMES
+    for k, (x, y, r) in enumerate([(5.3, 9.5, 2.8), (10.8, 5.2, 2.2), (10.5, 11.2, 1.7)]):
+        c.disc(x, y + round(0.7 * np.sin(ph + k * 1.7)), r, RAMPS["phb"])
+    return c
+
+
+def interior_ribosome(i: int = 0) -> Canvas:
+    """A speckle of ribosomes: small dots in the lilac of the nucleotide ramp."""
+    c = _spot()
+    N = RAMPS["nucleotide"]
+    dots = [(4, 5), (8, 3), (12, 5), (6, 8), (10, 8), (3, 11), (8, 12), (12, 11), (7, 6)]
+    for k, (x, y) in enumerate(dots):
+        tone = N[3] if (i + k * 3) % 8 < 2 else N[2]
+        c.plot(x, y, tone)
+        c.plot(x + 1, y, tone)
+        c.plot(x, y + 1, N[1])
+        c.plot(x + 1, y + 1, N[1])
+    return c
+
+
+def interior_peroxisome(i: int = 0) -> Canvas:
+    """Two peroxisomes with a dark catalase crystal. Bubbles of O2 rise from them."""
+    c = _spot()
+    O = RAMPS["o2"]
+    c.disc(6.5, 9.5, 3.6, O)
+    c.paint((np.abs(c.X - 6.5) < 1.3) & (np.abs(c.Y - 9.5) < 1.3), O[0])
+    c.disc(11.5, 11.5, 2.2, O)
+    c.plot(11, 11, O[0])
+    for k, (x, y0) in enumerate([(6, 6.5), (11, 8.5)]):
+        t = (i + k * 3) % FRAMES
+        if t < 6:
+            c.plot(x + (t % 2) * 0.0, y0 - t * 0.8, O[4])
+    return c
+
+
+def interior_cristae(i: int = 0) -> Canvas:
+    """A rose oval with inner folds (cristae) that sway."""
+    c = _spot()
+    P = RAMPS["proteo"]
+    ph = 2 * np.pi * i / FRAMES
+    c.lit_body(ellipse_sdf(c, 8, 8, 5.6, 4.2), P, width=4)
+    for k, x in enumerate((5.0, 8.0, 11.0)):
+        sway = round(0.7 * np.sin(ph + k * 1.3))
+        if k % 2 == 0:
+            c.line(x + sway, 4.5, x + sway, 9.0, P[0], 0.55)
+        else:
+            c.line(x + sway, 7.0, x + sway, 11.5, P[0], 0.55)
+    c.outline(P[0])
+    return c
+
+
+def _ring_canvas() -> Canvas:
+    return Canvas(INTERIOR_RING, INTERIOR_RING)
+
+
+def interior_pigment(i: int = 0) -> Canvas:
+    """A ring of orange carotenoid dots under the membrane. A bright dot runs round it."""
+    c = _ring_canvas()
+    cx, cy = INTERIOR_RING_CENTRE
+    P = RAMPS["pigment"]
+    n = 30
+    for k in range(n):
+        a = 2 * np.pi * k / n
+        x, y = cx + 16.0 * np.cos(a), cy + 16.0 * np.sin(a)
+        lit = (k - i * 2) % 10 == 0
+        c.plot(x, y, P[4] if lit else (P[3] if k % 3 == 0 else P[2]))
+        if lit:
+            c.plot(x + 1, y, P[3])
+    return c
+
+
+def interior_cuticle(i: int = 0) -> Canvas:
+    """A thick waxy rim on the outside of the body. A sheen runs round it."""
+    c = _ring_canvas()
+    cx, cy = INTERIOR_RING_CENTRE
+    K = RAMPS["carbon"]
+    d = np.hypot(c.X - cx, c.Y - cy)
+    ang = np.arctan2(c.Y - cy, c.X - cx)
+    ring = (d >= 19.5) & (d < 22.2)
+    # Light from the upper left: the rim is light there and dark at the lower right.
+    toward_light = np.cos(ang - np.arctan2(-0.55, -0.45))
+    tone = np.digitize(toward_light, [-0.4, 0.3])
+    for t, idx in enumerate((1, 2, 3)):
+        c.paint(ring & (tone == t), K[idx])
+    c.paint(ring & (d >= 21.2) & (tone < 2), K[1])
+    sheen = (np.cos(ang - 2 * np.pi * i / FRAMES) > 0.97) & (d >= 20.2) & (d < 21.4)
+    c.paint(ring & sheen, K[4])
+    c.paint(Canvas.dilate(ring) & ~ring & (d >= 22.2), K[0])
+    return c
+
+
+INTERIORS = {
+    "interior_sulfur": dict(make=interior_sulfur, note="Chemosynthesis: sulfur granules."),
+    "interior_thylakoid": dict(make=interior_thylakoid, note="LightCapture: thylakoid stack."),
+    "interior_lipid": dict(make=interior_lipid, note="FatStorage: lipid droplets."),
+    "interior_ribosome": dict(make=interior_ribosome, note="ProteinSynthesis: ribosome speckle."),
+    "interior_peroxisome": dict(make=interior_peroxisome, note="Catalase: peroxisomes."),
+    "interior_cristae": dict(make=interior_cristae, note="Respiration: folded inner membrane."),
+    "interior_pigment": dict(make=interior_pigment, ring=True, note="SecondaryMetabolites: pigment ring."),
+    "interior_cuticle": dict(make=interior_cuticle, ring=True, note="Cuticle: thick outer rim."),
+}
+
+
+def glitch_piece(c: Canvas, i: int) -> Canvas:
+    """The look of a mutated gene: the same shape, dim, with a row that jumps and
+    some pixels that drop out."""
+    out = Canvas(c.w, c.h, origin=(c.ox, c.oy))
+    px = c.px.copy()
+    live = px[..., 3] > 0
+    px[..., :3] = (px[..., :3].astype(float) * 0.55 + 18).astype(np.uint8)
+    rows = np.where(live.any(axis=1))[0]
+    if len(rows):
+        # One band of rows jumps sideways; the band moves up and down.
+        band = rows[(i * 3) % len(rows)]
+        for y in (band, min(band + 1, c.h - 1)):
+            if i % 2 == 0:
+                px[y] = np.roll(px[y], 1 if (i // 2) % 2 == 0 else -1, axis=0)
+    yy, xx = np.mgrid[0:c.h, 0:c.w]
+    drop = ((xx * 7 + yy * 13 + i * 5) % 11 == 0)
+    px[drop] = 0
+    out.px = px
+    return out
+
+
+def build_interiors() -> dict:
+    """{name: {"idle": [Canvas], "glitch": [Canvas]}}"""
+    out = {}
+    for name, spec in INTERIORS.items():
+        idle = [spec["make"](i) for i in range(FRAMES)]
+        out[name] = {"idle": idle, "glitch": [glitch_piece(f, i) for i, f in enumerate(idle)]}
+    return out
+
+
+def write_interiors(frames: dict) -> None:
+    path = ANIM_DIR / "manifest.json"
+    manifest = json.loads(path.read_text())
+    for name, kinds in frames.items():
+        spec = INTERIORS[name]
+        ring = spec.get("ring", False)
+        size = INTERIOR_RING if ring else INTERIOR_SPOT
+        anchor = list(INTERIOR_RING_CENTRE) if ring else [INTERIOR_SPOT / 2, INTERIOR_SPOT / 2]
+        info = {
+            "frame_size": [size, size],
+            "anchor_px": anchor,
+            "layer": "interior",
+            "note": spec["note"] + " Child of the body pivot, under the membrane overlays. "
+                    "idle = the gene works. glitch = the gene is mutated.",
+        }
+        for kind, fs in kinds.items():
+            write_png(ANIM_DIR / f"{name}_{kind}.png", np.concatenate([f.px for f in fs], axis=1))
+            info[kind] = {"file": f"{name}_{kind}.png", "columns": FRAMES, "rows": 1,
+                          "fps": INTERIOR_KINDS[kind]["fps"], "loop": INTERIOR_KINDS[kind]["loop"]}
+        manifest[name] = info
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+
+# Slot centres (x right, y up) in pixels from the body centre, in fill order.
+# Keep in line with SLOT_OFFSETS in src/interior.rs.
+INTERIOR_SLOTS = [(-9, 9), (9, -9), (9, 9), (-9, -9), (12, 0), (-12, 0), (0, 12), (0, -12)]
+
+
+def _compose(body: Canvas, frames: dict, names: list[str], i: int, look: str = "idle") -> np.ndarray:
+    """The player frame with the pieces on it, as the game puts them."""
+    px = body.px.copy()
+    spot = 0
+    for name in names:
+        piece = frames[name][look][i]
+        if INTERIORS[name].get("ring"):
+            px = np.where(piece.px[..., 3:4] > 0, piece.px, px)
+            continue
+        dx, dy = INTERIOR_SLOTS[spot]
+        spot += 1
+        x0, y0 = 32 + dx - INTERIOR_SPOT // 2, 32 - dy - INTERIOR_SPOT // 2
+        sub = px[y0:y0 + INTERIOR_SPOT, x0:x0 + INTERIOR_SPOT]
+        px[y0:y0 + INTERIOR_SPOT, x0:x0 + INTERIOR_SPOT] = np.where(piece.px[..., 3:4] > 0, piece.px, sub)
+    return px
+
+
+def write_interior_previews(frames: dict, cell_frames: list[Canvas]) -> None:
+    prev = PREVIEW_DIR / "anim"
+    bg = np.zeros((1, 1, 4), dtype=np.uint8)
+    bg[..., :3] = WATER[2]
+    bg[..., 3] = 255
+    # Sheet: one row for each piece, 8 idle frames then 8 glitch frames, on the player.
+    rows = []
+    for name in INTERIORS:
+        cells = []
+        for look in ("idle", "glitch"):
+            for i in range(FRAMES):
+                body = cell_frames[i % len(cell_frames)]
+                ring = INTERIORS[name].get("ring", False)
+                if ring:
+                    px = _compose(body, frames, [name], i, look)
+                else:
+                    # Show a spot piece on a plain tile at 16 px, so it is easy to read.
+                    px = np.zeros((INTERIOR_SPOT, INTERIOR_SPOT, 4), dtype=np.uint8)
+                    px[:] = (*RAMPS["player"][2], 255)
+                    px = np.where(frames[name][look][i].px[..., 3:4] > 0, frames[name][look][i].px, px)
+                    pad = np.zeros((INTERIOR_RING, INTERIOR_RING, 4), dtype=np.uint8)
+                    o = (INTERIOR_RING - INTERIOR_SPOT) // 2
+                    pad[o:o + INTERIOR_SPOT, o:o + INTERIOR_SPOT] = px
+                    px = pad
+                cells.append(np.where(px[..., 3:4] > 0, px, bg))
+        rows.append(np.concatenate(cells, axis=1))
+    write_png(prev / "interior_pieces.png", upscale(np.concatenate(rows, axis=0), 2))
+    # Demo: the player with 3 pieces (Standard) and with all 8 (Full), 4 frames each.
+    standard = ["interior_sulfur", "interior_thylakoid", "interior_lipid"]
+    full = list(INTERIORS)
+    strips = []
+    for names in (standard, full):
+        strips.append(np.concatenate(
+            [np.where((p := _compose(cell_frames[i], frames, names, i))[..., 3:4] > 0, p, bg) for i in range(0, FRAMES, 2)],
+            axis=1))
+    write_png(prev / "interior_demo.png", upscale(np.concatenate(strips, axis=0), 4))
+
+
 def main() -> None:
     sprites = {name: make() for name, make in SPRITES.items()}
     for name, c in sprites.items():
@@ -3220,6 +3496,9 @@ def main() -> None:
     overlays = build_overlays()
     write_overlays(overlays)
     write_overlay_previews(overlays, frames["player_cell"]["idle"])
+    interiors = build_interiors()
+    write_interiors(interiors)
+    write_interior_previews(interiors, frames["player_cell"]["idle"])
     engulf = build_engulf()
     write_engulf(engulf)
     write_engulf_previews(engulf)

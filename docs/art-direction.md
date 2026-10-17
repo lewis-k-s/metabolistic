@@ -305,6 +305,63 @@ Previews in `docs/art/anim/`: `engulf_story.gif` (engulf, digest, gene gain, for
 both pairs in two directions), `engulf_<pair>.png` and `engulf_<pair>_digest.png`
 (sheets), `gate_victory.gif` and `gate_victory.png`, and `gene_orb.png`.
 
+## Interior pieces
+
+The cell sprite shows what the cell can do. Each expressed pathway adds one
+small sprite piece **inside** the membrane, under the membrane protein overlays
+(which stay on the rim). A piece is a separate sprite, so the game can pick,
+place and swap pieces without a new body sheet. Every piece is a child of the
+`BodyDeform` pivot, so it stretches with the body (art rule 9).
+
+| Pathway (gene) | Piece | Real structure | Look |
+|---|---|---|---|
+| `Chemosynthesis` | `interior_sulfur` | sulfur granules, as in *Beggiatoa* | three bright yellow beads, a sparkle runs over them |
+| `LightCapture` | `interior_thylakoid` | thylakoid or chlorosome stack | four green lamellae, a light band runs along them |
+| `FatStorage` | `interior_lipid` | PHB-like lipid droplets | pale beads of two sizes, a highlight drifts |
+| `ProteinSynthesis` | `interior_ribosome` | ribosome speckle, dense in the cytoplasm | a cloud of small dark-lilac dots that twinkle |
+| `Catalase` | `interior_peroxisome` | peroxisome (catalase crystal) | two round bodies with a dark core, bubbles of O2 rise |
+| `Respiration` | `interior_cristae` | folded inner membrane (cristae) | a rose oval with folds that sway |
+| `SecondaryMetabolites` | `interior_pigment` | carotenoid ring under the membrane | orange dotted ring, **ring piece** |
+| `Cuticle` | `interior_cuticle` | thicker outer wall layer | a thick tan rim on the outside, **ring piece** |
+
+- **Gene state.** `Expressed` and `Enhanced` draw the `idle` clip. `Mutated`
+  draws the `glitch` clip: the same shape, dim, with an offset row of pixels that
+  jumps. `Silent` draws nothing. A gene with no enzyme draws nothing.
+- **Frame.** A spot piece has a 16x16 frame (the shape fills about 10 px) with the
+  anchor at the centre (8, 8). A ring piece has a 64x64 frame, the same as the
+  player body, with the anchor at the body centre. Both have 8 frames and play as
+  loops (`idle` at 5 fps, `glitch` at 8 fps). The light is from the upper left.
+- **Slots.** A spot piece sits in one of 8 fixed slots on a ring of radius 12 px
+  round the body centre, 45 degrees apart. The shapes are at most 10 px wide, so
+  the neighbours do not touch. A ring piece has no slot (it is centred) and a
+  cell shows each ring piece at most once. The fill order of the slots is
+  NW, SE, NE, SW, E, W, N, S, so that the first three pieces spread round the
+  body.
+- **Selection** (`interior::interior_plan`, a pure function). Each candidate gets
+  a score from its gene state (Expressed 1.0, Mutated 0.5), its enzyme count
+  (up to 4) and its activity (the throttle of the block, 0 to 1). The best N are
+  kept, N set by the display mode. A piece that is already shown gets a bonus
+  (hysteresis), and it keeps its slot. A new piece takes the free slot with the
+  lowest number. So a piece does not jump or flicker when two scores are close.
+- **Display modes** (`CellDisplay`, key `V` on the Run screen, the HUD shows the
+  mode for a few seconds):
+
+  | Mode | Interior pieces | Membrane overlays |
+  |---|---|---|
+  | `Minimal` | none | up to 2 of a kind, 6 in all |
+  | `Standard` | the best 3 | up to 2 of a kind, 6 in all |
+  | `Full` (debug) | all candidates (at most 8 spots plus 2 rings) | up to 3 of a kind, 8 in all |
+
+- **New piece.** Add one line to `PIECES` in `src/interior.rs` and one entry to
+  `INTERIORS` in `art/gen_sprites.py`. A new membrane protein is not an interior
+  piece: it goes in `actions_view::overlay_plan`.
+- **NPC cells** use the same pieces when the body is big enough (radius of 18 px
+  or more, not the gate cell, which has its own art). They are limited to
+  `Standard`, with at most 2 spots and no rings, to keep the frame time low.
+
+Previews in `docs/art/anim/`: `interior_pieces.png` (every piece, `idle` then
+`glitch`, 8 frames) and `interior_demo.png` (the player with 3 and with 8 pieces).
+
 ## In the game
 
 `src/sprites.rs` loads every sheet of `manifest.json` (the manifest is compiled

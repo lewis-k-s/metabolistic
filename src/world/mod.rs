@@ -13,6 +13,7 @@
 //! - `actions_view`: slot hotkeys, toxin droplets, membrane protein overlays,
 //!   shelter discs.
 //! - `walls_view`: tissue tile bodies and sprites.
+//! - `interior_view`: interior pieces of a cell (genome and pathways), display mode key.
 //! - `npc_view`: NPC bodies, particle sprites, death, engulf and victory clips.
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
 
@@ -38,6 +39,7 @@ use rand::prelude::*;
 pub mod actions_view;
 pub mod grid_view;
 pub mod hud;
+pub mod interior_view;
 pub mod npc_view;
 pub mod player_body;
 pub mod walls_view;
@@ -82,6 +84,7 @@ pub fn plugin(app: &mut App) {
             player_body::plugin,
             hud::plugin,
             actions_view::plugin,
+            interior_view::plugin,
             walls_view::plugin,
             npc_view::plugin,
         ))

@@ -53,6 +53,7 @@ enum HudLine {
     Hydration,
     Cuticle,
     Shelter,
+    View,
 }
 
 /// The ROS bar is full at this amount: the tint is full here too.
@@ -89,7 +90,7 @@ pub fn cuticle_line(shield: f32) -> String {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct HudSlot(usize);
 
-const LINES: [HudLine; 16] = [
+const LINES: [HudLine; 17] = [
     HudLine::Stage,
     HudLine::Atp,
     HudLine::Membrane,
@@ -106,6 +107,7 @@ const LINES: [HudLine; 16] = [
     HudLine::Hydration,
     HudLine::Cuticle,
     HudLine::Shelter,
+    HudLine::View,
 ];
 
 pub fn plugin(app: &mut App) {
@@ -201,6 +203,7 @@ fn update_hud(
     level: Option<Res<CurrentLevel>>,
     fraction: Res<UvFraction>,
     run: Res<RunState>,
+    display: Res<crate::interior::CellDisplay>,
     gate: Query<&GateProgress>,
     mut lines: Query<(&HudLine, &mut Text), Without<HudSlot>>,
     mut slots: Query<(&HudSlot, &mut Text), Without<HudLine>>,
@@ -224,6 +227,7 @@ fn update_hud(
                     String::new()
                 }
             }
+            HudLine::View => display.notice_text(),
             HudLine::Stage => stage_line(&run),
             HudLine::Atp => bar_line("ATP", pools.get(Currency::ATP), ATP_BAR_MAX),
             HudLine::Membrane => bar_line("Membrane", membrane.integrity, membrane.max),

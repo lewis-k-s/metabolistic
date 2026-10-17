@@ -4,8 +4,7 @@
 //!
 //! - **Hotkeys** 1-4 use the slots on the Run screen.
 //! - **Membrane protein overlays** (`docs/art-direction.md`): one 56x56 sprite
-//!   for each protein, up to `MAX_PER_PROTEIN` of a kind and `MAX_OVERLAYS` in
-//!   all, mounted on the rim at 0.95 x the radius and drawn above the cell. The
+//!   for each protein, up to the caps of the display mode (`CellDisplay`), mounted on the rim at 0.95 x the radius and drawn above the cell. The
 //!   baked rows give the direction, so the game never turns or scales them.
 //!   They play `idle`; `use` once on the action; the adhesin loops `hold`.
 //! - **Shelters**: a darker, calm disc on the water. It uses the water colours
@@ -18,6 +17,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::actions::*;
 use crate::cell::{Cell, CellSize};
+use crate::interior::{CellDisplay, OverlayCaps};
 use crate::movement::world_radius;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
@@ -26,10 +26,6 @@ use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row, oppos
 use crate::world::player_body::snap_offset;
 use crate::{GameState, InRun};
 
-/// Most overlays of one protein kind on a cell.
-pub const MAX_PER_PROTEIN: u32 = 2;
-/// Most overlays on a cell.
-pub const MAX_OVERLAYS: usize = 6;
 /// Mount distance from the cell centre, as a fraction of the radius.
 pub const MOUNT_FRACTION: f32 = 0.95;
 /// Z of an overlay above its cell.
@@ -87,9 +83,10 @@ pub fn overlay_sprite(protein: MembraneProtein) -> Option<&'static str> {
     }
 }
 
-/// The overlays a proteome shows, in a fixed order: up to `MAX_PER_PROTEIN` of
-/// each protein that has art, and `MAX_OVERLAYS` in all.
-pub fn overlay_plan(proteome: &Proteome) -> Vec<MembraneProtein> {
+/// The overlays a proteome shows, in a fixed order: up to `caps.per_protein` of
+/// each protein that has art, and `caps.total` in all. A new protein is one
+/// more entry in the list.
+pub fn overlay_plan(proteome: &Proteome, caps: OverlayCaps) -> Vec<MembraneProtein> {
     let mut plan = Vec::new();
     for protein in [
         MembraneProtein::Flagellum,
@@ -100,9 +97,9 @@ pub fn overlay_plan(proteome: &Proteome) -> Vec<MembraneProtein> {
     ] {
         let count = proteome
             .count(ProteinTarget::Membrane(protein))
-            .min(MAX_PER_PROTEIN);
+            .min(caps.per_protein);
         for _ in 0..count {
-            if plan.len() < MAX_OVERLAYS {
+            if plan.len() < caps.total {
                 plan.push(protein);
             }
         }
@@ -156,6 +153,7 @@ struct OverlayPlan(Vec<MembraneProtein>);
 
 fn sync_overlays(
     sheets: Res<Sheets>,
+    display: Res<CellDisplay>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<(&Proteome, Option<&OverlayPlan>, Option<&Children>), With<Cell>>,
     overlays: Query<(), With<Overlay>>,
@@ -165,7 +163,7 @@ fn sync_overlays(
         let Ok((proteome, current, children)) = cells.get(controlled.0) else {
             continue;
         };
-        let plan = overlay_plan(proteome);
+        let plan = overlay_plan(proteome, display.mode.overlay_caps());
         if current.is_some_and(|c| c.0 == plan) {
             continue;
         }
@@ -270,6 +268,9 @@ pub fn spawn_shelter(commands: &mut Commands, images: &mut Assets<Image>, shelte
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interior::DisplayMode;
+
+    const CAPS: OverlayCaps = OverlayCaps { per_protein: 2, total: 6 };
 
     fn proteome(counts: &[(MembraneProtein, u32)]) -> Proteome {
         let mut proteome = Proteome::default();
@@ -283,12 +284,12 @@ mod tests {
 
     #[test]
     fn one_overlay_for_each_protein_up_to_the_caps() {
-        assert!(overlay_plan(&Proteome::default()).is_empty());
+        assert!(overlay_plan(&Proteome::default(), CAPS).is_empty());
         let plan = overlay_plan(&proteome(&[
             (MembraneProtein::Flagellum, 5),
             (MembraneProtein::Toxin, 1),
             (MembraneProtein::Receptor, 2),
-        ]));
+        ]), CAPS);
         assert_eq!(
             plan,
             vec![
@@ -303,13 +304,16 @@ mod tests {
             (MembraneProtein::Adhesin, 2),
             (MembraneProtein::Toxin, 2),
             (MembraneProtein::Transporter, 2),
-        ]));
-        assert_eq!(many.len(), MAX_OVERLAYS);
+        ]), CAPS);
+        assert_eq!(many.len(), CAPS.total);
+        // The mode sets the caps: Full allows more than Standard.
+        let more = overlay_plan(&proteome(&[(MembraneProtein::Flagellum, 5)]), DisplayMode::Full.overlay_caps());
+        assert_eq!(more.len(), 3);
     }
 
     #[test]
     fn overlays_are_spaced_round_the_rim() {
-        for count in 1..=MAX_OVERLAYS {
+        for count in 1..=CAPS.total {
             let mut rows: Vec<_> = (0..count).map(|i| spaced_row(i, count)).collect();
             rows.sort();
             rows.dedup();
