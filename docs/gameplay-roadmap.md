@@ -649,6 +649,32 @@ Original plan:
 2. Water channel and desiccation. Cuticle / thick membrane.
 3. Land drag value. Tissue at its most complex.
 
+### Codex browser (first pass of the genome editor)
+
+The Codex overlay shows the catalog of all genes and membrane proteins
+(`codex_catalog`, `screens::codex`). It is not a `GameState`: a state change
+would remove the run, so it opens over the menu (button), Prepare (button) and
+Manage (key C). Esc closes it.
+
+- Data: one `CodexEntry` for each `BlockKind::ALL` and `MembraneProtein::ALL`.
+  Numbers come from `block_spec`, `proteins` and the action constants. Only
+  text is written by hand, in `gene_facts` and `protein_facts`. Both are
+  `match` blocks with no wildcard arm. **A new gene or protein is one new arm**
+  (plus its icon in `gene_icon` or `overlay_sheet`).
+- Cards: grouped by category, with icon, name and a badge: unknown (a black
+  silhouette and "?"), in codex, the gene state in the genome that is shown
+  (expressed, enhanced, mutated, silent), or the count on the cell for a
+  membrane protein. The filter row: all, genes, membrane proteins, owned.
+- Detail panel (hover or click): category, first stage, source, effect, flows,
+  cofactors, costs, and a note on real biology.
+- Edit, no new rules: in Manage, "Queue enzyme" and "Queue protein" send
+  `QueueProtein`. In Prepare, "Add to loadout" and "Remove from loadout" use
+  `prepare::toggle`. In the menu the overlay only shows.
+- Not done: recycle from the overlay, a known state for membrane proteins that
+  the player never made (all are known now), search, a scroll for small
+  windows, and entries for the planned pilus and T6SS proteins (they need only
+  two new arms).
+
 ## 5. Open questions
 
 - Time rules for the editor outside shelters (stop, slow, or full speed).

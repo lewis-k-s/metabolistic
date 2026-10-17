@@ -72,11 +72,12 @@ const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
 const MAX_LOADING_FRAMES: u32 = 600;
 
 /// Each step: a screen, and for the menu, the page.
-const SEQUENCE: [(GameState, Option<MenuPage>); 21] = [
+const SEQUENCE: [(GameState, Option<MenuPage>); 23] = [
     (GameState::Menu, Some(MenuPage::Main)),
     (GameState::Menu, Some(MenuPage::Settings)),
     (GameState::Prepare, None),
     (GameState::Run, None),
+    (GameState::Manage, None),
     (GameState::Manage, None),
     (GameState::Manage, None),
     (GameState::Manage, None),
@@ -94,6 +95,7 @@ const SEQUENCE: [(GameState, Option<MenuPage>); 21] = [
     (GameState::Run, None),
     (GameState::RunOver, None),
     (GameState::Menu, Some(MenuPage::Main)),
+    (GameState::Menu, Some(MenuPage::Main)),
 ];
 
 /// Steps of the M4 checks.
@@ -105,21 +107,24 @@ const STEP_MANAGE_PANEL: usize = 5;
 const STEP_MANAGE_SOCKET: usize = 6;
 const STEP_MANAGE_TIP: usize = 7;
 const STEP_MANAGE_LIMIT: usize = 8;
-const STEP_RUN_AGAIN: usize = 9;
+/// The Codex overlay on the Manage screen (C), and in the menu (last step).
+const STEP_MANAGE_CODEX: usize = 9;
+const STEP_MENU_CODEX: usize = 22;
+const STEP_RUN_AGAIN: usize = 10;
 /// The gate chamber view.
-const STEP_GATE_VIEW: usize = 10;
+const STEP_GATE_VIEW: usize = 11;
 /// The stage-complete screen. The run state moves to shallow water here.
-const STEP_STAGE_COMPLETE: usize = 11;
+const STEP_STAGE_COMPLETE: usize = 12;
 /// The shallow-water steps (M7).
-const STEP_SHALLOW: usize = 12;
-const STEP_SHALLOW_CATALASE: usize = 13;
-const STEP_SHALLOW_GATE: usize = 14;
+const STEP_SHALLOW: usize = 13;
+const STEP_SHALLOW_CATALASE: usize = 14;
+const STEP_SHALLOW_GATE: usize = 15;
 /// The second stage-complete screen. The run state moves to land here.
-const STEP_STAGE_COMPLETE_2: usize = 15;
+const STEP_STAGE_COMPLETE_2: usize = 16;
 /// The land steps (M8).
-const STEP_LAND: usize = 16;
-const STEP_LAND_DRY: usize = 17;
-const STEP_LAND_GATE: usize = 18;
+const STEP_LAND: usize = 17;
+const STEP_LAND_DRY: usize = 18;
+const STEP_LAND_GATE: usize = 19;
 
 /// The player must move at least this far (pixels) while W is held on the
 /// Run screen.
@@ -161,7 +166,7 @@ pub fn plugin(app: &mut App) {
     .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage))
     // After the UI focus system, so that a pressed button stays pressed for the
     // screen's own systems of this frame.
-    .add_systems(PreUpdate, smoke_manage.after(bevy::ui::UiSystems::Focus))
+    .add_systems(PreUpdate, (smoke_manage, smoke_codex).after(bevy::ui::UiSystems::Focus))
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
 }
@@ -634,6 +639,66 @@ fn smoke_land(
 #[derive(Default)]
 struct ManageSmoke {
     orders_before: usize,
+}
+
+/// The Codex checks. The overlay opens with the key C on the Manage screen,
+/// shows one card for every gene and membrane protein, and a button press
+/// queues a membrane protein. The last step opens it from the menu.
+fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
+    use crate::codex_catalog::{Edit, EntryId};
+    use crate::screens::codex::{smoke_open, smoke_press_edit, smoke_probe, smoke_show};
+    let (step, frame) = {
+        let smoke = world.resource::<SmokeTest>();
+        (smoke.step, smoke.frames_in_step)
+    };
+    let state = world.resource::<State<GameState>>().get().clone();
+    let all = BlockKind::ALL.len() + MembraneProtein::ALL.len();
+    match (step, frame, state) {
+        (STEP_MANAGE_CODEX, 5, GameState::Manage) => {
+            // Press C, as the player does.
+            world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyC);
+        }
+        (STEP_MANAGE_CODEX, 6, GameState::Manage) => {
+            world.resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::KeyC);
+        }
+        (STEP_MANAGE_CODEX, 20, GameState::Manage) => {
+            let probe = smoke_probe(world);
+            assert!(probe.open, "smoke test: C did not open the codex");
+            assert_eq!(probe.cards, all, "smoke test: the codex has a card for every entry");
+            smoke_show(world, EntryId::Protein(MembraneProtein::Toxin));
+            if let Some(cell) = world.query_filtered::<&ControlledCell, With<LocalPlayer>>().iter(world).next().map(|c| c.0) {
+                memory.orders_before = world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
+            }
+        }
+        (STEP_MANAGE_CODEX, 30, GameState::Manage) => {
+            let toxin = ProteinTarget::Membrane(MembraneProtein::Toxin);
+            assert!(
+                smoke_probe(world).edit_buttons.contains(&Edit::Queue(toxin)),
+                "smoke test: the codex detail panel has no queue button"
+            );
+            smoke_press_edit(world, Edit::Queue(toxin));
+        }
+        (STEP_MANAGE_CODEX, 50, GameState::Manage) => {
+            let cell = world
+                .query_filtered::<&ControlledCell, With<LocalPlayer>>()
+                .iter(world)
+                .next()
+                .map(|c| c.0)
+                .expect("smoke test: a player cell");
+            let orders = world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
+            assert!(orders > memory.orders_before, "smoke test: the codex button queued no protein");
+            info!("smoke test: the codex opened with C and queued a protein");
+            smoke_show(world, EntryId::Gene(BlockKind::Respiration));
+        }
+        (STEP_MENU_CODEX, 5, GameState::Menu) => smoke_open(world, true),
+        (STEP_MENU_CODEX, 20, GameState::Menu) => {
+            let probe = smoke_probe(world);
+            assert!(probe.open && probe.cards == all, "smoke test: the menu codex shows {} cards", probe.cards);
+            smoke_show(world, EntryId::Gene(BlockKind::Fermentation));
+            info!("smoke test: the codex opened from the menu with {} cards", probe.cards);
+        }
+        _ => {}
+    }
 }
 
 /// The Manage checks. The picks are what a click and a hover send (the smoke

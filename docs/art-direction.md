@@ -414,3 +414,18 @@ screen can tint them. Previews of the new sprites are in
   colony, `Multicellularity`) reuses `gate_cell_phototroph`: it should become a
   cluster of three or four small cells in one halo, with no victory clip of its own yet.
   A cell with low hydration needs a look too (now only the HUD bar).
+
+## Missing art for the Codex screen
+
+The Codex screen (`screens::codex`) shows a plain labelled tile where an entry
+has no art. The list below is what is missing now. A pathway icon is
+`pathway_icon_<gene>.png` (see "Proteins, plates and icons"); add it to
+`PATHWAY_ICONS` in `src/codex_catalog.rs`.
+
+- Pathway icons for genes with no block yet: `SugarCatabolism`,
+  `OrganicAcidOxidation`, `NitrogenSulfurAssimilation`,
+  `AromaticPrecursorSynthesis`, `Polymerization`, `Multicellularity`.
+- A card frame for each badge (unknown, in codex, expressed, mutated, silent) and a
+  "?" silhouette. The cards use a flat colour and a black tint now.
+- A still image for each membrane protein. The cards use frame 0 of the `idle`
+  clip of its overlay sheet (the east direction).

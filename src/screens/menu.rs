@@ -27,6 +27,7 @@ pub enum MenuPage {
 enum MenuAction {
     Open(GameState),
     Page(MenuPage),
+    Codex,
     Quit,
 }
 
@@ -39,6 +40,7 @@ fn spawn_main_page(mut commands: Commands) {
             label("Metabolistic", 80.0),
             button("Start", MenuAction::Open(GameState::Prepare)),
             button("Manage", MenuAction::Open(GameState::Manage)),
+            button("Codex", MenuAction::Codex),
             button("Settings", MenuAction::Page(MenuPage::Settings)),
             button("Quit", MenuAction::Quit),
         ],
@@ -62,6 +64,7 @@ fn menu_buttons(
     mut next_state: ResMut<NextState<GameState>>,
     mut next_page: ResMut<NextState<MenuPage>>,
     mut exit: MessageWriter<AppExit>,
+    mut codex: ResMut<super::codex::CodexUi>,
 ) {
     for (interaction, action) in &buttons {
         if *interaction != Interaction::Pressed {
@@ -70,6 +73,7 @@ fn menu_buttons(
         match action {
             MenuAction::Open(state) => next_state.set(state.clone()),
             MenuAction::Page(page) => next_page.set(*page),
+            MenuAction::Codex => codex.open = true,
             MenuAction::Quit => {
                 exit.write(AppExit::Success);
             }
