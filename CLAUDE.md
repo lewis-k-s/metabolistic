@@ -21,10 +21,11 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `envgrid.rs`: `EnvGrid`, the spatial grid (Heat, Minerals): pure diffusion, drift, source and decay steps, sampling
 - `exchange.rs`: grid <-> cell exchange (mineral uptake, heat damage, movement ATP cost) in the metabolic tick
 - `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold to reel, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on the left mouse button, injector on the right). Bindings on the Run screen: WASD moves, Shift is the flagellum burst, the four action slots are the left, right, back and forward mouse buttons (keys 1-4 also work). The flagellum trails the move direction (`ActionState::heading`); aimed proteins point at the cursor (`aim`)
+- `lighting.rs`: the pure light field (ambient + heat + shaft light) and the lightmap; `world/lighting_view.rs` draws it as a banded, dithered darkness overlay (`assets/shaders/lighting.wgsl`). Plan: `docs/art-direction.md`, "Light and darkness"
 - `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
 - `level.rs`: the hand-built vent field
 - `run.rs`: death detection and `RunSummary`
-- `world/`: the run world (full only): grid texture, vents, player body (avian2d), camera, HUD
+- `world/`: the run world (full only): grid texture (O2, water, land minerals; heat, light and vent minerals are drawn by the lighting), sea floor, vents, `vfx` (vent smoke and sparkles, `bevy_enoki`), player body (avian2d), camera, HUD
 - `metabolism/`: Core metabolic flow simulation and graph management
 - `codex_catalog.rs`: the catalog of all genes and membrane proteins (`CodexEntry`), pure state and edit rules. A new `BlockKind` or `MembraneProtein` needs one arm in `gene_facts` or `protein_facts`, and a real gene symbol in `gene_symbol`
 - `genome_map.rs`: the pure layout of the Codex genome: a circular chromosome folded into rows (`GenomeLayout`), one locus per catalog entry, the wobble and helix formulas, the hit test (`pick`) and the colour of a locus (`Look`). `assets/shaders/genome.wgsl` uses the same geometry
@@ -87,6 +88,7 @@ Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `smoke_test`) c
 ### Development Tools (In-Game)
 - **Inspector**: F1 to open runtime debugging and inspection tools
 - **UI Debug**: `` ` `` (backquote) toggles UI node outlines
+- **Lighting**: `F6` turns the darkness overlay on and off (Run screen). The light is `lighting.rs` (pure) and `world/lighting_view.rs`
 - **Screen Navigation**: `Tab` zooms between Run and Manage; `Esc` returns to the menu
 
 ## Code Patterns

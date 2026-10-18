@@ -55,7 +55,9 @@ uv run --with numpy art/gen_sprites.py
 6. **The membrane is a visible rim** on every cell: a lighter band at the
    edge. Later, its width and colour can show membrane integrity.
 7. **Glow is dithered** (an ordered 4x4 pattern), not blended. It marks
-   things that matter: the vent heat, the symbiont, the gate cell.
+   things that matter: the vent heat, the symbiont, the gate cell. Scene light
+   and darkness follow the same rule (see "Light and darkness"). The one blend
+   is a weak bloom, and only on emissive pixels.
 8. **Walls are cross-sections.** A wall piece shows the bilayer cut open, as a
    band. This is the usual way to draw a wall from above, and it shows what the
    wall is made of.
@@ -85,6 +87,7 @@ uv run --with numpy art/gen_sprites.py
 | `wall_membrane_pore` | 32x26 | M5, wall with a transporter |
 | `vent_chimney_top` | 128x128 | M2, vent core: Heat and Minerals source |
 | `vent_plume_top` | 128x128 | M2, smoke overlay. Draw above creatures |
+| `seafloor` | 128x128, tiles | Vent level: the deep-sea floor (sediment, pebbles, fine cracks, low contrast). Tiled under the grid image |
 | `vent_chimney_side` | 72x120 | Menu, loading and codex art. Not for the Run screen |
 
 ## Animation
@@ -378,6 +381,179 @@ cell moves. It is a placeholder until the proteome says which overlays to draw.
 `anchor_px` is rounded down to a whole pixel, so a sprite never sits on a half
 pixel (the cell frames are centred on 32.5).
 
+## Light and darkness
+
+Status: 2026-10-18. Phase 1 (lightmap, darkness overlay, debug key F6) is in
+the game, and so are the floor sprite and the vent particles (moved forward
+from phase 3). The other phases are not.
+
+**Changes after the first phase-1 build.** The grid image no longer draws the
+Heat and Light bands (the orange glow round the vents and the yellow and
+violet light zones). The lighting shows the vents and the UV shafts on its
+own. The grid still draws O2, water and, on land, minerals. In the vents and in
+shallow water the minerals are fine cyan specks (1 sprite pixel, a BAYER4
+dither of the mineral level, at most 40 % of the pixels), drawn by the
+lighting shader on the additive quad from the alpha channel of the lightmap.
+The grid texel is 4 world pixels, which was too coarse for a dither. The vent level has a
+textured floor sprite (`seafloor`, tiled at z -20, under the grid image), and
+the darkness darkens it like the rest. The burn zone (heat from about 30 to
+60) turns white in the light, so it is the brightest and whitest area. The
+quads reach 1200 units past the field and the lightmap is clamped at its
+edge, so there is no seam at the field edge.
+
+The sprites carry their own light (rule 2), and the background is one flat
+colour. This plan adds scene light: the field is dark far from a vent or a
+light shaft, and some entities glow. The vent stage is the darkest. The
+darkness is part of the play there.
+
+### The light field comes from the grid
+
+The game does not use light entities. The light at a point is a pure function
+of the grid:
+
+```
+light(x) = ambient(level) + k_heat * Heat(x) + k_light * Light(x) + splats(x)
+```
+
+- `Heat` gives warm light (the `vent` ramp), `Light` gives cool light. In the
+  vents all light is UV, so the shaft light is a pale violet (a blacklight).
+- `splats` are small, soft additions from emitters: fluorescent cells, toxin
+  droplets, stun flashes.
+- The light falls off from a vent or a shaft with the same diffusion and drift
+  as the simulation. The plume drift moves the glow, and the burn zone is the
+  brightest area. There is no second falloff to tune.
+- `ambient` is set for each level: vents about 0.08, shallow water a gradient
+  with depth, land 1.0. Shallow water and land are bright, so the darkness is
+  mostly a vent-stage look.
+- The lightmap is a pure function of `EnvGrid`, the level and the emitter list.
+  Test it without a window, like `render_grid`: light falls as the distance
+  from a vent increases, it never goes below the ambient, and a shaft is lit.
+- The light is for the player's view only. It does not change the simulation.
+
+### How it is drawn
+
+One camera. No lighting crate: the main light source is the grid, and each
+crate is one more dependency that can hold back a Bevy upgrade.
+
+1. **Lightmap.** After each metabolic tick, the CPU writes one RGB texel for
+   each grid cell (or 2 x 2) into a small texture with linear filtering.
+2. **Darkness overlay.** A `Material2d` quad above the world, with normal alpha
+   blending: colour = the darkest tone of the `WATER` ramp, alpha = 1 - light.
+   Cells fade into deep-sea navy, not into black. A second, additive quad
+   adds the warm tint near the vents.
+3. **Bands and dither.** The shader snaps each fragment to a sprite pixel
+   (`PIXEL_SCALE`), sorts the light into about 5 bands, and dithers the band
+   edges with `BAYER4`. A sprite pixel is either in a band or not. There is no
+   soft gradient on the screen.
+4. **Emissive layer.** Glow sprites are drawn above the darkness, so the
+   darkness does not hide them. The camera has HDR and a weak `Bloom` with a
+   threshold above 1. Only emissive pixels pass the threshold, so only they
+   bloom.
+5. **Debug.** A dev key turns the lighting off. The smoke test saves one
+   screenshot with the lighting on.
+
+Later (v2): a render target for small moving lights, and wall shadows from
+`WallMap`.
+
+**Baked light and scene light.** The sprites keep their upper-left light.
+The scene light only changes how much of each sprite you see, and its tint.
+The rim mask (see below) can later give a lit edge on the side of the cell
+that faces a vent.
+
+### Fluorescence
+
+- **The biology.** Real vents give off a faint glow (thermal radiation and
+  chemiluminescence). A green sulfur bacterium from an East Pacific Rise vent
+  does photosynthesis with this geothermal light, which is a good origin
+  story for `gate_cell_phototroph`. Fluorescence is light that a molecule
+  gives back after UV excites it. The vent shafts are all UV, so an entity
+  glows strongly inside a shaft.
+- **Glow floor.** Outside the shafts, a fluorescent entity keeps a small,
+  stylized glow. This is the one place where the look is more important than
+  accuracy: without it, the glowing entities would be dark in the dark.
+  Emission = floor + gain x local UV.
+- **No bioluminescence in the vents.** Most luciferases need O2, and the vents
+  have none. Bioluminescence can come later, in shallow water, as a lure or a
+  signal.
+- **Selective.** Glow gives information to the player. Each glow uses the
+  highlight tone of the role's own ramp, so rule 4 stays true.
+
+| Entity | Glow | Why |
+|---|---|---|
+| Prey | dim, periwinkle | food that you can find (flavins fluoresce) |
+| Pigment prey | strong in UV, at the edge of shaft A | it shows the way to the pigment gene |
+| Gate phototroph | red halo (bacteriochlorophyll) | the goal is a beacon |
+| Symbiont | gold (its glow now) | - |
+| Mineral and metal pickups | a glint when lit; minerals fluoresce in UV | real minerals fluoresce |
+| Predator | none | tension: you see it as a shape against lit areas, and by its wake in the marine snow |
+| Virus | none | a hidden threat |
+| Player | none at first | a later light-sensing gene can make the view larger |
+
+**Masks from the generator.** `art/gen_sprites.py` also writes, frame for
+frame, `<name>_emit.png` (the pixels that fluoresce) and `<name>_rim.png` (the
+membrane band). The atlas layout is the same as the main sheet, so a child
+sprite uses the same atlas index. One material, `DitherGlow` (colour,
+intensity, time), draws a mask as hard on/off pixels: a pixel is on when the
+intensity is above its `BAYER4` threshold. The same material draws
+fluorescence, the pigment glimmer and the UV burn sparkle.
+
+### Pigments
+
+- **Glimmer.** A cell with pigment shows a dithered sparkle on its rim mask, in
+  the pigment colour. Intensity = local UV x shield (`P / (10 + P)`). The
+  threshold offset changes with time, so the pixels twinkle. The sparkle shows
+  that the shield works, without the HUD. As the pigment decays, the sparkle
+  fades.
+- **Burn.** A cell without pigment gets a damage flicker on the same rim
+  instead. The contrast between the two teaches the rule.
+- **Stages.** Vents: a rare glimmer in the dark. Shallow water: pigment is the
+  main protection, and it also tints the body by pool size. Land: a full body
+  tint, and the glimmer only in very strong UV.
+- **Colour (open).** Orange (carotenoid) conflicts with Heat (rule 5). Violet
+  conflicts with the UV light and the virus. Candidates: a rose-amber
+  carotenoid, or a brown-gold scytonemin. Later the pigment type can be a
+  choice of the player.
+
+### Particles
+
+Status: the vent smoke and sparkles are in the game (`world::vfx`). The rest
+is not.
+
+Use `bevy_enoki` 0.7 (it supports Bevy 0.19). It is made for 2D, works on
+WebGL2 and hot-reloads its effect files. `bevy_hanabi` needs compute shaders,
+so it does not run on WebGL2. The module is `world::vfx`: `particles.rs` is
+already the pickups module.
+
+- **Vent smoke and sparkles (in the game).** Each vent has a dense smoke
+  column (dark grey-brown puffs, the `waste` ramp) in two layers: big puffs
+  that grow from 10 to 48 px as they rise (9 s life), and thin wisps. The rise
+  slows with age and the Heat drift of the grid bends the column, so it fans
+  out at the top. It is in the lit layer (z 6, below the darkness). It also has
+  sparkles (small light-orange and yellow specks, the `vent` ramp) that rise
+  and twinkle out. Sparkles are emissive: they are drawn above the darkness
+  (z 30). A replacement vertex shader snaps every particle to the sprite pixel
+  grid, and the particle shader draws palette tones with a dither fade.
+- A small particle material snaps each particle to a sprite pixel and uses
+  palette colours only. Particles fade out with dither, not with alpha.
+- Particles are drawn in the lit layer, so the darkness hides them, unless
+  they are emissive (sparks, stun, glints).
+
+| Kind | Effects |
+|---|---|
+| Atmosphere | **marine snow**: slow specks that are visible only near light. It is the most important effect, because it shows the light falloff. Vent sparks and smoke. Mineral specks that move with the grid drift. |
+| Actions | flagellum wake, toxin trail, pilus shot and reel, injector stun sparks |
+| Events | pickup glint, UV burn sparkles, engulf debris |
+
+### Phases
+
+1. Lightmap, darkness overlay with bands, level ambient, debug key, smoke-test
+   screenshot.
+2. Emissive masks from the generator, `DitherGlow`, glow data for each NPC
+   kind, bloom.
+3. Marine snow (`bevy_enoki`). Vent smoke and sparkles are done.
+4. Action and event effects.
+5. Pigment glimmer and tint, ambient for shallow water and land.
+
 ## Metabolism view
 
 The Manage screen shows a cross-section of the cell (see `metabolism-view.md`).
@@ -458,6 +634,9 @@ screen can tint them. Previews of the new sprites are in
   as stand-ins (pale yellow `#fff4b4` with a violet edge `#7c52cc`, dithered).
   The art owner must pick the real light ramp and rays. Also the gene orb in
   the game is still the plain sheet with no glow.
+- Scene light, fluorescence, pigment glimmer and particles: see "Light and
+  darkness" (a plan, nothing in the game yet). The art owner must pick the
+  pigment colour, the warm and cool light tints and the number of light bands.
 - UI frame, icons for the 4 action slots, HUD bars.
 - Shallow-water and land palettes. The water backdrop and the rock ramp are for
   the vent stage only.

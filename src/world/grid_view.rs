@@ -4,9 +4,15 @@
 //! `TEXELS_PER_CELL` texels along each side of a grid cell, so each texel is a
 //! few world pixels. The image is rewritten after each metabolic tick.
 //!
-//! Colours follow `docs/art-direction.md`: heat is orange and red, minerals are
-//! cyan, O2 is a sea green. Light (UV) is pale yellow with a violet edge: the art doc has no light
-//! colour yet, so these are stand-ins (see its "Not done yet" list). A glow is dithered with an ordered 4x4 pattern: a texel is either
+//! The grid draws O2 and water, and minerals on land. **Heat and light are not
+//! drawn here**: the darkness overlay (`lighting_view`) shows the vents and the UV
+//! shafts as light. `heat_glow` and `light_glow` stay, because the Manage
+//! screen draws the outside of the cell with their colours. In the vents and
+//! in shallow water the minerals are fine cyan specks in the lighting shader:
+//! the grid texel is 4 world pixels, too coarse for a dither.
+//!
+//! Colours follow `docs/art-direction.md`: minerals are cyan, O2 is a sea
+//! green. A glow is dithered with an ordered 4x4 pattern: a texel is either
 //! fully set or fully clear, never blended. `render_grid` is a pure function
 //! of the grid, so the colours and the dither can be tested without a window.
 
@@ -54,9 +60,9 @@ const HEAT_BANDS: [Band; 4] = [
 
 /// Mineral bands (the `mineral` ramp of the art doc).
 const MINERAL_BANDS: [Band; 3] = [
-    Band { lo: 0.3, hi: 3.0, color: [0x1d, 0x7a, 0xa8] },
-    Band { lo: 2.0, hi: 8.0, color: [0x3e, 0xc0, 0xe0] },
-    Band { lo: 8.0, hi: 20.0, color: [0x92, 0xec, 0xff] },
+    Band { lo: 1.2, hi: 6.0, color: [0x1d, 0x7a, 0xa8] },
+    Band { lo: 5.0, hi: 14.0, color: [0x3e, 0xc0, 0xe0] },
+    Band { lo: 14.0, hi: 30.0, color: [0x92, 0xec, 0xff] },
 ];
 
 /// Light bands: a violet edge, then pale yellow. The bands start where the
@@ -71,14 +77,6 @@ const LIGHT_BANDS: [Band; 2] = [
 const O2_BANDS: [Band; 2] = [
     Band { lo: 0.4, hi: 3.0, color: [0x2a, 0x8c, 0x6a] },
     Band { lo: 2.5, hi: 8.0, color: [0x9a, 0xf0, 0xcc] },
-];
-
-/// Light bands of shallow water. Light covers the whole upper water, so the
-/// bands draw only the strong light near the surface, where UV hurts: a warm
-/// pale yellow, and a violet edge. Below that the water is plain.
-const SURFACE_LIGHT_BANDS: [Band; 2] = [
-    Band { lo: 3.0, hi: 6.0, color: [0x7c, 0x52, 0xcc] },
-    Band { lo: 5.5, hi: 9.5, color: [0xff, 0xf4, 0xb4] },
 ];
 
 /// Water bands (M8): a deep blue edge, then a pale blue. The art doc has no
@@ -120,33 +118,26 @@ pub fn light_glow(level: f32) -> Vec<(Color, f32)> {
 /// How a level draws its grid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridStyle {
-    light_bands: &'static [Band],
     /// Draw the O2 layer. On land the air holds O2 everywhere, so it is not drawn.
     draw_o2: bool,
     /// Draw the water layer (land only).
     draw_water: bool,
+    /// Draw the mineral layer. The vents and shallow water draw minerals in
+    /// the lighting shader instead, as fine specks (see `lighting_view`).
+    draw_minerals: bool,
 }
 
 impl GridStyle {
     /// The style of a field.
     pub fn for_field(field: crate::level::FieldKind) -> Self {
         match field {
-            crate::level::FieldKind::Vents => {
-                Self { light_bands: &LIGHT_BANDS, draw_o2: true, draw_water: false }
+            crate::level::FieldKind::Vents | crate::level::FieldKind::Shallow => {
+                Self { draw_o2: true, draw_water: false, draw_minerals: false }
             }
-            crate::level::FieldKind::Shallow => {
-                Self { light_bands: &SURFACE_LIGHT_BANDS, draw_o2: true, draw_water: false }
-            }
-            // Light is the same everywhere on land, so it is not drawn.
-            crate::level::FieldKind::Land => {
-                Self { light_bands: &[], draw_o2: false, draw_water: true }
-            }
+            crate::level::FieldKind::Land => Self { draw_o2: false, draw_water: true, draw_minerals: true },
         }
     }
 }
-
-/// Heat level from which heat is drawn over light.
-const HEAT_OVER_LIGHT: f32 = 25.0;
 
 /// The dither threshold of a texel.
 fn dither(tx: usize, ty: usize) -> f32 {
@@ -182,7 +173,7 @@ pub fn texture_size(grid: &EnvGrid) -> (usize, usize) {
 }
 
 /// RGBA8 pixels of the grid, row 0 at the top. A texel is clear (alpha 0) or
-/// fully set (alpha 255). Strong heat is drawn over light, light over weak heat, and heat over minerals.
+/// fully set (alpha 255). Water is drawn over O2, and O2 over minerals.
 pub fn render_grid(grid: &EnvGrid) -> Vec<u8> {
     render_grid_styled(grid, GridStyle::for_field(crate::level::FieldKind::Vents))
 }
@@ -204,10 +195,6 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
             // One set of taps for all channels. A channel below its lowest band
             // cannot draw anything here, so it is not interpolated.
             let taps = bilinear_taps(dims, origin, pos);
-            let heat = level_at(&taps, grid.layer(Channel::Heat), HEAT_BANDS[0].lo);
-            let light = style.light_bands.first().map_or(0.0, |band| {
-                level_at(&taps, grid.layer(Channel::Light), band.lo)
-            });
             let o2 = if style.draw_o2 {
                 level_at(&taps, grid.layer(Channel::O2), O2_BANDS[0].lo)
             } else {
@@ -218,17 +205,12 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
             } else {
                 0.0
             };
-            let minerals = level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo);
-            // Strong heat is drawn over light. Weak heat is not, so the faint
-            // halo of a vent does not hide a shaft.
-            let color = if heat >= HEAT_OVER_LIGHT {
-                band_color(&HEAT_BANDS, heat, threshold)
+            let minerals = if style.draw_minerals {
+                level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo)
             } else {
-                None
-            }
-            .or_else(|| band_color(style.light_bands, light, threshold))
-            .or_else(|| band_color(&HEAT_BANDS, heat, threshold))
-            .or_else(|| band_color(&WATER_BANDS, water, threshold))
+                0.0
+            };
+            let color = band_color(&WATER_BANDS, water, threshold)
             .or_else(|| band_color(&O2_BANDS, o2, threshold))
             .or_else(|| band_color(&MINERAL_BANDS, minerals, threshold));
             if let Some([r, g, b]) = color {
@@ -293,6 +275,29 @@ pub fn spawn_grid_view(commands: &mut Commands, grid: &EnvGrid, style: GridStyle
             ));
         }
     });
+}
+
+/// Z of the sea floor (below the grid image, which is at -10).
+const FLOOR_Z: f32 = -20.0;
+/// The floor reaches this far past the field, so the camera never sees the
+/// clear colour at the edge.
+const FLOOR_MARGIN: f32 = 1200.0;
+
+/// Spawns the deep-sea floor: one tiled sprite (`seafloor.png`, 128 x 128)
+/// under the grid image. One sprite pixel is one world unit.
+pub fn spawn_floor(commands: &mut Commands, asset_server: &AssetServer, origin: Vec2, size: Vec2) {
+    let center = origin + size * 0.5;
+    commands.spawn((
+        Name::new("Sea Floor"),
+        Sprite {
+            image: asset_server.load("sprites/seafloor.png"),
+            custom_size: Some(size + Vec2::splat(2.0 * FLOOR_MARGIN)),
+            image_mode: SpriteImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 },
+            ..default()
+        },
+        Transform::from_translation(center.extend(FLOOR_Z)),
+        DespawnOnExit(InRun),
+    ));
 }
 
 /// Z of the vent chimney (below the creatures).
@@ -397,81 +402,67 @@ mod tests {
     #[test]
     fn the_image_has_no_partial_transparency() {
         let grid = level::vent_field();
-        let data = render_grid(&grid);
+        // The land style draws the minerals of the vent field.
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
         assert_eq!(data.len(), texture_size(&grid).0 * texture_size(&grid).1 * 4);
         assert!(data.chunks(4).all(|px| px[3] == 0 || px[3] == 255));
         assert!(data.chunks(4).any(|px| px[3] == 255), "something is drawn");
     }
 
     #[test]
-    fn heat_is_orange_or_red_and_minerals_are_cyan() {
+    fn heat_and_light_are_not_drawn() {
+        // The lighting overlay shows them. The grid draws neither.
         let mut grid = EnvGrid::centered(8, 8);
-        let (width, _) = texture_size(&grid);
-        // A hot cell and a mineral cell, far apart.
-        grid.set_level(Channel::Heat, 1, 1, 30.0);
-        grid.set_level(Channel::Minerals, 6, 6, 30.0);
-        let data = render_grid(&grid);
-        let mut heat_texels = 0;
-        let mut mineral_texels = 0;
-        for ty in 0..texture_size(&grid).1 {
-            for tx in 0..width {
-                if alpha(&data, width, tx, ty) == 0 {
-                    continue;
-                }
-                let i = (ty * width + tx) * 4;
-                let [r, b] = [data[i], data[i + 2]];
-                if r > b {
-                    heat_texels += 1; // red, orange or yellow
-                } else {
-                    assert!(b > r, "mineral colours are cyan");
-                    mineral_texels += 1;
-                }
+        for y in 0..8 {
+            for x in 0..8 {
+                grid.set_level(Channel::Heat, x, y, 100.0);
+                grid.set_level(Channel::Light, x, y, 10.0);
             }
         }
-        assert!(heat_texels > 10 && mineral_texels > 10);
+        assert!(render_grid(&grid).chunks(4).all(|px| px[3] == 0));
     }
 
     #[test]
-    fn light_is_pale_yellow_with_a_violet_edge() {
+    fn vents_leave_minerals_to_the_lighting() {
+        let mut grid = EnvGrid::centered(8, 8);
+        grid.set_level(Channel::Minerals, 4, 4, 30.0);
+        assert!(render_grid(&grid).chunks(4).all(|px| px[3] == 0));
+    }
+
+    #[test]
+    fn minerals_are_cyan() {
         let mut grid = EnvGrid::centered(8, 8);
         let (width, height) = texture_size(&grid);
-        // A strong shaft in column 4, a faint edge in column 2.
-        for y in 0..8 {
-            grid.set_level(Channel::Light, 4, y, 10.0);
-            grid.set_level(Channel::Light, 2, y, 1.0);
-        }
-        let data = render_grid(&grid);
-        let (mut yellow, mut violet) = (0, 0);
+        grid.set_level(Channel::Minerals, 6, 6, 30.0);
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
+        let mut texels = 0;
         for ty in 0..height {
             for tx in 0..width {
                 if alpha(&data, width, tx, ty) == 0 {
                     continue;
                 }
                 let i = (ty * width + tx) * 4;
-                match [data[i], data[i + 1], data[i + 2]] {
-                    [0xff, 0xf4, 0xb4] => yellow += 1,
-                    [0x7c, 0x52, 0xcc] => violet += 1,
-                    other => panic!("unexpected colour {other:?}"),
-                }
+                assert!(data[i + 2] > data[i], "mineral colours are cyan");
+                texels += 1;
             }
         }
-        assert!(yellow > 20 && violet > 10, "yellow {yellow}, violet {violet}");
+        assert!(texels > 10);
     }
 
     #[test]
     fn a_stronger_glow_sets_more_texels() {
-        let count = |heat: f32| {
+        let count = |minerals: f32| {
             let mut grid = EnvGrid::centered(8, 8);
             for y in 0..8 {
                 for x in 0..8 {
-                    grid.set_level(Channel::Heat, x, y, heat);
+                    grid.set_level(Channel::Minerals, x, y, minerals);
                 }
             }
-            render_grid(&grid).chunks(4).filter(|px| px[3] == 255).count()
+            render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land)).chunks(4).filter(|px| px[3] == 255).count()
         };
         assert_eq!(count(0.0), 0);
-        assert!(count(2.0) < count(3.0));
-        assert!(count(3.0) < count(5.0));
+        assert!(count(2.0) < count(4.0));
+        assert!(count(4.0) < count(8.0));
         // Above the top band, every texel is set.
         let full = 8 * TEXELS_PER_CELL * 8 * TEXELS_PER_CELL;
         assert_eq!(count(100.0), full);
@@ -489,13 +480,13 @@ mod tests {
 
     #[test]
     fn the_image_follows_world_y_upwards() {
-        // Heat in the top row of grid cells must light the top rows of texels.
+        // Minerals in the top row of grid cells must set the top rows of texels.
         let mut grid = EnvGrid::centered(4, 4);
         for x in 0..4 {
-            grid.set_level(Channel::Heat, x, 3, 100.0);
+            grid.set_level(Channel::Minerals, x, 3, 100.0);
         }
         let (width, height) = texture_size(&grid);
-        let data = render_grid(&grid);
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
         assert_eq!(alpha(&data, width, 5, 0), 255, "top row is set");
         assert_eq!(alpha(&data, width, 5, height - 1), 0, "bottom row is clear");
     }

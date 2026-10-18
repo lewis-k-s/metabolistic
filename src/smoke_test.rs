@@ -220,6 +220,8 @@ fn drive_smoke_test(
     mut zoom: ResMut<crate::screens::zoom::ScreenZoom>,
     mut codex: ResMut<crate::screens::codex::CodexUi>,
     genome: Res<crate::screens::codex::GenomeView>,
+    lighting: Res<crate::world::lighting_view::LightingOn>,
+    darkness: Query<(), With<crate::world::lighting_view::DarknessQuad>>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -322,6 +324,9 @@ fn drive_smoke_test(
                 }
             }
             if target == GameState::Run {
+                // The lighting is on during the Run steps, so the screenshot shows it.
+                assert!(lighting.0, "smoke test: the lighting is off on the Run screen");
+                assert!(darkness.iter().count() == 2 || smoke.step >= STEP_LAND, "smoke test: the darkness overlay is missing");
                 assert!(
                     players
                         .iter()
