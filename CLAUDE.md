@@ -59,6 +59,13 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
 - Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
 
+### Offscreen Rendering (works with the screen locked)
+- **Read this before you need screenshots in an unattended session.** When macOS locks the screen, a window stops rendering. Offscreen rendering continues: a camera renders to an `Image`, and `Screenshot::image(handle)` saves it as a PNG. Tested with the screen locked (2026-10-18): the frames came on time, with correct content.
+- Spike: `cargo run --example offscreen_spike` (about 5 s, 5 frames to `target/offscreen_spike/`, or `OFFSCREEN_SPIKE_DIR`). `cargo run --example offscreen_spike -- --soak 180` runs for 180 s, saves 1 frame every 3 s, and logs `locked=yes/no` for each frame. It exits on its own, like the smoke test.
+- The recipe (copy it from `examples/offscreen_spike.rs`): `WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, .. }`, `.disable::<WinitPlugin>()`, `ScheduleRunnerPlugin::run_loop(1/60 s)`, an `Image` with `TextureUsages::RENDER_ATTACHMENT`, the camera with `RenderTarget::Image`, and UI nodes with `UiTargetCamera(camera)`. Use the Read tool to look at the PNGs.
+- For long unattended runs, put `caffeinate -i` before the command, so that the Mac does not sleep.
+- Not done yet: the game (`cargo run`, the smoke test, the scenario and playtest launches) renders to a window and needs an unlocked screen. Plan for a game-wide offscreen mode: image-target cameras, a `VirtualCursor` resource in place of the cursor reads from `PrimaryWindow`, and manual time steps (`TimeUpdateStrategy::ManualDuration`).
+
 ### Scenario Launch (fast testing)
 - `METABOLISTIC_SCENARIO=vent_motile cargo run` (or `cargo run -- --scenario vent_motile`) opens directly in a Run with a prepared cell. It skips Menu and Prepare. A bare name is `assets/scenarios/<name>.json`; a name with `/` or `.json` is a path. A bad file stops the game with the parse error.
 - A scenario file sets stage, seed, spawn, genes, enzymes, membrane proteins, action slots, pools, codex genes and `invulnerable`. All fields are optional (`{"stage":"Vent","membrane":{"Flagellum":3}}` is valid). Format and rules: the doc comment of `src/scenario.rs`.
@@ -179,7 +186,7 @@ The codebase includes comprehensive testing with multiple categories:
 - **Headless testing**: All tests run without graphics dependencies using MetabolisticApp::new_headless()
 
 ## Development Warnings
-- **Do not run `cargo run`** in development environments - it will launch the full UI
+- **Do not run `cargo run`** in development environments - it will launch the full UI. Exceptions that exit on their own: the smoke test, and `cargo run --example offscreen_spike` (no window; it works with the screen locked, see "Offscreen Rendering")
 - **Use headless mode** for testing: `MetabolisticApp::new_headless()` in tests
 - **GPU/Graphics dependencies**: Full build requires graphics drivers; use `--features headless` for CI/containers
 - **Audio dependencies**: Full build requires ALSA/audio libraries; use setup script for containers (`codex-setup.sh`)

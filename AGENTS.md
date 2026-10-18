@@ -2,6 +2,8 @@
 
 This file provides essential context for cloud-based LLM agents working on the Metabolistic3D project. Use this as a reference for understanding the project structure, patterns, and best practices.
 
+> **Screenshots with the screen locked:** a window stops rendering when macOS locks the screen, but offscreen rendering continues. `cargo run --example offscreen_spike` renders with no window (camera to `Image`, `Screenshot::image`) and saves PNGs to `target/offscreen_spike/`. Copy its recipe when you need frames in an unattended session. Details and limits: `CLAUDE.md`, "Offscreen Rendering".
+
 ## Project Overview
 
 **Metabolistic3D** is a 3D cellular metabolism simulation game built with the Bevy engine. It simulates real cellular biochemistry through interconnected metabolic blocks that mirror biological processes like glycolysis, respiration, and photosynthesis.
@@ -149,6 +151,7 @@ Core metabolic currencies that flow between blocks:
 - **Development build**: `cargo run`
 - **Release build**: `cargo build --release` 
 - **Native release**: `cargo run --profile release-native`
+- **Offscreen render spike** (no window, works with the screen locked): `cargo run --example offscreen_spike` (`-- --soak 180` for a long run)
 - **Single test**: `cargo test test_name`
 - **All tests**: `cargo test`
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`)
