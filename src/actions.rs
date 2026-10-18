@@ -29,8 +29,9 @@
 //!   adhesin.
 //! - **Toxin**: fires a droplet in the aim direction (`FireToxin`). Costs ATP and
 //!   Metals. Needs a toxin. There are no targets until M5.
-//! - **Pilus**: a type IV pilus (see `pilus`). Press shoots it along the aim, hold
-//!   reels it in, release lets go. Needs a pilus.
+//! - **Pilus**: a type IV pilus (see `pilus`). Press shoots it along the aim,
+//!   hold keeps it attached, the mouse wheel reels it in and out, release lets
+//!   go. Needs a pilus.
 //! - **Injector**: a type VI secretion spear (see `stun`). Stuns a cell in
 //!   contact, in a cone round the aim. Needs an injector.
 //! - **Lyse**: cuts the wall tile in contact (`walls`). 5 ATP. Needs a lytic protein.
@@ -324,6 +325,8 @@ pub struct ActionState {
     pub pilus_flash: f32,
     /// True while a pilus is attached and held (the overlay loops `hold`).
     pub pilus_taut: bool,
+    /// True while a held pilus retracts (see `pilus::reel_step`).
+    pub pilus_reeling: bool,
     /// Seconds left of the injector overlay's `use` clip.
     pub injector_flash: f32,
     /// Seconds until the injector can fire again.
@@ -349,6 +352,7 @@ impl Default for ActionState {
             toxin_flash: 0.0,
             pilus_flash: 0.0,
             pilus_taut: false,
+            pilus_reeling: false,
             injector_flash: 0.0,
             injector_cooldown: 0.0,
             aim: Vec2::X,
@@ -363,6 +367,12 @@ impl ActionState {
     /// wall, so the cell crawls through it (see `walls`).
     pub fn ghosting(&self) -> bool {
         self.adhesin_held && self.on_wall
+    }
+
+    /// The pilus is no longer attached.
+    pub fn let_go(&mut self) {
+        self.pilus_taut = false;
+        self.pilus_reeling = false;
     }
 
     pub fn bursting(&self) -> bool {
@@ -426,6 +436,34 @@ impl ActionState {
 /// mouse buttons. Press actions use `UseSlot`; the pilus also reads the hold.
 #[derive(Component, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotHeld(pub [bool; SLOT_COUNT]);
+
+/// The aimed proteins of a cell, the most recently used first. The protein in
+/// front points exactly at the cursor; the others sit a little to the side
+/// (`world::actions_view::cluster_row`). Using an aimed slot moves its protein
+/// to the front.
+#[derive(Component, Default, Debug, Clone, PartialEq, Eq)]
+pub struct AimOrder(pub Vec<MembraneProtein>);
+
+impl AimOrder {
+    /// Moves `protein` to the front.
+    pub fn bump(&mut self, protein: MembraneProtein) {
+        self.0.retain(|p| *p != protein);
+        self.0.insert(0, protein);
+    }
+
+    /// The place of each protein of `shown` in the cluster: the used ones by
+    /// recency, then the never used ones in the order of `shown`. Returns the
+    /// rank of `protein`, or `None` if it is not in `shown`.
+    pub fn rank(&self, shown: &[MembraneProtein], protein: MembraneProtein) -> Option<usize> {
+        let mut ranked: Vec<MembraneProtein> = self.0.iter().copied().filter(|p| shown.contains(p)).collect();
+        for p in shown {
+            if !ranked.contains(p) {
+                ranked.push(*p);
+            }
+        }
+        ranked.iter().position(|p| *p == protein)
+    }
+}
 
 /// Cursor distance in pixels below which the aim does not change.
 pub const AIM_DEAD_ZONE: f32 = 2.0;
@@ -499,9 +537,10 @@ pub fn slot_status(
         ActionKind::Adhesin if state.adhesin_held => "HOLDING".into(),
         ActionKind::Adhesin => "ready".into(),
         ActionKind::Toxin => format!("{TOXIN_ATP} ATP + {TOXIN_METALS} Metals"),
-        ActionKind::Pilus if state.pilus_taut => "REELING".into(),
+        ActionKind::Pilus if state.pilus_reeling => "REELING".into(),
+        ActionKind::Pilus if state.pilus_taut => "HOLDING (wheel to reel)".into(),
         ActionKind::Pilus => format!(
-            "press to shoot ({} ATP), hold to reel",
+            "press to shoot ({} ATP), hold, wheel to reel",
             crate::pilus::PILUS_EXTEND_ATP
         ),
         ActionKind::Injector if state.injector_cooldown > 0.0 => {
@@ -648,6 +687,23 @@ pub fn use_action(kind: ActionKind, target: &mut ActionTarget) -> UseResult {
 }
 
 // --- Messages and systems ---
+
+/// Moves the protein of each used aimed slot to the front of the `AimOrder`.
+pub fn aim_order_system(mut orders: MessageReader<UseSlot>, mut cells: Query<(&ActionBar, &mut AimOrder)>) {
+    for order in orders.read() {
+        let Ok((bar, mut aim_order)) = cells.get_mut(order.cell) else {
+            continue;
+        };
+        let Some(kind) = bar.slots.get(order.slot).copied().flatten() else {
+            continue;
+        };
+        if let Some(protein) = kind.required_protein().filter(|_| kind.needs_aim())
+            && aim_order.0.first() != Some(&protein)
+        {
+            aim_order.bump(protein);
+        }
+    }
+}
 
 /// Asks a cell to use an action slot (0-based).
 #[derive(Message, Debug, Clone, Copy)]
@@ -847,7 +903,7 @@ impl Plugin for ActionsPlugin {
             .add_message::<SetPathwayLevel>()
             .add_message::<FireToxin>()
             .add_message::<LyseOrder>()
-            .add_systems(Update, (use_slot_system, set_pathway_level_system))
+            .add_systems(Update, (use_slot_system, set_pathway_level_system, aim_order_system))
             .add_systems(FixedUpdate, advance_action_state_system)
             .add_systems(
                 crate::metabolism::MetabolicSchedule,
@@ -863,6 +919,27 @@ impl Plugin for ActionsPlugin {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn the_last_used_aimed_protein_leads_the_cluster() {
+        use MembraneProtein::*;
+        let shown = [Toxin, Pilus, Injector];
+        let mut order = AimOrder::default();
+        // Never used: the order of the plan.
+        assert_eq!(order.rank(&shown, Toxin), Some(0));
+        assert_eq!(order.rank(&shown, Injector), Some(2));
+        order.bump(Injector);
+        assert_eq!(order.rank(&shown, Injector), Some(0));
+        assert_eq!(order.rank(&shown, Toxin), Some(1));
+        order.bump(Pilus);
+        order.bump(Injector);
+        assert_eq!(order.0, vec![Injector, Pilus]);
+        assert_eq!(order.rank(&shown, Pilus), Some(1));
+        assert_eq!(order.rank(&shown, Toxin), Some(2));
+        // A protein not shown has no place; a used one that is gone is skipped.
+        assert_eq!(order.rank(&shown, Lytic), None);
+        assert_eq!(order.rank(&[Toxin], Toxin), Some(0));
+    }
 
     fn pools(atp: f32, metals: f32) -> CurrencyPools {
         let mut p = CurrencyPools::default();

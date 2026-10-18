@@ -32,7 +32,7 @@ use std::f32::consts::PI;
 use crate::blocks::genome::{BlockKind, Genome};
 use crate::environment::LocalEnvironment;
 use crate::exchange::ExchangeStats;
-use crate::actions::{ActionBar, ActionState, PathwayLevels, SlotHeld};
+use crate::actions::{ActionBar, ActionState, AimOrder, PathwayLevels, SlotHeld};
 use crate::pilus::PilusTether;
 use crate::shelter::InShelter;
 use crate::genome_damage::{GenomeIntegrity, InducedMutations, MutationLoad, RepairProgress};
@@ -73,6 +73,7 @@ use crate::proteins::{Proteome, SynthesisQueue};
     ActionBar,
     ActionState,
     SlotHeld,
+    AimOrder,
     PilusTether,
     CellTick,
     EngulfIntent,

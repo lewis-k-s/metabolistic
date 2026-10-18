@@ -14,10 +14,16 @@
 //!   (from the mount point on the rim). It costs `PILUS_EXTEND_ATP`. The nearest
 //!   cell or wall tile on the line is the hit (`cast_pilus`). A hit makes a
 //!   `Tether`; a miss ends the pilus at once.
-//! - **Hold** the slot: the pilus retracts at `PILUS_RETRACT_SPEED`. PilT pays
-//!   `PILUS_RETRACT_ATP_PER_PX` for each pixel of fibre (`reel_cost`). The step
-//!   is capped at the gap to the minimum length (`retract_step`), so it does not
-//!   depend on the step time.
+//! - **Hold** the slot: the pilus stays attached. The fibre never has slack:
+//!   it is never longer than the real distance, and it holds the target at the
+//!   wanted length (`Tether::wanted`, at first the length of the hit).
+//! - **Reel** (`ReelPilus`, the mouse wheel on the Run screen): each notch moves
+//!   the wanted length by `REEL_PIXELS_PER_NOTCH`, in or out, between the
+//!   minimum and `max_length` (`reel_wanted`). The fibre retracts to it at
+//!   `PILUS_RETRACT_SPEED` and pays out at `PILUS_PAYOUT_SPEED` (`reel_step`).
+//!   PilT pays `PILUS_RETRACT_ATP_PER_PX` for each pixel that retracts
+//!   (`reel_cost`); paying out is free. The step is capped at the gap, so it
+//!   does not depend on the step time.
 //! - **Release** the slot, or run out of ATP, or lose the target: the pilus
 //!   detaches.
 //! - Who moves (`pull_mode`): a target smaller than the owner is pulled to the
@@ -57,6 +63,10 @@ pub const PILUS_RETRACT_SPEED: f32 = 70.0;
 pub const PILUS_RETRACT_ATP_PER_SEC: f32 = 2.0;
 /// ATP for each pixel of fibre that retracts.
 pub const PILUS_RETRACT_ATP_PER_PX: f32 = PILUS_RETRACT_ATP_PER_SEC / PILUS_RETRACT_SPEED;
+/// Speed at which the fibre pays out, in pixels per second.
+pub const PILUS_PAYOUT_SPEED: f32 = 120.0;
+/// Change of the wanted length for one notch of the mouse wheel, in pixels.
+pub const REEL_PIXELS_PER_NOTCH: f32 = 20.0;
 /// Gap in pixels between the rims at which the reel stops.
 pub const PILUS_STOP_GAP: f32 = CONTACT_GAP * 0.5;
 /// Distance in pixels between the samples of the wall search along the line.
@@ -86,7 +96,19 @@ pub struct Tether {
     pub length: f32,
     /// The shortest length: the rims touch.
     pub min_length: f32,
+    /// The longest length that the fibre can pay out to.
+    pub max_length: f32,
+    /// The length that the player reels to (see `reel_wanted`).
+    pub wanted: f32,
     pub pull: Pull,
+}
+
+/// An order to reel a pilus in (negative `pixels`) or out (positive). The Run
+/// screen sends it from the mouse wheel.
+#[derive(Message, Debug, Clone, Copy, PartialEq)]
+pub struct ReelPilus {
+    pub cell: Entity,
+    pub pixels: f32,
 }
 
 /// The tether of a cell. `None` while the pilus is in.
@@ -212,6 +234,31 @@ pub fn retract_step(length: f32, min_length: f32, rate: f32, dt: f32) -> f32 {
     length - step
 }
 
+/// The fibre length after `dt` seconds of reeling to `wanted`: it retracts at
+/// `PILUS_RETRACT_SPEED` and pays out at `PILUS_PAYOUT_SPEED`. The step is capped
+/// at the gap, so the result does not depend on how `dt` is split.
+pub fn reel_step(length: f32, wanted: f32, dt: f32) -> f32 {
+    if wanted < length {
+        retract_step(length, wanted, PILUS_RETRACT_SPEED, dt)
+    } else {
+        let step = (PILUS_PAYOUT_SPEED * dt).max(0.0).min(wanted - length);
+        length + step
+    }
+}
+
+/// The wanted length after a reel order of `pixels` (negative is in). A reel in
+/// starts from the shorter of the wanted and the real fibre length, a reel out
+/// from the longer, so that a stale wanted length never eats a notch. The result
+/// stays between the minimum and the maximum length.
+pub fn reel_wanted(tether: &Tether, pixels: f32) -> f32 {
+    let base = if pixels < 0.0 {
+        tether.wanted.min(tether.length)
+    } else {
+        tether.wanted.max(tether.length)
+    };
+    (base + pixels).clamp(tether.min_length, tether.max_length.max(tether.min_length))
+}
+
 /// ATP for retracting `pixels` of fibre.
 pub fn reel_cost(pixels: f32) -> f32 {
     PILUS_RETRACT_ATP_PER_PX * pixels.max(0.0)
@@ -245,11 +292,15 @@ pub fn make_tether(
         None => mount + aim.normalize_or(Vec2::X) * hit.distance,
     };
     let min = min_length(owner_radius, target_radius);
+    let length = owner.distance(anchor).max(min);
+    let reach = owner_radius * PILUS_MOUNT_FRACTION + PILUS_RANGE + target_radius.unwrap_or(0.0);
     Tether {
         target: hit.target,
         anchor,
-        length: owner.distance(anchor).max(min),
+        length,
         min_length: min,
+        max_length: reach.max(length),
+        wanted: length,
         pull: pull_mode(owner_radius, target_radius),
     }
 }
@@ -328,8 +379,20 @@ pub fn pilus_launch_system(
     }
 }
 
-/// Retracts a held pilus and lets go when the slot is released, the ATP is out,
-/// or the target is gone.
+/// Applies the reel orders to the wanted length of each tether.
+pub fn pilus_reel_input_system(mut orders: MessageReader<ReelPilus>, mut tethers: Query<&mut PilusTether>) {
+    for order in orders.read() {
+        let Ok(mut tether) = tethers.get_mut(order.cell) else {
+            continue;
+        };
+        if let Some(current) = tether.0.as_mut() {
+            current.wanted = reel_wanted(current, order.pixels);
+        }
+    }
+}
+
+/// Reels a held pilus to its wanted length and lets go when the slot is
+/// released, the ATP is out, or the target is gone.
 #[allow(clippy::type_complexity)]
 pub fn pilus_reel_system(
     time: Res<Time>,
@@ -350,8 +413,9 @@ pub fn pilus_reel_system(
     let dt = time.delta_secs();
     for (bar, held, mut state, mut tether, mut pools, mut ledger, transform) in &mut owners {
         let Some(mut current) = tether.0 else {
-            if state.pilus_taut {
+            if state.pilus_taut || state.pilus_reeling {
                 state.pilus_taut = false;
+                state.pilus_reeling = false;
             }
             continue;
         };
@@ -365,24 +429,24 @@ pub fn pilus_reel_system(
                 Ok(t) => current.anchor = t.translation.truncate(),
                 Err(_) => {
                     tether.0 = None;
-                    state.pilus_taut = false;
+                    state.let_go();
                     continue;
                 }
             }
         }
         if !holding {
             tether.0 = None;
-            state.pilus_taut = false;
+            state.let_go();
             continue;
         }
         // The fibre never has slack: it follows the real distance.
         let actual = transform.translation.truncate().distance(current.anchor);
         let length = current.length.min(actual).max(current.min_length);
-        let next = retract_step(length, current.min_length, PILUS_RETRACT_SPEED, dt);
+        let next = reel_step(length, current.wanted, dt);
         let cost = reel_cost(length - next);
         if pools.get(Currency::ATP) < cost {
             tether.0 = None;
-            state.pilus_taut = false;
+            state.let_go();
             continue;
         }
         if cost > 0.0 {
@@ -391,6 +455,7 @@ pub fn pilus_reel_system(
         current.length = next;
         tether.0 = Some(current);
         state.pilus_taut = true;
+        state.pilus_reeling = next < length;
     }
 }
 
@@ -426,7 +491,8 @@ pub struct PilusPlugin;
 
 impl Plugin for PilusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, pilus_launch_system)
+        app.add_message::<ReelPilus>()
+            .add_systems(Update, (pilus_launch_system, pilus_reel_input_system).chain())
             .add_systems(
                 FixedUpdate,
                 (
@@ -550,6 +616,43 @@ mod tests {
     }
 
     #[test]
+    fn the_reel_moves_to_the_wanted_length_for_any_step_time() {
+        for dt in [0.001, 0.016, 0.5, 3.0] {
+            let mut length = 100.0;
+            for _ in 0..10_000 {
+                length = reel_step(length, 60.0, dt);
+                assert!(length >= 60.0 - 1e-4, "dt {dt}: overshoot to {length}");
+            }
+            assert_abs_diff_eq!(length, 60.0, epsilon = 1e-3);
+            for _ in 0..10_000 {
+                length = reel_step(length, 90.0, dt);
+                assert!(length <= 90.0 + 1e-4, "dt {dt}: overshoot to {length}");
+            }
+            assert_abs_diff_eq!(length, 90.0, epsilon = 1e-3);
+        }
+        assert_eq!(reel_step(50.0, 50.0, 1.0), 50.0);
+    }
+
+    #[test]
+    fn a_reel_order_moves_the_wanted_length_inside_the_limits() {
+        let t = Tether {
+            target: None,
+            anchor: Vec2::ZERO,
+            length: 80.0,
+            min_length: 30.0,
+            max_length: 160.0,
+            wanted: 100.0,
+            pull: Pull::TargetToOwner,
+        };
+        // In: from the shorter of wanted and length, so the notch is not lost.
+        assert_eq!(reel_wanted(&t, -20.0), 60.0);
+        // Out: from the longer.
+        assert_eq!(reel_wanted(&t, 20.0), 120.0);
+        assert_eq!(reel_wanted(&t, -500.0), 30.0);
+        assert_eq!(reel_wanted(&t, 500.0), 160.0);
+    }
+
+    #[test]
     fn the_kinematic_pull_keeps_the_body_inside_the_length() {
         let p = pull_position(Vec2::ZERO, Vec2::new(100.0, 0.0), 60.0);
         assert_abs_diff_eq!(p.x, 60.0, epsilon = 1e-4);
@@ -570,6 +673,8 @@ mod tests {
         );
         assert_eq!(t.pull, Pull::TargetToOwner);
         assert_abs_diff_eq!(t.length, 60.0);
+        assert_eq!(t.wanted, t.length, "the hit holds its length until the player reels");
+        assert_abs_diff_eq!(t.max_length, 19.0 + PILUS_RANGE + 11.25);
         assert_abs_diff_eq!(t.min_length, 20.0 + 11.25 + PILUS_STOP_GAP);
         let wall = make_tether(
             Vec2::ZERO,

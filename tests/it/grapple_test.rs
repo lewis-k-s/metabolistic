@@ -1,7 +1,8 @@
 //! # The pilus and the injector (headless)
 //!
-//! A pilus catches prey and reels it in, a bigger cell or a wall pulls the owner,
-//! a released pilus lets go, and a stunned NPC does not move and cannot escape
+//! A pilus catches prey, holds it at its length, and reels it in or pays out on a
+//! reel order (the mouse wheel). A bigger cell or a wall pulls the owner, a
+//! released pilus lets go, and a stunned NPC does not move and cannot escape
 //! the engulf. The headless app has no physics, so the kinematic fallback of
 //! `pilus` moves the pulled body (the joints of `world::pilus_view` follow the
 //! same rules in the full game).
@@ -18,7 +19,7 @@ use metabolistic3d::metabolism::CurrencyPools;
 use metabolistic3d::molecules::Currency;
 use metabolistic3d::movement::MoveInput;
 use metabolistic3d::npc::{Archetype, spawn_npc};
-use metabolistic3d::pilus::{PILUS_EXTEND_ATP, PilusTether, Pull, reel_cost};
+use metabolistic3d::pilus::{PILUS_EXTEND_ATP, PilusTether, Pull, ReelPilus, reel_cost};
 use metabolistic3d::proteins::{MembraneProtein, ProteinTarget, Proteome};
 use metabolistic3d::shared::spawn_starter_cell;
 use metabolistic3d::stun::{INJECTOR_ATP, INJECTOR_COOLDOWN, INJECTOR_METALS, STUN_SECONDS, Stunned};
@@ -100,6 +101,11 @@ fn press(app: &mut App, cell: Entity, slot: usize, hold: bool) {
     app.world_mut().write_message(UseSlot { cell, slot });
 }
 
+/// A reel order: negative pixels reel in.
+fn reel(app: &mut App, cell: Entity, pixels: f32) {
+    app.world_mut().write_message(ReelPilus { cell, pixels });
+}
+
 fn hold(app: &mut App, cell: Entity, slot: usize, on: bool) {
     let mut held = [false; 4];
     held[slot] = on;
@@ -119,7 +125,12 @@ fn a_pilus_catches_prey_reels_it_in_and_the_player_engulfs_it() {
     assert_eq!(t.target, Some(prey));
     assert_eq!(t.pull, Pull::TargetToOwner, "prey is smaller: it comes to the owner");
     assert_abs_diff_eq!(t.length, 100.0, epsilon = 1e-3);
-    // Holding reels it in. The prey is out of engulf range at first.
+    // Holding alone keeps the length.
+    frames(&mut app, 3);
+    assert_abs_diff_eq!(position(&app, prey).x, 100.0, epsilon = 1e-3);
+    assert_abs_diff_eq!(pool(&app, player, Currency::ATP), atp - PILUS_EXTEND_ATP, epsilon = 1e-3);
+    // A reel order pulls it in. The prey is out of engulf range at first.
+    reel(&mut app, player, -500.0);
     frames(&mut app, 4);
     let mid = position(&app, prey).x;
     assert!(mid < 100.0 && mid > 40.0, "reeling: {mid}");
@@ -135,6 +146,29 @@ fn a_pilus_catches_prey_reels_it_in_and_the_player_engulfs_it() {
     frames(&mut app, 2);
     assert!(app.world().get_entity(prey).is_err(), "the prey was engulfed");
     assert_eq!(tether(&app, player).0, None, "the pilus lets go of a gone target");
+}
+
+#[test]
+fn paying_out_lets_the_prey_go_further_and_reeling_brings_it_back() {
+    let mut app = app();
+    let player = hunter(&mut app, Vec2::ZERO);
+    let prey = npc(&mut app, Archetype::Prey, Vec2::new(60.0, 0.0));
+    press(&mut app, player, PILUS_SLOT, true);
+    frames(&mut app, 1);
+    reel(&mut app, player, 40.0);
+    frames(&mut app, 1);
+    let t = tether(&app, player).0.unwrap();
+    assert_abs_diff_eq!(t.wanted, 100.0, epsilon = 1e-3);
+    // The prey is pushed away: the fibre lets it go to the wanted length only.
+    for _ in 0..20 {
+        app.world_mut().get_mut::<Transform>(prey).unwrap().translation.x += 10.0;
+        frames(&mut app, 1);
+    }
+    let x = position(&app, prey).x;
+    assert!(x > 90.0 && x < 101.0, "held at the wanted length: {x}");
+    reel(&mut app, player, -20.0);
+    frames(&mut app, 5);
+    assert!(position(&app, prey).x < 81.0, "reeled in one notch: {}", position(&app, prey).x);
 }
 
 #[test]
@@ -171,6 +205,7 @@ fn the_pilus_lets_go_when_the_atp_runs_out() {
     assert!(tether(&app, player).0.is_some());
     // Just enough for a few pixels of reel.
     app.world_mut().get_mut::<CurrencyPools>(player).unwrap().set(Currency::ATP, 0.05);
+    reel(&mut app, player, -500.0);
     frames(&mut app, 5);
     assert_eq!(tether(&app, player).0, None, "no ATP: the pilus detaches");
     assert!(position(&app, prey).x > 100.0, "it did not get far");
@@ -184,6 +219,7 @@ fn a_bigger_cell_pulls_the_owner_to_it() {
     press(&mut app, player, PILUS_SLOT, true);
     frames(&mut app, 1);
     assert_eq!(tether(&app, player).0.unwrap().pull, Pull::OwnerToTarget);
+    reel(&mut app, player, -500.0);
     frames(&mut app, 3);
     assert!(position(&app, player).x > 5.0, "the owner moved to the predator");
     assert_eq!(position(&app, predator).x, 130.0, "the predator stayed");
@@ -205,6 +241,7 @@ fn a_wall_pulls_the_owner_to_it() {
     let t = tether(&app, player).0.expect("the pilus stuck to the wall");
     assert_eq!(t.target, None);
     assert_eq!(t.pull, Pull::OwnerToTarget);
+    reel(&mut app, player, -500.0);
     frames(&mut app, 15);
     // The owner rim ends at the anchor: the centre is a radius short of x = 35.
     let x = position(&app, player).x;

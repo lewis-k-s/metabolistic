@@ -34,6 +34,8 @@ avian2d = { version = "0.7", optional = true, default-features = false, features
   "f32",
   "parry-f32",
   "parallel",
+  # The pilus joint (`world::pilus_view`). Without it avian ignores all joints.
+  "xpbd_joints",
 ] }
 bevy-inspector-egui = { version = "0.37", optional = true }
 # bevy-inspector-egui 0.37 needs bevy_egui 0.40 and egui 0.34.
