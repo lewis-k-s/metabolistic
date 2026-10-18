@@ -226,17 +226,10 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
 #[derive(Resource)]
 pub struct GridImage(pub Handle<Image>, pub GridStyle);
 
-/// A mineral particle: a sprite that shows where minerals are. It is visible
-/// when the minerals under it are above `threshold`. Visual only.
-#[derive(Component)]
-pub struct MineralParticle {
-    pub threshold: f32,
-}
-
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        (update_grid_image, update_mineral_particles)
+        update_grid_image
             .run_if(in_state(InRun).and_then(resource_exists_and_changed::<EnvGrid>)),
     );
 }
@@ -331,39 +324,6 @@ pub fn spawn_vent(commands: &mut Commands, asset_server: &AssetServer, vent: Ven
     ));
 }
 
-/// Spawns mineral particles on a fixed scatter over the field.
-pub fn spawn_mineral_particles(
-    commands: &mut Commands,
-    asset_server: &AssetServer,
-    grid: &EnvGrid,
-) {
-    const COUNT: u32 = 450;
-    let image = asset_server.load("sprites/pickup_mineral.png");
-    let origin = grid.origin();
-    let size = grid.world_size();
-    for i in 0..COUNT {
-        // A cheap hash gives a fixed scatter and a threshold for each particle.
-        let h = |salt: u32| {
-            let mut x = i.wrapping_mul(0x9E37_79B1).wrapping_add(salt.wrapping_mul(0x85EB_CA6B));
-            x ^= x >> 15;
-            x = x.wrapping_mul(0x2C1B_3C6D);
-            x ^= x >> 12;
-            (x & 0xFFFF) as f32 / 65535.0
-        };
-        let position = (origin + Vec2::new(h(1) * size.x, h(2) * size.y)).round();
-        commands.spawn((
-            Name::new("Mineral Particle"),
-            MineralParticle {
-                threshold: 0.3 + h(3) * 4.0,
-            },
-            Sprite::from_image(image.clone()),
-            Transform::from_translation(position.extend(-8.0)),
-            Visibility::Hidden,
-            DespawnOnExit(InRun),
-        ));
-    }
-}
-
 /// Rewrites the grid image after each metabolic tick.
 fn update_grid_image(
     grid: Res<EnvGrid>,
@@ -373,20 +333,6 @@ fn update_grid_image(
     let Some(handle) = image_handle else { return };
     if let Some(mut image) = images.get_mut(&handle.0) {
         image.data = Some(render_grid_styled(&grid, handle.1));
-    }
-}
-
-fn update_mineral_particles(
-    grid: Res<EnvGrid>,
-    mut particles: Query<(&MineralParticle, &Transform, &mut Visibility)>,
-) {
-    for (particle, transform, mut visibility) in &mut particles {
-        let level = grid.sample(Channel::Minerals, transform.translation.truncate());
-        *visibility = if level > particle.threshold {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
     }
 }
 

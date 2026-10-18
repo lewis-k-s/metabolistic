@@ -81,7 +81,7 @@ uv run --with numpy art/gen_sprites.py
 | `gate_cell_proteobacterium` | 72x72 | M7, gate cell of the shallow-water stage (rose, cristae folds) |
 | `virus_phage` | 44x28 | M5, virus (lies flat, points right) |
 | `food_carbon` | 12x12 | M2, OrganicCarbon particle |
-| `pickup_mineral` | 12x18 | M2, Minerals particle |
+| `pickup_mineral` | 12x18 | M2, shape of the `mol_minerals` icon (not on the floor: the lighting shader draws minerals as specks) |
 | `pickup_metal_fes` | 16x16 | M1/M2, Metals cofactor |
 | `wall_membrane` | 16x26 | M5, world membrane (tiles sideways) |
 | `wall_membrane_pore` | 32x26 | M5, wall with a transporter |

@@ -6,8 +6,8 @@
 //! player goes back to the menu. Every world entity has
 //! `DespawnOnExit(InRun)`, and the `EnvGrid` resource is removed on exit.
 //!
-//! - `grid_view`: draws the grid as one texture, plus the vents and the
-//!   mineral particles.
+//! - `grid_view`: draws the grid as one texture, plus the sea floor and the
+//!   vents.
 //! - `player_body`: the physics body, thrust, camera and blob look of the
 //!   player's cell. The cell plays baked sprite sheets.
 //! - `actions_view`: slot hotkeys, toxin droplets, membrane protein overlays,
@@ -134,7 +134,6 @@ fn spawn_world(
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
         vfx::spawn_vent_particles(&mut commands, vent, grid.params(crate::environment::Channel::Heat).drift);
     }
-    grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);
     let walls = def.wall_map();
     walls_view::spawn_walls(&mut commands, &asset_server, &walls, &grid);
