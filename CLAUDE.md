@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy engine. It simulates cellular biochemistry through interconnected metabolic blocks that mirror real biological processes, teaching players about metabolism through engaging gameplay.
 
+## Agents: the Game Runs Offscreen (no game windows)
+
+- **When an agent starts the game, it opens no window.** `src/offscreen.rs` turns on offscreen mode when it finds `CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX` or `CODEX_THREAD_ID`. This applies to `cargo run`, the smoke test, scenario launches and the playtest. Several sessions can run the game at the same time, and it works with the screen locked (tested 2026-10-18).
+- `METABOLISTIC_OFFSCREEN=1` forces the mode on, and `METABOLISTIC_OFFSCREEN=0` forces a window. **Do not set `METABOLISTIC_OFFSCREEN=0` unless the user asks to see a window.**
+- How it works: winit is off, so the primary `Window` entity has no OS window (fixed 1280x720; size queries work, the cursor position is `None`). Each camera that targets the primary window renders to one image (`OffscreenTarget`), and each `Screenshot::primary_window()` captures that image. Game code needs no changes. Use the Read tool to look at the PNGs.
+- A launch with no script (no smoke test, no playtest) saves one frame every 2 s to `METABOLISTIC_OFFSCREEN_DIR` (default `target/offscreen`) and exits after `METABOLISTIC_OFFSCREEN_SECS` (default 20). Example: `METABOLISTIC_SCENARIO=vent_motile METABOLISTIC_OFFSCREEN_SECS=8 cargo run`.
+- For long unattended runs, put `caffeinate -i` before the command, so that the Mac does not sleep.
+- Not done yet: there is no virtual cursor (aim and mouse hover do nothing), and time is real time, not manual steps. `cargo run --example offscreen_spike` (`-- --soak 180`) is the minimal pattern; its soak run logs the screen lock state for each frame.
+
 ## Architecture
 
 ### Core Structure
@@ -56,16 +65,9 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 
 ### Smoke Test (full game)
-- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
+- `METABOLISTIC_SMOKE_TEST=1 cargo run` runs for about 60 s (offscreen for agents, a window otherwise), checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
 - Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
 - Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
-
-### Offscreen Rendering (works with the screen locked)
-- **Read this before you need screenshots in an unattended session.** When macOS locks the screen, a window stops rendering. Offscreen rendering continues: a camera renders to an `Image`, and `Screenshot::image(handle)` saves it as a PNG. Tested with the screen locked (2026-10-18): the frames came on time, with correct content.
-- Spike: `cargo run --example offscreen_spike` (about 5 s, 5 frames to `target/offscreen_spike/`, or `OFFSCREEN_SPIKE_DIR`). `cargo run --example offscreen_spike -- --soak 180` runs for 180 s, saves 1 frame every 3 s, and logs `locked=yes/no` for each frame. It exits on its own, like the smoke test.
-- The recipe (copy it from `examples/offscreen_spike.rs`): `WindowPlugin { primary_window: None, exit_condition: ExitCondition::DontExit, .. }`, `.disable::<WinitPlugin>()`, `ScheduleRunnerPlugin::run_loop(1/60 s)`, an `Image` with `TextureUsages::RENDER_ATTACHMENT`, the camera with `RenderTarget::Image`, and UI nodes with `UiTargetCamera(camera)`. Use the Read tool to look at the PNGs.
-- For long unattended runs, put `caffeinate -i` before the command, so that the Mac does not sleep.
-- Not done yet: the game (`cargo run`, the smoke test, the scenario and playtest launches) renders to a window and needs an unlocked screen. Plan for a game-wide offscreen mode: image-target cameras, a `VirtualCursor` resource in place of the cursor reads from `PrimaryWindow`, and manual time steps (`TimeUpdateStrategy::ManualDuration`).
 
 ### Scenario Launch (fast testing)
 - `METABOLISTIC_SCENARIO=vent_motile cargo run` (or `cargo run -- --scenario vent_motile`) opens directly in a Run with a prepared cell. It skips Menu and Prepare. A bare name is `assets/scenarios/<name>.json`; a name with `/` or `.json` is a path. A bad file stops the game with the parse error.
@@ -92,7 +94,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - `dev`: Development features with dynamic linking and dev tools
 - `dev_native`: Development features plus file watching for hot reload
 
-Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `smoke_test`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
+Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `offscreen`, `smoke_test`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
 
 ### Development Tools (In-Game)
 - **Inspector**: F1 to open runtime debugging and inspection tools
@@ -188,7 +190,7 @@ The codebase includes comprehensive testing with multiple categories:
 - **Headless testing**: All tests run without graphics dependencies using MetabolisticApp::new_headless()
 
 ## Development Warnings
-- **Do not run `cargo run`** in development environments - it will launch the full UI. Exceptions that exit on their own: the smoke test, and `cargo run --example offscreen_spike` (no window; it works with the screen locked, see "Offscreen Rendering")
+- **Do not run `cargo run`** for a person's window. For an agent, `cargo run` is offscreen and exits by itself (see "Agents: the Game Runs Offscreen"); the smoke test and `cargo run --example offscreen_spike` also exit by themselves
 - **Use headless mode** for testing: `MetabolisticApp::new_headless()` in tests
 - **GPU/Graphics dependencies**: Full build requires graphics drivers; use `--features headless` for CI/containers
 - **Audio dependencies**: Full build requires ALSA/audio libraries; use setup script for containers (`codex-setup.sh`)

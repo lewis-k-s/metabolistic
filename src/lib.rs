@@ -51,6 +51,8 @@ pub mod dev_tools;
 #[cfg(feature = "full")]
 pub mod inspector;
 #[cfg(feature = "full")]
+pub mod offscreen;
+#[cfg(feature = "full")]
 pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
@@ -107,18 +109,29 @@ impl MetabolisticApp {
 
         #[cfg(feature = "full")]
         {
-            app.add_plugins(
-                DefaultPlugins
-                    .set(WindowPlugin {
-                        primary_window: Some(Window {
-                            title: "Metabolistic".into(),
-                            ..default()
-                        }),
-                        ..default()
-                    })
-                    // Pixel art: no smoothing when sprites are scaled.
-                    .set(ImagePlugin::default_nearest()),
-            );
+            // Agents get offscreen mode: no OS window (see `offscreen`).
+            let offscreen = offscreen::requested();
+            let window = if offscreen {
+                offscreen::window("Metabolistic")
+            } else {
+                Window {
+                    title: "Metabolistic".into(),
+                    ..default()
+                }
+            };
+            let plugins = DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // Pixel art: no smoothing when sprites are scaled.
+                .set(ImagePlugin::default_nearest());
+            if offscreen {
+                app.add_plugins(offscreen::configure(plugins))
+                    .add_plugins(offscreen::plugin);
+            } else {
+                app.add_plugins(plugins);
+            }
         }
 
         app // State management
