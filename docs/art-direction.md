@@ -390,7 +390,11 @@ from phase 3). The other phases are not.
 **Changes after the first phase-1 build.** The grid image no longer draws the
 Heat and Light bands (the orange glow round the vents and the yellow and
 violet light zones). The lighting shows the vents and the UV shafts on its
-own. The grid still draws minerals, O2 and water. The vent level has a
+own. The grid still draws O2, water and, on land, minerals. In the vents and in
+shallow water the minerals are fine cyan specks (1 sprite pixel, a BAYER4
+dither of the mineral level, at most 40 % of the pixels), drawn by the
+lighting shader on the additive quad from the alpha channel of the lightmap.
+The grid texel is 4 world pixels, which was too coarse for a dither. The vent level has a
 textured floor sprite (`seafloor`, tiled at z -20, under the grid image), and
 the darkness darkens it like the rest. The burn zone (heat from about 30 to
 60) turns white in the light, so it is the brightest and whitest area. The
@@ -520,9 +524,11 @@ WebGL2 and hot-reloads its effect files. `bevy_hanabi` needs compute shaders,
 so it does not run on WebGL2. The module is `world::vfx`: `particles.rs` is
 already the pickups module.
 
-- **Vent smoke and sparkles (in the game).** Each vent has dense smoke (dark
-  grey-brown puffs, the `waste` ramp) that rises and drifts with the Heat
-  drift of the grid, in the lit layer (z 6, below the darkness). It also has
+- **Vent smoke and sparkles (in the game).** Each vent has a dense smoke
+  column (dark grey-brown puffs, the `waste` ramp) in two layers: big puffs
+  that grow from 10 to 48 px as they rise (9 s life), and thin wisps. The rise
+  slows with age and the Heat drift of the grid bends the column, so it fans
+  out at the top. It is in the lit layer (z 6, below the darkness). It also has
   sparkles (small light-orange and yellow specks, the `vent` ramp) that rise
   and twinkle out. Sparkles are emissive: they are drawn above the darkness
   (z 30). A replacement vertex shader snaps every particle to the sprite pixel

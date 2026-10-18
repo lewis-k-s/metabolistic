@@ -29,5 +29,6 @@ fn vertex(in: VertexIn) -> VertexOutput {
     out.uv = vec2<f32>(corner.x, 1.0 - corner.y);
     out.lifetime_frac = in.i_scale_lifetime.z;
     out.lifetime_total = in.i_scale_lifetime.w;
+    out.size = size.x;
     return out;
 }

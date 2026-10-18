@@ -1,6 +1,6 @@
 // Fragment shader of the vent particles (`world::vfx`).
 //
-// A particle is a square of `size` x `size` sprite pixels (the vertex shader,
+// A particle is a square of `in.size` x `in.size` sprite pixels (the vertex shader,
 // `vent_particle_vertex.wgsl`, snaps it to whole world units). Each pixel is
 // one palette tone, or it is not drawn: there is no alpha blending. The
 // particle colour carries two numbers: red is the tone (0..1, in 4 steps) and
@@ -12,8 +12,7 @@
 struct Params {
     // The ramp: five tones, dark to light (linear colour).
     tones: array<vec4<f32>, 5>,
-    // Side of the particle in sprite pixels.
-    size: f32,
+    pad2: f32,
     // 0 = a round puff, shaded from the upper left. 1 = a plus-shaped spark.
     shape: f32,
     pad0: f32,
@@ -34,10 +33,10 @@ fn bayer4(c: vec2<i32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let cell = vec2<i32>(floor(in.uv * p.size));
-    let from_centre = vec2<f32>(cell) + vec2<f32>(0.5) - vec2<f32>(p.size * 0.5);
+    let cell = vec2<i32>(floor(in.uv * in.size));
+    let from_centre = vec2<f32>(cell) + vec2<f32>(0.5) - vec2<f32>(in.size * 0.5);
     if p.shape < 0.5 {
-        if length(from_centre) > p.size * 0.5 {
+        if length(from_centre) > in.size * 0.5 {
             discard;
         }
     } else if abs(from_centre.x) + abs(from_centre.y) > 1.01 {
@@ -49,7 +48,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var tone = i32(round(in.color.r * 4.0));
     if p.shape < 0.5 {
         // uv.y points down, so the upper left is negative x and negative y.
-        let lit = -dot(from_centre / (p.size * 0.5), vec2<f32>(0.6, 0.8));
+        let lit = -dot(from_centre / (in.size * 0.5), vec2<f32>(0.6, 0.8));
         tone += select(select(0, -1, lit < -0.45), 1, lit > 0.45);
     }
     tone = clamp(tone, 0, 4);

@@ -8,7 +8,9 @@
 // Two quads use this shader. The dark quad (dark.w = 0) draws the darkest
 // water tone with alpha = 1 - banded light, with normal alpha blending. The
 // tint quad (dark.w = 1) is additive: it adds the hue of the light (warm near
-// a vent, violet in a shaft) in the same bands.
+// a vent, violet in a shaft) in the same bands, and the minerals: fine cyan
+// specks, one sprite pixel each, dithered by the mineral level (the alpha of
+// the lightmap).
 
 #import bevy_sprite::mesh2d_vertex_output::VertexOutput
 
@@ -26,6 +28,16 @@ const IN: array<f32, 5> = array<f32, 5>(0.08, 0.25, 0.45, 0.70, 1.0);
 const OUT: array<f32, 5> = array<f32, 5>(0.20, 0.38, 0.60, 0.82, 1.0);
 // Strength of the additive tint.
 const TINT: f32 = 0.45;
+// Mineral level at which the lightmap alpha is full (`lighting::MINERAL_FULL`).
+const MINERAL_FULL: f32 = 30.0;
+// Highest share of pixels that a mineral speck layer sets.
+const MINERAL_MAX_DENSITY: f32 = 0.4;
+// The `mineral` ramp (linear), tones 1 to 3, for low, middle and high levels.
+const MINERAL_LOW: vec3<f32> = vec3<f32>(0.012, 0.195, 0.392);
+const MINERAL_MID: vec3<f32> = vec3<f32>(0.048, 0.527, 0.745);
+const MINERAL_HIGH: vec3<f32> = vec3<f32>(0.287, 0.839, 1.0);
+// Strength of the mineral specks: they are a hint, not a wash.
+const MINERAL_STRENGTH: f32 = 0.7;
 
 fn bayer4(p: vec2<i32>) -> f32 {
     var m = array<f32, 16>(
@@ -59,7 +71,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample at the pixel centre, so a sprite pixel has one light value.
     let local = (snapped - size.zw) / size.xy;
     let uv = vec2<f32>(local.x, 1.0 - local.y);
-    let rgb = textureSampleLevel(lightmap, lightmap_sampler, uv, 0.0).rgb;
+    let sample = textureSampleLevel(lightmap, lightmap_sampler, uv, 0.0);
+    let rgb = sample.rgb;
     let lum = max(rgb.r, max(rgb.g, rgb.b));
     let level = banded(lum, bayer4(pixel));
     if dark.w < 0.5 {
@@ -67,5 +80,12 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     // The hue of the light: what is left when the grey part is taken away.
     let hue = rgb - vec3<f32>(min(rgb.r, min(rgb.g, rgb.b)));
-    return vec4<f32>(hue * level * TINT, 0.0);
+    var color = hue * level * TINT;
+    // Minerals: a pixel is set when the density is above its threshold.
+    let minerals = sample.a * MINERAL_FULL;
+    let density = clamp((minerals - 0.8) / 14.0, 0.0, 1.0) * MINERAL_MAX_DENSITY;
+    if density > bayer4(pixel) {
+        color += select(select(MINERAL_LOW, MINERAL_MID, minerals > 5.0), MINERAL_HIGH, minerals > 14.0) * MINERAL_STRENGTH;
+    }
+    return vec4<f32>(color, 0.0);
 }

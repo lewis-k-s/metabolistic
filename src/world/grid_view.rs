@@ -4,10 +4,12 @@
 //! `TEXELS_PER_CELL` texels along each side of a grid cell, so each texel is a
 //! few world pixels. The image is rewritten after each metabolic tick.
 //!
-//! The grid draws minerals, O2 and water. **Heat and light are not drawn
-//! here**: the darkness overlay (`lighting_view`) shows the vents and the UV
+//! The grid draws O2 and water, and minerals on land. **Heat and light are not
+//! drawn here**: the darkness overlay (`lighting_view`) shows the vents and the UV
 //! shafts as light. `heat_glow` and `light_glow` stay, because the Manage
-//! screen draws the outside of the cell with their colours.
+//! screen draws the outside of the cell with their colours. In the vents and
+//! in shallow water the minerals are fine cyan specks in the lighting shader:
+//! the grid texel is 4 world pixels, too coarse for a dither.
 //!
 //! Colours follow `docs/art-direction.md`: minerals are cyan, O2 is a sea
 //! green. A glow is dithered with an ordered 4x4 pattern: a texel is either
@@ -120,6 +122,9 @@ pub struct GridStyle {
     draw_o2: bool,
     /// Draw the water layer (land only).
     draw_water: bool,
+    /// Draw the mineral layer. The vents and shallow water draw minerals in
+    /// the lighting shader instead, as fine specks (see `lighting_view`).
+    draw_minerals: bool,
 }
 
 impl GridStyle {
@@ -127,9 +132,9 @@ impl GridStyle {
     pub fn for_field(field: crate::level::FieldKind) -> Self {
         match field {
             crate::level::FieldKind::Vents | crate::level::FieldKind::Shallow => {
-                Self { draw_o2: true, draw_water: false }
+                Self { draw_o2: true, draw_water: false, draw_minerals: false }
             }
-            crate::level::FieldKind::Land => Self { draw_o2: false, draw_water: true },
+            crate::level::FieldKind::Land => Self { draw_o2: false, draw_water: true, draw_minerals: true },
         }
     }
 }
@@ -200,7 +205,11 @@ pub fn render_grid_styled(grid: &EnvGrid, style: GridStyle) -> Vec<u8> {
             } else {
                 0.0
             };
-            let minerals = level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo);
+            let minerals = if style.draw_minerals {
+                level_at(&taps, grid.layer(Channel::Minerals), MINERAL_BANDS[0].lo)
+            } else {
+                0.0
+            };
             let color = band_color(&WATER_BANDS, water, threshold)
             .or_else(|| band_color(&O2_BANDS, o2, threshold))
             .or_else(|| band_color(&MINERAL_BANDS, minerals, threshold));
@@ -393,7 +402,8 @@ mod tests {
     #[test]
     fn the_image_has_no_partial_transparency() {
         let grid = level::vent_field();
-        let data = render_grid(&grid);
+        // The land style draws the minerals of the vent field.
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
         assert_eq!(data.len(), texture_size(&grid).0 * texture_size(&grid).1 * 4);
         assert!(data.chunks(4).all(|px| px[3] == 0 || px[3] == 255));
         assert!(data.chunks(4).any(|px| px[3] == 255), "something is drawn");
@@ -413,11 +423,18 @@ mod tests {
     }
 
     #[test]
+    fn vents_leave_minerals_to_the_lighting() {
+        let mut grid = EnvGrid::centered(8, 8);
+        grid.set_level(Channel::Minerals, 4, 4, 30.0);
+        assert!(render_grid(&grid).chunks(4).all(|px| px[3] == 0));
+    }
+
+    #[test]
     fn minerals_are_cyan() {
         let mut grid = EnvGrid::centered(8, 8);
         let (width, height) = texture_size(&grid);
         grid.set_level(Channel::Minerals, 6, 6, 30.0);
-        let data = render_grid(&grid);
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
         let mut texels = 0;
         for ty in 0..height {
             for tx in 0..width {
@@ -441,7 +458,7 @@ mod tests {
                     grid.set_level(Channel::Minerals, x, y, minerals);
                 }
             }
-            render_grid(&grid).chunks(4).filter(|px| px[3] == 255).count()
+            render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land)).chunks(4).filter(|px| px[3] == 255).count()
         };
         assert_eq!(count(0.0), 0);
         assert!(count(2.0) < count(4.0));
@@ -469,7 +486,7 @@ mod tests {
             grid.set_level(Channel::Minerals, x, 3, 100.0);
         }
         let (width, height) = texture_size(&grid);
-        let data = render_grid(&grid);
+        let data = render_grid_styled(&grid, GridStyle::for_field(crate::level::FieldKind::Land));
         assert_eq!(alpha(&data, width, 5, 0), 255, "top row is set");
         assert_eq!(alpha(&data, width, 5, height - 1), 0, "bottom row is clear");
     }

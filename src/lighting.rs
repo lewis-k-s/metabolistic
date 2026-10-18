@@ -94,12 +94,18 @@ pub fn light_at(ambient: f32, heat: f32, light: f32, position: Vec2, splats: &[S
     out.map(|c| c.clamp(ambient.clamp(0.0, 1.0), 1.0))
 }
 
+/// Mineral level at which the alpha of the lightmap is full. The shader draws
+/// the minerals as fine cyan specks from it (`lighting.wgsl` uses the same
+/// number).
+pub const MINERAL_FULL: f32 = 30.0;
+
 /// RGBA8 texels of the lightmap, one for each grid cell, row 0 at the top (the
-/// highest world y). Alpha is 255.
+/// highest world y). Alpha is the mineral level, in 0..=`MINERAL_FULL`.
 pub fn render_lightmap(grid: &EnvGrid, ambient: Ambient, splats: &[Splat]) -> Vec<u8> {
     let dims = grid.dims();
     let heat = grid.layer(Channel::Heat);
     let light = grid.layer(Channel::Light);
+    let minerals = grid.layer(Channel::Minerals);
     let mut data = vec![255u8; dims.width * dims.height * 4];
     for row in 0..dims.height {
         // Image rows go down; world y goes up.
@@ -113,6 +119,7 @@ pub fn render_lightmap(grid: &EnvGrid, ambient: Ambient, splats: &[Splat]) -> Ve
             for (k, c) in rgb.iter().enumerate() {
                 data[t + k] = (c * 255.0).round() as u8;
             }
+            data[t + 3] = (minerals[i] / MINERAL_FULL * 255.0).clamp(0.0, 255.0).round() as u8;
         }
     }
     data
@@ -152,6 +159,18 @@ mod tests {
         let [r, g, b] = light_at(0.08, 0.0, 10.0, Vec2::ZERO, &[]);
         assert!(b > 0.5, "a shaft is lit");
         assert!(b > r && b > g.min(r), "a shaft is violet: {r} {g} {b}");
+    }
+
+    #[test]
+    fn minerals_go_to_the_alpha_channel() {
+        let mut grid = EnvGrid::new(4, 4, Vec2::ZERO);
+        grid.set_level(Channel::Minerals, 1, 1, MINERAL_FULL);
+        grid.set_level(Channel::Minerals, 2, 2, MINERAL_FULL / 2.0);
+        let map = render_lightmap(&grid, Ambient::Flat(0.5), &[]);
+        let alpha = |x: usize, y: usize| map[((3 - y) * 4 + x) * 4 + 3];
+        assert_eq!(alpha(1, 1), 255);
+        assert!((alpha(2, 2) as i32 - 128).abs() <= 1);
+        assert_eq!(alpha(0, 0), 0);
     }
 
     #[test]
@@ -206,6 +225,6 @@ mod tests {
         };
         assert!(texel(8, 8) > texel(0, 0));
         let floor = (VENT_AMBIENT * 255.0).round() as u8;
-        assert!(map.chunks(4).all(|p| p[0] >= floor && p[3] == 255));
+        assert!(map.chunks(4).all(|p| p[0] >= floor));
     }
 }
