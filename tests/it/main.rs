@@ -13,6 +13,7 @@ mod genome_test;
 mod grapple_test;
 mod integration_test;
 mod land_test;
+mod level_files_test;
 mod living_world_test;
 mod metabolic_flow_test;
 mod metabolic_invariants;

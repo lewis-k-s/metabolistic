@@ -36,6 +36,7 @@
 //! | `pools`        | Pool values that replace the starter ones: `{"ATP": 400}`.                  |
 //! | `codex`        | Genes to put into the (in-memory) codex.                                    |
 //! | `invulnerable` | The cell cannot die or be engulfed.                                         |
+//! | `level`        | A level file for the first stage: `"vents/chimney_forest"` (see `level_file`). Its stage replaces `stage`. |
 //!
 //! Slots hold active skills only. Pathway levels are set on the metabolic map
 //! during the run.
@@ -93,6 +94,8 @@ pub struct Scenario {
     pub pools: BTreeMap<Currency, f32>,
     pub codex: Vec<BlockKind>,
     pub invulnerable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
 }
 
 impl Default for Scenario {
@@ -108,6 +111,7 @@ impl Default for Scenario {
             pools: BTreeMap::new(),
             codex: Vec::new(),
             invulnerable: false,
+            level: None,
         }
     }
 }
@@ -151,6 +155,15 @@ impl Scenario {
         pools
     }
 
+    /// The level file of the scenario, read and built. `None` if it names none.
+    pub fn level_file(&self, assets_dir: &Path) -> Result<Option<(Stage, crate::level::LevelDef)>, String> {
+        let Some(id) = &self.level else { return Ok(None) };
+        let path = crate::level_file::resolve_path(id, assets_dir);
+        let file = crate::level_file::load(&path)?;
+        let def = file.to_def().map_err(|e| format!("level {}: {e}", path.display()))?;
+        Ok(Some((file.stage, def)))
+    }
+
     /// The run state for the first frame: stage, seed and cell.
     pub fn begin_run(&self) -> RunState {
         let mut run = RunState::begin(self.seed, Default::default());
@@ -189,6 +202,7 @@ impl Scenario {
             pools: pools.pools.iter().map(|(k, v)| (*k, *v)).collect(),
             codex: Vec::new(),
             invulnerable,
+            level: None,
         }
     }
 }
@@ -245,15 +259,26 @@ pub fn load(path: &Path) -> Result<Scenario, String> {
 /// The scenario that the command line or the environment asks for. `None` if
 /// none is asked for. Panics with the error if the file is bad: a scenario run
 /// must never fall back to the normal start.
+///
+/// `--level x` (or `METABOLISTIC_LEVEL=x`) alone asks for the default scenario
+/// on that level; with a scenario it replaces the scenario's level.
 pub fn requested() -> Option<Scenario> {
+    use crate::level_file::{LEVEL_VAR, level_name};
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env = std::env::var(SCENARIO_VAR).ok();
-    let name = scenario_name(&args, env.as_deref())?;
-    let path = resolve_path(&name, &assets_dir());
-    match load(&path) {
-        Ok(scenario) => Some(scenario),
-        Err(err) => panic!("{err}"),
+    let level = level_name(&args, std::env::var(LEVEL_VAR).ok().as_deref());
+    let mut scenario = match scenario_name(&args, env.as_deref()) {
+        Some(name) => match load(&resolve_path(&name, &assets_dir())) {
+            Ok(scenario) => scenario,
+            Err(err) => panic!("{err}"),
+        },
+        None if level.is_some() => Scenario::default(),
+        None => return None,
+    };
+    if level.is_some() {
+        scenario.level = level;
     }
+    Some(scenario)
 }
 
 /// The scenario that the game starts with. Present from start up to the end of
@@ -281,7 +306,18 @@ pub fn start(
     info!("scenario: starting a run at {:?}, seed {}", scenario.stage, scenario.seed);
     store.path = None;
     codex.bank(&scenario.codex);
-    commands.insert_resource(scenario.begin_run());
+    let mut run = scenario.begin_run();
+    // A bad level file stops the game, like a bad scenario file.
+    match scenario.level_file(&assets_dir()) {
+        Ok(Some((stage, def))) => {
+            info!("scenario: level {:?} ({})", scenario.level, def.name);
+            run.stage_index = STAGES.iter().position(|s| *s == stage).unwrap_or(0);
+            run.level = Some(def);
+        }
+        Ok(None) => {}
+        Err(err) => panic!("{err}"),
+    }
+    commands.insert_resource(run);
     commands.insert_resource(PendingScenarioCell {
         pools: scenario.start_pools(),
         invulnerable: scenario.invulnerable,

@@ -19,6 +19,7 @@ pub mod genome_map;
 pub mod land;
 pub mod layout;
 pub mod level;
+pub mod level_file;
 pub mod lighting;
 pub mod membrane;
 pub mod metabolism;

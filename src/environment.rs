@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 /// An outside channel. A later stage may add OrganicCarbon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Channel {
     /// Heat from a vent.
     Heat,

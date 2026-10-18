@@ -190,11 +190,12 @@ impl LevelDef {
     /// The hand-made base layout of the land level.
     pub fn land_base() -> Self {
         Self {
-            name: "Land",
+            name: "Land".into(),
             seed: 0,
             width: FIELD_WIDTH,
             height: FIELD_HEIGHT,
             field: FieldKind::Land,
+            field_overrides: Vec::new(),
             vents: Vec::new(),
             shafts: Vec::<Shaft>::new(),
             shaft_level: 0.0,
@@ -240,6 +241,7 @@ impl LevelDef {
                     pores: WAXY_PORES.to_vec(),
                 },
             ],
+            tiles: Vec::new(),
             npcs: npc_spawns(),
             viruses: vec![
                 Vec2::new(-300.0, -270.0),

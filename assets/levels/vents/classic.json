@@ -1,0 +1,356 @@
+{
+  "name": "Classic Vent Field",
+  "stage": "Vents",
+  "summary": "The current hand-built level (LevelDef::vents_base). One hot core vent and a weaker second vent, two UV shafts, wall lines that split the field, and the gate chamber in the east.",
+  "pillars": [
+    "Round halos: heat and minerals drift east and north from two point sources.",
+    "Tissue walls with pores split the field into rooms; the gate chamber is one of them.",
+    "Two UV shafts block the direct way east, so the player goes round them or gets the pigment gene first."
+  ],
+  "seed": 0,
+  "size": [
+    64,
+    48
+  ],
+  "vents": [
+    {
+      "at": [
+        0.0,
+        0.0
+      ],
+      "radius": 50.0,
+      "heat": 500.0,
+      "minerals": 70.0
+    },
+    {
+      "at": [
+        400.0,
+        280.0
+      ],
+      "radius": 40.0,
+      "heat": 160.0,
+      "minerals": 25.0
+    }
+  ],
+  "shafts": [
+    {
+      "min": [
+        270.0,
+        130.0
+      ],
+      "max": [
+        370.0,
+        800.0
+      ]
+    },
+    {
+      "min": [
+        550.0,
+        -800.0
+      ],
+      "max": [
+        670.0,
+        170.0
+      ]
+    }
+  ],
+  "shaft_level": 10.0,
+  "uv_fraction": 1.0,
+  "air_o2": 0.0,
+  "wet": [],
+  "npcs_like_light": false,
+  "shelters": [
+    {
+      "at": [
+        120.0,
+        -130.0
+      ],
+      "radius": 48.0
+    },
+    {
+      "at": [
+        480.0,
+        380.0
+      ],
+      "radius": 48.0
+    }
+  ],
+  "chamber": {
+    "x": [
+      57,
+      61
+    ],
+    "y": [
+      24,
+      29
+    ],
+    "pores": [
+      57,
+      60
+    ],
+    "wall": "Wall",
+    "lit": true
+  },
+  "lines": [
+    {
+      "kind": "Wall",
+      "vertical": true,
+      "at": 50,
+      "span": [
+        29,
+        47
+      ],
+      "pores": [
+        36,
+        41
+      ]
+    },
+    {
+      "kind": "Wall",
+      "vertical": false,
+      "at": 16,
+      "span": [
+        30,
+        48
+      ],
+      "pores": [
+        35,
+        42
+      ]
+    }
+  ],
+  "mobs": {
+    "predator": {
+      "label": "Engulfer",
+      "archetype": "Predator",
+      "notes": "Bigger than the player; chases and engulfs."
+    },
+    "prey": {
+      "label": "Bacillus",
+      "archetype": "Prey"
+    },
+    "prey_secondarymetabolites": {
+      "label": "Pigmented bacillus",
+      "archetype": "Prey",
+      "signature": "SecondaryMetabolites",
+      "notes": "Carries the pigment gene (UV shield). Waits in the dim edge under shaft A."
+    },
+    "symbiont": {
+      "label": "Symbiont",
+      "archetype": "Symbiont",
+      "notes": "Follows the player; trades carbon for ATP on contact."
+    }
+  },
+  "spawns": [
+    {
+      "mob": "prey_secondarymetabolites",
+      "at": [
+        300.0,
+        50.0
+      ]
+    },
+    {
+      "mob": "prey_secondarymetabolites",
+      "at": [
+        345.0,
+        40.0
+      ]
+    },
+    {
+      "mob": "prey_secondarymetabolites",
+      "at": [
+        255.0,
+        75.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        60.0,
+        170.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        250.0,
+        -70.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        -150.0,
+        100.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        210.0,
+        -330.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        700.0,
+        250.0
+      ]
+    },
+    {
+      "mob": "predator",
+      "at": [
+        760.0,
+        330.0
+      ]
+    },
+    {
+      "mob": "predator",
+      "at": [
+        -330.0,
+        -210.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        60.0,
+        -70.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        450.0,
+        150.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        260.0,
+        -340.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        470.0,
+        440.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        -40.0,
+        330.0
+      ]
+    }
+  ],
+  "viruses": [
+    [
+      100.0,
+      300.0
+    ],
+    [
+      -200.0,
+      -50.0
+    ],
+    [
+      460.0,
+      -100.0
+    ],
+    [
+      700.0,
+      420.0
+    ],
+    [
+      -350.0,
+      200.0
+    ]
+  ],
+  "food_zones": [
+    {
+      "at": [
+        -100.0,
+        200.0
+      ],
+      "radius": 110.0
+    },
+    {
+      "at": [
+        450.0,
+        210.0
+      ],
+      "radius": 90.0
+    },
+    {
+      "at": [
+        300.0,
+        -200.0
+      ],
+      "radius": 130.0
+    },
+    {
+      "at": [
+        120.0,
+        20.0
+      ],
+      "radius": 80.0
+    }
+  ],
+  "metal_zones": [
+    {
+      "at": [
+        130.0,
+        150.0
+      ],
+      "radius": 60.0
+    },
+    {
+      "at": [
+        -120.0,
+        -130.0
+      ],
+      "radius": 60.0
+    },
+    {
+      "at": [
+        330.0,
+        330.0
+      ],
+      "radius": 50.0
+    },
+    {
+      "at": [
+        500.0,
+        250.0
+      ],
+      "radius": 40.0
+    }
+  ],
+  "initial_food": 22,
+  "initial_metals": 10,
+  "gate": {
+    "at": [
+      880.0,
+      96.0
+    ],
+    "gene": "LightCapture",
+    "sprite": "gate_cell_phototroph"
+  },
+  "key_gene": {
+    "gene": "SecondaryMetabolites",
+    "centre": [
+      320.0,
+      92.0
+    ],
+    "count": 3,
+    "dim_edge": true
+  },
+  "start": [
+    190.0,
+    70.0
+  ]
+}

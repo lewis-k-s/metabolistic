@@ -23,7 +23,8 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold to reel, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on the left mouse button, injector on the right). Bindings on the Run screen: WASD moves, Shift is the flagellum burst, the four action slots are the left, right, back and forward mouse buttons (keys 1-4 also work). The flagellum trails the move direction (`ActionState::heading`); aimed proteins point at the cursor (`aim`)
 - `lighting.rs`: the pure light field (ambient + heat + shaft light) and the lightmap; `world/lighting_view.rs` draws it as a banded, dithered darkness overlay (`assets/shaders/lighting.wgsl`). Plan: `docs/art-direction.md`, "Light and darkness"
 - `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
-- `level.rs`: the hand-built vent field
+- `level.rs`: the hand-built vent field and `LevelDef`, the value the world spawns from
+- `level_file.rs`: level files (`assets/levels/<stage>/<name>.json`, id `vents/caldera`): JSON -> `LevelDef`, plus design text (summary, pillars, proposals, creature catalog with labels and proposed behaviour, map notes). A stage can have many levels
 - `run.rs`: death detection and `RunSummary`
 - `world/`: the run world (full only): grid texture (O2, water, land minerals; heat, light and vent minerals are drawn by the lighting), sea floor, vents, `vfx` (vent smoke and sparkles, `bevy_enoki`), player body (avian2d), camera, HUD
 - `metabolism/`: Core metabolic flow simulation and graph management
@@ -65,6 +66,14 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Presets: `vent_motile` (3 flagella, transporter, burst), `vent_hunter` (flagella, adhesin, toxin, high ATP), `shallow_start` (light capture, catalase), `land_start`. To add one, put a JSON file in `assets/scenarios/`; the test `every_preset_loads_and_builds_a_cell` checks it.
 - F9 in a run writes the cell's current state as a scenario to `scenario-dump.json` in the save dir. A scenario run never writes the real codex file.
 - The scenario launch does not work together with `METABOLISTIC_SMOKE_TEST`.
+
+### Level Tool (view, check, play levels)
+- `cargo levels list` / `cargo levels check [ids]`: list levels; parse, build and run `layout::validate` (exit 1 on a broken rule).
+- `cargo levels bake [ids]`: writes `target/levels/viewer.html` (all levels: a panel to compare maps per stage, and an inspect view with layers, hover values and the creature roster), one PNG per level (agents can read it) and a `.bake.json`. The grid fields come from the real `EnvGrid` warm-up.
+- `cargo levels ascii <id> [map|heat|minerals|light|o2|water]` and `cargo levels probe <id> <x> <y>`: text views for agents.
+- `cargo levels export-bases`: rewrites `assets/levels/<stage>/classic.json` from the Rust base levels (a test checks they match).
+- Play a level: `METABOLISTIC_LEVEL=vents/caldera cargo run` (or `--level`, or `"level"` in a scenario). It replaces the first stage's level.
+- The viewer template is `tools/level-viewer/viewer.html`; the bin is `src/bin/levels/`. Format: the doc comment of `src/level_file.rs`.
 
 ### Testing
 - **Run all tests**: `cargo test` (full build, about 10 s after an edit)

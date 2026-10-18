@@ -4580,6 +4580,7 @@ dependencies = [
  "egui",
  "env_logger",
  "log",
+ "png",
  "proptest",
  "rand 0.10.3",
  "ratatui",

@@ -6,3 +6,5 @@ th = "test --no-default-features --features headless"
 ch = "check --no-default-features --features headless --all-targets"
 # Lint everything in the full build.
 lint = "clippy --all-targets"
+# The level tool: list, check, bake (viewer + PNGs), ascii, probe. See `src/level_file.rs`.
+levels = "run --no-default-features --features headless --bin levels --"

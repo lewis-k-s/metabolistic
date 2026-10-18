@@ -1,0 +1,458 @@
+{
+  "name": "Classic Land",
+  "stage": "Land",
+  "summary": "The current land level (LevelDef::land_base). Air everywhere, water only in wet zones, and dry ground that slows cells down.",
+  "seed": 0,
+  "size": [
+    64,
+    48
+  ],
+  "vents": [],
+  "shafts": [],
+  "shaft_level": 0.0,
+  "uv_fraction": 0.5,
+  "surface_light": {
+    "level": 2.8,
+    "depth_scale": 1000000000.0
+  },
+  "air_o2": 4.0,
+  "wet": [
+    {
+      "min": [
+        -1024.0,
+        -768.0
+      ],
+      "max": [
+        -872.0,
+        768.0
+      ],
+      "level": 10.0
+    },
+    {
+      "at": [
+        -470.0,
+        150.0
+      ],
+      "radius": 70.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        -150.0,
+        -330.0
+      ],
+      "radius": 90.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        120.0,
+        200.0
+      ],
+      "radius": 70.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        390.0,
+        -330.0
+      ],
+      "radius": 80.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        380.0,
+        460.0
+      ],
+      "radius": 60.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        700.0,
+        400.0
+      ],
+      "radius": 70.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        760.0,
+        -260.0
+      ],
+      "radius": 80.0,
+      "level": 18.0
+    },
+    {
+      "at": [
+        -700.0,
+        -90.0
+      ],
+      "radius": 40.0,
+      "level": 12.0
+    },
+    {
+      "at": [
+        -110.0,
+        60.0
+      ],
+      "radius": 40.0,
+      "level": 12.0
+    },
+    {
+      "at": [
+        160.0,
+        -260.0
+      ],
+      "radius": 40.0,
+      "level": 12.0
+    },
+    {
+      "at": [
+        620.0,
+        330.0
+      ],
+      "radius": 40.0,
+      "level": 12.0
+    },
+    {
+      "at": [
+        800.0,
+        80.0
+      ],
+      "radius": 60.0,
+      "level": 12.0
+    }
+  ],
+  "npcs_like_light": true,
+  "shelters": [
+    {
+      "at": [
+        -700.0,
+        -90.0
+      ],
+      "radius": 48.0
+    },
+    {
+      "at": [
+        -110.0,
+        60.0
+      ],
+      "radius": 48.0
+    },
+    {
+      "at": [
+        160.0,
+        -260.0
+      ],
+      "radius": 48.0
+    },
+    {
+      "at": [
+        620.0,
+        330.0
+      ],
+      "radius": 48.0
+    }
+  ],
+  "chamber": {
+    "x": [
+      54,
+      59
+    ],
+    "y": [
+      24,
+      28
+    ],
+    "pores": [
+      54,
+      58
+    ],
+    "wall": "Waxy",
+    "lit": false
+  },
+  "lines": [
+    {
+      "kind": "Wall",
+      "vertical": false,
+      "at": 20,
+      "span": [
+        14,
+        30
+      ],
+      "pores": [
+        18,
+        26
+      ]
+    },
+    {
+      "kind": "Mat",
+      "vertical": true,
+      "at": 24,
+      "span": [
+        24,
+        40
+      ],
+      "pores": []
+    },
+    {
+      "kind": "Tough",
+      "vertical": true,
+      "at": 40,
+      "span": [
+        12,
+        36
+      ],
+      "pores": [
+        18,
+        30
+      ]
+    },
+    {
+      "kind": "Waxy",
+      "vertical": true,
+      "at": 47,
+      "span": [
+        6,
+        26
+      ],
+      "pores": [
+        10,
+        22
+      ]
+    }
+  ],
+  "mobs": {
+    "predator": {
+      "label": "Engulfer",
+      "archetype": "Predator"
+    },
+    "prey": {
+      "label": "Bacillus",
+      "archetype": "Prey"
+    },
+    "prey_cuticle": {
+      "label": "Bacillus (Cuticle)",
+      "archetype": "Prey",
+      "signature": "Cuticle"
+    },
+    "prey_lightcapture": {
+      "label": "Bacillus (LightCapture)",
+      "archetype": "Prey",
+      "signature": "LightCapture"
+    },
+    "symbiont": {
+      "label": "Symbiont",
+      "archetype": "Symbiont"
+    }
+  },
+  "spawns": [
+    {
+      "mob": "prey_cuticle",
+      "at": [
+        -490.0,
+        175.0
+      ]
+    },
+    {
+      "mob": "prey_cuticle",
+      "at": [
+        -440.0,
+        140.0
+      ]
+    },
+    {
+      "mob": "prey_cuticle",
+      "at": [
+        -480.0,
+        110.0
+      ]
+    },
+    {
+      "mob": "prey_lightcapture",
+      "at": [
+        -150.0,
+        -330.0
+      ]
+    },
+    {
+      "mob": "prey_lightcapture",
+      "at": [
+        120.0,
+        200.0
+      ]
+    },
+    {
+      "mob": "prey_lightcapture",
+      "at": [
+        390.0,
+        -330.0
+      ]
+    },
+    {
+      "mob": "prey_lightcapture",
+      "at": [
+        700.0,
+        400.0
+      ]
+    },
+    {
+      "mob": "prey_lightcapture",
+      "at": [
+        380.0,
+        460.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        -300.0,
+        -330.0
+      ]
+    },
+    {
+      "mob": "prey",
+      "at": [
+        20.0,
+        330.0
+      ]
+    },
+    {
+      "mob": "predator",
+      "at": [
+        420.0,
+        250.0
+      ]
+    },
+    {
+      "mob": "predator",
+      "at": [
+        -100.0,
+        -520.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        -620.0,
+        -20.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        -100.0,
+        120.0
+      ]
+    },
+    {
+      "mob": "symbiont",
+      "at": [
+        190.0,
+        -150.0
+      ]
+    }
+  ],
+  "viruses": [
+    [
+      -300.0,
+      -270.0
+    ],
+    [
+      60.0,
+      40.0
+    ],
+    [
+      390.0,
+      210.0
+    ],
+    [
+      600.0,
+      -170.0
+    ]
+  ],
+  "food_zones": [
+    {
+      "at": [
+        -470.0,
+        150.0
+      ],
+      "radius": 90.0
+    },
+    {
+      "at": [
+        -150.0,
+        -330.0
+      ],
+      "radius": 100.0
+    },
+    {
+      "at": [
+        120.0,
+        200.0
+      ],
+      "radius": 90.0
+    },
+    {
+      "at": [
+        390.0,
+        -330.0
+      ],
+      "radius": 90.0
+    },
+    {
+      "at": [
+        700.0,
+        400.0
+      ],
+      "radius": 80.0
+    }
+  ],
+  "metal_zones": [
+    {
+      "at": [
+        -350.0,
+        -330.0
+      ],
+      "radius": 60.0
+    },
+    {
+      "at": [
+        200.0,
+        -100.0
+      ],
+      "radius": 50.0
+    },
+    {
+      "at": [
+        620.0,
+        120.0
+      ],
+      "radius": 40.0
+    }
+  ],
+  "initial_food": 18,
+  "initial_metals": 8,
+  "gate": {
+    "at": [
+      800.0,
+      80.0
+    ],
+    "gene": "Multicellularity",
+    "sprite": "gate_cell_phototroph"
+  },
+  "key_gene": {
+    "gene": "Cuticle",
+    "centre": [
+      -470.0,
+      150.0
+    ],
+    "count": 3,
+    "dim_edge": false
+  },
+  "start": [
+    -780.0,
+    30.0
+  ]
+}

@@ -66,7 +66,7 @@ pub const TOUGH_LYSE_METALS: f32 = 1.0;
 pub const TOUGH_RECOIL: f32 = 4.0;
 
 /// The kind of a wall tile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum WallKind {
     Wall,
     Pore,

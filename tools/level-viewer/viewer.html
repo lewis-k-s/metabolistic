@@ -1,0 +1,641 @@
+<title>Metabolistic Level Atlas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<!--
+  The level viewer. `cargo levels bake` puts the level data in place of the
+  marker in the "data" script below and writes target/levels/viewer.html.
+  Rendering is one function per layer (see `drawMap`), so editing tools can
+  later reuse the same drawing and the same coordinate helpers (toCanvas,
+  toWorld). Level data is the bake JSON: see src/bin/levels/bake.rs.
+-->
+<style>
+/* Layout: survey-console. Stage tabs on top; a panel of map cards to compare
+   options, or one map with a side sheet of facts. Dark only: the abyss is the
+   subject, and the maps are drawn on deep water. */
+:root {
+  color-scheme: dark;
+  --abyss: #060b14;
+  --hull: #0c1422;
+  --hull-2: #111c2e;
+  --seam: #1e2c44;
+  --ink: #d9e3ef;
+  --ink-dim: #8090a8;
+  --sulfur: #e9c74a;
+  --heat: #ff6a2a;
+  --mineral: #3fd4a8;
+  --uv: #b282ff;
+  --prey: #74e374;
+  --hostile: #ff5050;
+  --ally: #66b2ff;
+  --gate: #f266f2;
+  --ok: #57d68d;
+  --bad: #ff7a5c;
+  --display: "Chakra Petch", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --step--1: 0.8rem;
+  --step-0: 0.9rem;
+  --step-1: 1.05rem;
+  --step-2: 1.4rem;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--abyss);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: var(--step-0);
+  line-height: 1.45;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--sulfur); outline-offset: 2px; }
+
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--abyss) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--seam);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px;
+}
+.brand { font-family: var(--display); font-weight: 600; font-size: var(--step-1); letter-spacing: 0.06em; text-transform: uppercase; }
+.brand small { color: var(--ink-dim); font-weight: 500; letter-spacing: 0.1em; margin-left: 8px; font-size: var(--step--1); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tab {
+  background: transparent; border: 1px solid var(--seam); border-radius: 3px;
+  padding: 4px 10px; cursor: pointer; font-family: var(--mono); font-size: var(--step--1);
+  color: var(--ink-dim);
+}
+.tab[aria-pressed="true"] { color: var(--abyss); background: var(--sulfur); border-color: var(--sulfur); }
+.tab:hover:not([aria-pressed="true"]) { color: var(--ink); border-color: var(--ink-dim); }
+.spacer { flex: 1; }
+.hint { color: var(--ink-dim); font-size: var(--step--1); font-family: var(--mono); }
+
+main {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 40px;
+}
+
+/* Panel of options */
+.panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); gap: 16px; align-items: start; }
+.card {
+  background: var(--hull); border: 1px solid var(--seam); border-radius: 4px;
+  display: flex; flex-direction: column; min-width: 0; cursor: pointer; text-align: left; padding: 0;
+}
+.card:hover { border-color: var(--ink-dim); }
+.card canvas { width: 100%; display: block; border-bottom: 1px solid var(--seam); border-radius: 4px 4px 0 0; image-rendering: auto; }
+.card-body { padding: 12px 14px 14px; display: grid; gap: 8px; }
+.card h2 { margin: 0; font-family: var(--display); font-weight: 600; font-size: var(--step-1); letter-spacing: 0.02em; text-wrap: balance; }
+.card .id { font-family: var(--mono); font-size: var(--step--1); color: var(--ink-dim); }
+.card p { margin: 0; color: var(--ink-dim); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--seam);
+  border-radius: 999px; padding: 1px 8px 1px 4px; font-size: var(--step--1); font-family: var(--mono);
+  background: var(--hull-2); white-space: nowrap;
+}
+.chip img { width: 16px; height: 16px; image-rendering: pixelated; }
+.chip.plain { padding-left: 8px; }
+.status { font-family: var(--mono); font-size: var(--step--1); padding: 1px 7px; border-radius: 3px; border: 1px solid; }
+.status.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.status.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+
+/* Inspect */
+.inspect { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 18px; align-items: start; }
+@media (max-width: 960px) { .inspect { grid-template-columns: minmax(0, 1fr); } }
+.mapwrap { position: relative; min-width: 0; }
+.layers { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.layer {
+  border: 1px solid var(--seam); background: var(--hull); border-radius: 3px; padding: 3px 8px;
+  cursor: pointer; font-family: var(--mono); font-size: var(--step--1); color: var(--ink-dim);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.layer i { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--ink-dim)); opacity: 0.35; }
+.layer[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-dim); }
+.layer[aria-pressed="true"] i { opacity: 1; }
+#map { width: 100%; display: block; border: 1px solid var(--seam); border-radius: 4px; cursor: crosshair; background: var(--hull); }
+.readout {
+  position: absolute; pointer-events: none; background: color-mix(in srgb, var(--abyss) 94%, transparent);
+  border: 1px solid var(--seam); border-radius: 3px; padding: 6px 8px; font-family: var(--mono);
+  font-size: 11.5px; line-height: 1.5; white-space: pre; z-index: 3; font-variant-numeric: tabular-nums;
+}
+.mapfoot { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; color: var(--ink-dim); font-family: var(--mono); font-size: var(--step--1); }
+.toast { color: var(--sulfur); }
+
+.sheet { display: grid; gap: 18px; min-width: 0; }
+.sheet h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: var(--step-2); line-height: 1.15; text-wrap: balance; }
+.sheet h3 {
+  margin: 0 0 8px; font-family: var(--display); font-weight: 500; font-size: var(--step--1);
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim);
+}
+.sheet p { margin: 0; max-width: 65ch; }
+.sheet ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.pillars li::marker { color: var(--sulfur); }
+.proposals li::marker { color: var(--uv); }
+.mob { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 4px 10px; padding: 9px 0; border-top: 1px solid var(--seam); align-items: start; }
+.mob:first-of-type { border-top: 0; padding-top: 0; }
+.mob img { width: 32px; height: 32px; image-rendering: pixelated; background: var(--hull-2); border-radius: 3px; border: 1px solid var(--seam); }
+.mob b { font-weight: 700; }
+.mob .count { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.mob .meta { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 4px; }
+.mob .behaviour { grid-column: 2 / 4; color: var(--ink-dim); font-size: var(--step--1); }
+.mob .behaviour em { color: var(--uv); font-style: normal; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; margin-right: 4px; }
+.role { font-family: var(--mono); font-size: 11px; padding: 0 6px; border-radius: 3px; border: 1px solid currentColor; }
+.role.prey { color: var(--prey); } .role.hostile { color: var(--hostile); } .role.ally { color: var(--ally); } .role.key { color: var(--sulfur); }
+table.facts { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+table.facts td, table.facts th { padding: 3px 6px 3px 0; text-align: left; border-top: 1px solid var(--seam); vertical-align: top; }
+table.facts th { color: var(--ink-dim); font-weight: 400; }
+.changed { color: var(--sulfur); }
+.errors li { color: var(--bad); font-family: var(--mono); font-size: var(--step--1); }
+.empty { color: var(--ink-dim); padding: 40px 0; max-width: 60ch; }
+.empty code { font-family: var(--mono); color: var(--sulfur); }
+.back { background: none; border: 0; color: var(--ink-dim); cursor: pointer; padding: 0; font-family: var(--mono); font-size: var(--step--1); }
+.back:hover { color: var(--ink); }
+@media (prefers-reduced-motion: no-preference) { .card { transition: border-color 120ms; } }
+</style>
+
+<header class="top">
+  <div class="brand">Level Atlas<small id="count"></small></div>
+  <nav class="tabs" id="stages" aria-label="Stage"></nav>
+  <div class="spacer"></div>
+  <span class="hint" id="hint">click a map to inspect it</span>
+</header>
+<main id="main"></main>
+
+<script id="data" type="application/json">"__LEVEL_DATA__"</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const STAGE_NAMES = { Vents: "Deep vents", ShallowWater: "Shallow water", Land: "Land" };
+const CSS = getComputedStyle(document.documentElement);
+const tok = (name) => CSS.getPropertyValue(name).trim();
+const ROLE_COLOUR = { prey: tok("--prey"), hostile: tok("--hostile"), ally: tok("--ally"), gate: tok("--gate"), key: tok("--sulfur") };
+const WALL_COLOUR = { Tough: "#6b615c", Wall: "#9e5273", Pore: "#f2c773", Mat: "#3f7a3d", Waxy: "#c7bd6b" };
+const MOB_RADIUS = { prey: 11, ally: 11, hostile: 22, gate: 34 };
+const LAYERS = [
+  ["Heat", "--heat"], ["Minerals", "--mineral"], ["Light", "--uv"], ["O2", "--ally"], ["Water", "--ally"],
+  ["Damage", "--hostile"], ["Walls", "--ink-dim"], ["Zones", "--sulfur"], ["Creatures", "--prey"],
+  ["Notes", "--sulfur"], ["Currents", "--mineral"], ["Grid", "--seam"],
+];
+
+const store = {
+  get(key, fallback) { try { const v = localStorage.getItem("atlas." + key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem("atlas." + key, JSON.stringify(value)); } catch { /* storage is optional */ } },
+};
+const state = {
+  stage: "Vents",
+  level: null,
+  layers: store.get("layers", { Heat: true, Minerals: true, Light: true, O2: true, Water: true, Damage: true, Walls: true, Zones: true, Creatures: true, Notes: true, Currents: false, Grid: false }),
+};
+
+const sprites = {};
+if (DATA && DATA.sprites) {
+  for (const [name, uri] of Object.entries(DATA.sprites)) { const img = new Image(); img.src = uri; sprites[name] = img; }
+}
+
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v); else node.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) node.append(kid);
+  return node;
+};
+
+// --- Coordinates: world units (y up, origin at the centre) <-> canvas pixels.
+function view(level, canvasWidth) {
+  const [w, h] = level.size, cell = level.cell;
+  const s = canvasWidth / w; // canvas px per grid cell
+  const [ox, oy] = level.origin;
+  return {
+    s, w, h, cell, width: w * s, height: h * s,
+    toCanvas: (x, y) => [(x - ox) / cell * s, h * s - (y - oy) / cell * s],
+    toWorld: (px, py) => [ox + px / s * cell, oy + (h * s - py) / s * cell],
+    len: (d) => d / cell * s,
+  };
+}
+
+/** Bilinear sample between cell centres, like EnvGrid::sample. */
+function sample(level, channel, x, y) {
+  const values = level.channels[channel];
+  if (!values) return 0;
+  const [w, h] = level.size;
+  const gx = (x - level.origin[0]) / level.cell - 0.5, gy = (y - level.origin[1]) / level.cell - 0.5;
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(gx))), y0 = Math.max(0, Math.min(h - 1, Math.floor(gy)));
+  const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+  const tx = Math.max(0, Math.min(1, gx - x0)), ty = Math.max(0, Math.min(1, gy - y0));
+  const at = (i, j) => values[j * w + i];
+  return (at(x0, y0) * (1 - tx) + at(x1, y0) * tx) * (1 - ty) + (at(x0, y1) * (1 - tx) + at(x1, y1) * tx) * ty;
+}
+
+const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
+function channelColour(level, channel) {
+  if (channel === "Light") return level.uv_fraction > 0.5 ? [0.7, 0.45, 1.0] : [1.0, 0.94, 0.55];
+  return { Heat: [1.0, 0.36, 0.12], Minerals: [0.2, 0.85, 0.65], O2: [0.55, 0.75, 1.0], Water: [0.25, 0.45, 0.9] }[channel];
+}
+
+/** The channel fields at grid resolution, as an offscreen canvas. */
+function fieldImage(level, layers) {
+  const [w, h] = level.size;
+  const off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  const ctx = off.getContext("2d");
+  const img = ctx.createImageData(w, h);
+  const bg = level.background;
+  const active = Object.keys(level.channels).filter((c) => layers[c]);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const px = [...bg];
+      for (const c of active) {
+        const v = level.channels[c][y * w + x];
+        if (v <= 0.01) continue;
+        const t = Math.sqrt(Math.min(1, v / level.refs[c])) * 0.75, col = channelColour(level, c);
+        for (let i = 0; i < 3; i++) px[i] += col[i] * t;
+      }
+      const o = ((h - 1 - y) * w + x) * 4;
+      img.data[o] = Math.min(255, px[0] * 255); img.data[o + 1] = Math.min(255, px[1] * 255);
+      img.data[o + 2] = Math.min(255, px[2] * 255); img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return off;
+}
+
+function dashed(ctx, on) { ctx.setLineDash(on ? [5, 4] : []); }
+
+function drawArrow(ctx, a, b, colour, width = 1.5) {
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), head = 6 + width * 2;
+  ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = width;
+  ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+  dashed(ctx, false);
+  ctx.beginPath(); ctx.moveTo(...b);
+  ctx.lineTo(b[0] - head * Math.cos(ang - 0.45), b[1] - head * Math.sin(ang - 0.45));
+  ctx.lineTo(b[0] - head * Math.cos(ang + 0.45), b[1] - head * Math.sin(ang + 0.45));
+  ctx.closePath(); ctx.fill();
+}
+
+function mobRole(level, spawn) {
+  const mob = level.mobs[spawn.mob];
+  return mob.key ? "key" : mob.role;
+}
+
+/** Draws the whole map. `detail` adds sprites and labels (the inspect view). */
+function drawMap(canvas, level, layers, detail) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 600;
+  const v = view(level, cssWidth);
+  canvas.width = Math.round(v.width * dpr); canvas.height = Math.round(v.height * dpr);
+  canvas.style.height = v.height + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(fieldImage(level, layers), 0, 0, v.width, v.height);
+  const [w, h] = level.size;
+
+  if (layers.Grid) {
+    ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 1;
+    for (let x = 0; x <= w; x++) { ctx.beginPath(); ctx.moveTo(x * v.s, 0); ctx.lineTo(x * v.s, v.height); ctx.stroke(); }
+    for (let y = 0; y <= h; y++) { ctx.beginPath(); ctx.moveTo(0, y * v.s); ctx.lineTo(v.width, y * v.s); ctx.stroke(); }
+  }
+  if (layers.Damage && level.channels.Heat) {
+    const heat = level.channels.Heat, hot = (x, y) => x >= 0 && y >= 0 && x < w && y < h && heat[y * w + x] >= level.heat_damage;
+    ctx.strokeStyle = tok("--hostile"); ctx.lineWidth = detail ? 1.5 : 1; ctx.beginPath();
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!hot(x, y)) continue;
+      const X = x * v.s, Y = (h - 1 - y) * v.s;
+      if (!hot(x - 1, y)) { ctx.moveTo(X, Y); ctx.lineTo(X, Y + v.s); }
+      if (!hot(x + 1, y)) { ctx.moveTo(X + v.s, Y); ctx.lineTo(X + v.s, Y + v.s); }
+      if (!hot(x, y + 1)) { ctx.moveTo(X, Y); ctx.lineTo(X + v.s, Y); }
+      if (!hot(x, y - 1)) { ctx.moveTo(X, Y + v.s); ctx.lineTo(X + v.s, Y + v.s); }
+    }
+    ctx.stroke();
+  }
+  if (layers.Walls) {
+    for (const [x, y, kind] of level.walls) {
+      ctx.globalAlpha = kind === "Mat" ? 0.7 : 1;
+      ctx.fillStyle = WALL_COLOUR[kind] || "#888";
+      ctx.fillRect(x * v.s, (h - 1 - y) * v.s, v.s + 0.5, v.s + 0.5);
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (layers.Currents) {
+    const drift = level.currents.Minerals.drift, mag = Math.hypot(drift[0], drift[1]);
+    if (mag > 0.01) {
+      const step = Math.max(3, Math.round(w / 12)), len = Math.min(1.6, 0.5 + mag) * v.s;
+      ctx.globalAlpha = 0.55;
+      for (let y = step / 2; y < h; y += step) for (let x = step / 2; x < w; x += step) {
+        const a = [x * v.s, (h - y) * v.s];
+        drawArrow(ctx, a, [a[0] + drift[0] / mag * len, a[1] - drift[1] / mag * len], tok("--mineral"), 1);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (layers.Zones) {
+    ctx.lineWidth = 1;
+    for (const z of level.food_zones) { ctx.strokeStyle = "rgba(233,199,74,0.45)"; dashed(ctx, true); ring(ctx, v, z.at, z.radius); }
+    for (const z of level.metal_zones) { ctx.strokeStyle = "rgba(200,205,225,0.45)"; dashed(ctx, true); ring(ctx, v, z.at, z.radius); }
+    dashed(ctx, true); ctx.strokeStyle = "rgba(178,130,255,0.55)";
+    for (const s of level.shafts) {
+      const a = v.toCanvas(s.min[0], s.max[1]), b = v.toCanvas(s.max[0], s.min[1]);
+      ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    }
+    dashed(ctx, false);
+    for (const s of level.shelters) {
+      ctx.strokeStyle = "#4ff0e0"; ctx.lineWidth = detail ? 2 : 1.5; ring(ctx, v, s.at, s.radius);
+      ctx.fillStyle = "rgba(79,240,224,0.10)"; ctx.beginPath(); ctx.arc(...v.toCanvas(...s.at), v.len(s.radius), 0, 7); ctx.fill();
+    }
+  }
+  for (const vent of level.vents) {
+    const c = v.toCanvas(...vent.at), r = Math.max(2.5, v.len(vent.radius));
+    const g = ctx.createRadialGradient(...c, 0, ...c, r);
+    g.addColorStop(0, "#fff3d0"); g.addColorStop(0.6, "#ffb060"); g.addColorStop(1, "rgba(255,120,40,0.2)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(...c, r, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#1a0d04"; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (layers.Creatures) {
+    for (const s of level.spawns) drawMob(ctx, v, level, s, detail);
+    ctx.strokeStyle = "#d58cff"; ctx.lineWidth = 1.5;
+    for (const p of level.viruses) {
+      const [x, y] = v.toCanvas(...p), r = detail ? 5 : 3;
+      ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.moveTo(x - r, y + r); ctx.lineTo(x + r, y - r); ctx.stroke();
+    }
+    drawSprite(ctx, v, level.gate.sprite, level.gate.at, MOB_RADIUS.gate, ROLE_COLOUR.gate, detail);
+  }
+  // The start: a white ring with a cross.
+  const st = v.toCanvas(...level.start), sr = Math.max(5, v.len(22));
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(...st, sr, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(st[0] - sr * 1.5, st[1]); ctx.lineTo(st[0] + sr * 1.5, st[1]); ctx.moveTo(st[0], st[1] - sr * 1.5); ctx.lineTo(st[0], st[1] + sr * 1.5); ctx.lineWidth = 1; ctx.stroke();
+  if (detail && sprites.player_cell?.complete) {
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(sprites.player_cell, st[0] - sr * 0.8, st[1] - sr * 0.8, sr * 1.6, sr * 1.6); ctx.imageSmoothingEnabled = true;
+  }
+  if (layers.Notes && detail) drawNotes(ctx, v, level);
+  return v;
+}
+
+function ring(ctx, v, at, radius) { ctx.beginPath(); ctx.arc(...v.toCanvas(...at), v.len(radius), 0, 7); ctx.stroke(); }
+
+function drawSprite(ctx, v, name, at, radius, colour, detail) {
+  const [x, y] = v.toCanvas(...at), r = Math.max(detail ? 5 : 2.5, v.len(radius));
+  const img = sprites[name];
+  if (detail && img && img.complete && img.naturalWidth) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, x - r, y - r, r * 2, r * 2);
+    ctx.imageSmoothingEnabled = true;
+    ctx.strokeStyle = colour; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, 7); ctx.stroke();
+  } else {
+    ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(x, y, r + 1, 0, 7); ctx.fill();
+    ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+}
+
+function drawMob(ctx, v, level, spawn, detail) {
+  const mob = level.mobs[spawn.mob], role = mobRole(level, spawn);
+  drawSprite(ctx, v, mob.sprite, spawn.at, MOB_RADIUS[mob.role] || 11, ROLE_COLOUR[role], detail);
+  if (detail && mob.proposed) {
+    const [x, y] = v.toCanvas(...spawn.at), r = Math.max(5, v.len(MOB_RADIUS[mob.role] || 11)) + 5;
+    ctx.strokeStyle = tok("--uv"); dashed(ctx, true); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.stroke(); dashed(ctx, false);
+  }
+}
+
+function drawNotes(ctx, v, level) {
+  ctx.font = "600 11.5px " + tok("--mono");
+  for (const n of level.notes) {
+    const colour = n.proposed ? tok("--uv") : tok("--sulfur");
+    ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = 1.5; dashed(ctx, n.proposed);
+    let label = null;
+    if (n.at && n.to) { drawArrow(ctx, v.toCanvas(...n.at), v.toCanvas(...n.to), colour); label = v.toCanvas(...n.at); }
+    else if (n.at && n.radius) { ring(ctx, v, n.at, n.radius); const c = v.toCanvas(...n.at); label = [c[0] - v.len(n.radius) * 0.7, c[1] - v.len(n.radius) - 6]; }
+    else if (n.rect) { const a = v.toCanvas(n.rect[0], n.rect[3]), b = v.toCanvas(n.rect[2], n.rect[1]); ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]); label = [a[0] + 4, a[1] - 6]; }
+    else if (n.at) label = v.toCanvas(...n.at);
+    dashed(ctx, false);
+    if (label) {
+      const text = n.text.length > 46 ? n.text.slice(0, 44) + "…" : n.text;
+      const tw = ctx.measureText(text).width;
+      const x = Math.max(4, Math.min(v.width - tw - 8, label[0])), y = Math.max(14, label[1]);
+      ctx.fillStyle = "rgba(6,11,20,0.82)"; ctx.fillRect(x - 3, y - 11, tw + 6, 15);
+      ctx.fillStyle = colour; ctx.fillText(text, x, y);
+    }
+  }
+}
+
+// --- Views
+
+function stageLevels(stage) {
+  return DATA.levels.filter((l) => stage === "All" || l.stage === stage);
+}
+
+function renderTabs() {
+  const nav = document.getElementById("stages");
+  nav.replaceChildren();
+  for (const stage of ["Vents", "ShallowWater", "Land", "All"]) {
+    const n = stageLevels(stage).length;
+    if (!n) continue;
+    nav.append(el("button", {
+      class: "tab", "aria-pressed": String(state.stage === stage && !state.level),
+      onclick: () => { state.stage = stage; state.level = null; route(); },
+      text: `${STAGE_NAMES[stage] || "All stages"} · ${n}`,
+    }));
+  }
+  document.getElementById("count").textContent = `${DATA.levels.length} maps`;
+}
+
+function statusChip(level) {
+  return level.errors.length
+    ? el("span", { class: "status bad", title: level.errors.join("\n"), text: `${level.errors.length} broken rule${level.errors.length > 1 ? "s" : ""}` })
+    : el("span", { class: "status ok", text: "valid" });
+}
+
+function mobChips(level) {
+  return Object.entries(level.mobs).map(([id, m]) => {
+    const img = sprites[m.sprite];
+    return el("span", { class: "chip", title: m.label + (m.proposed ? " (proposed: " + m.proposed + ")" : "") },
+      img ? el("img", { src: img.src, alt: "" }) : null,
+      `${m.count} ${m.label}`);
+  });
+}
+
+function renderPanel() {
+  document.getElementById("hint").textContent = "click a map to inspect it";
+  const main = document.getElementById("main");
+  const grid = el("section", { class: "panel", "aria-label": "Maps" });
+  main.replaceChildren(grid);
+  for (const level of stageLevels(state.stage)) {
+    const canvas = el("canvas", { "aria-label": `Map of ${level.name}` });
+    const card = el("button", { class: "card", onclick: () => openLevel(level.id) },
+      canvas,
+      el("div", { class: "card-body" },
+        el("div", { class: "row" }, el("h2", { text: level.name })),
+        el("div", { class: "row" }, el("span", { class: "id", text: `${level.id} · ${level.size[0]}×${level.size[1]}` }), statusChip(level)),
+        level.summary ? el("p", { text: level.summary }) : null,
+        el("div", { class: "row" }, mobChips(level)),
+      ));
+    grid.append(card);
+    requestAnimationFrame(() => drawMap(canvas, level, { ...state.layers, Notes: false, Currents: false, Grid: false }, false));
+  }
+}
+
+function factsTable(rows) {
+  return el("table", { class: "facts" }, rows.map(([k, val, cls]) => el("tr", {}, el("th", { text: k }), el("td", { class: cls || "", text: val }))));
+}
+
+const fmt = (n) => (Math.round(n * 100) / 100).toString();
+const fmtPt = (p) => `[${Math.round(p[0])}, ${Math.round(p[1])}]`;
+
+function renderInspect(level) {
+  document.getElementById("hint").textContent = "hover for values · click to copy a point";
+  const main = document.getElementById("main");
+  const canvas = el("canvas", { id: "map", "aria-label": `Map of ${level.name}` });
+  const readout = el("div", { class: "readout", hidden: "" });
+  const toast = el("span", { class: "toast" });
+  const layerBar = el("div", { class: "layers", role: "group", "aria-label": "Layers" });
+  for (const [name, colour] of LAYERS) {
+    if (["Heat", "Minerals", "Light", "O2", "Water"].includes(name) && !level.channels[name]) continue;
+    const b = el("button", { class: "layer", "aria-pressed": String(!!state.layers[name]), style: `--c: var(${colour})`,
+      onclick: () => { state.layers[name] = !state.layers[name]; store.set("layers", state.layers); b.setAttribute("aria-pressed", String(state.layers[name])); redraw(); } },
+      el("i"), name === "Light" && level.uv_fraction > 0.5 ? "UV light" : name);
+    layerBar.append(b);
+  }
+  const mapwrap = el("div", { class: "mapwrap" },
+    el("button", { class: "back", onclick: () => { state.level = null; route(); }, text: `← ${STAGE_NAMES[level.stage]} maps` }),
+    el("div", { style: "height:8px" }), layerBar, canvas, readout,
+    el("div", { class: "mapfoot" },
+      el("span", { text: `${level.size[0]}×${level.size[1]} cells · ${level.size[0] * level.cell}×${level.size[1] * level.cell} px` }),
+      el("span", { text: `heat burns ≥ ${level.heat_damage}` }),
+      el("span", { text: `cargo levels probe ${level.id} x y` }), toast));
+
+  let v = null;
+  const redraw = () => { v = drawMap(canvas, level, state.layers, true); };
+  const nearest = (x, y) => {
+    let best = null;
+    const consider = (d, what) => { if (d < 40 && (!best || d < best[0])) best = [d, what]; };
+    for (const s of level.spawns) consider(Math.hypot(s.at[0] - x, s.at[1] - y), level.mobs[s.mob].label + (level.mobs[s.mob].proposed ? " (proposed)" : ""));
+    for (const vent of level.vents) consider(Math.hypot(vent.at[0] - x, vent.at[1] - y) - vent.radius, `vent: heat ${vent.heat}, minerals ${vent.minerals}`);
+    for (const s of level.shelters) consider(Math.hypot(s.at[0] - x, s.at[1] - y) - s.radius, "shelter");
+    consider(Math.hypot(level.gate.at[0] - x, level.gate.at[1] - y) - 20, `gate cell (${level.gate.gene})`);
+    consider(Math.hypot(level.start[0] - x, level.start[1] - y), "player start");
+    return best && best[1];
+  };
+  canvas.addEventListener("mousemove", (e) => {
+    if (!v) return;
+    const r = canvas.getBoundingClientRect();
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    const [x, y] = v.toWorld(px, py);
+    const gx = Math.floor((x - level.origin[0]) / level.cell), gy = Math.floor((y - level.origin[1]) / level.cell);
+    const wall = level.walls.find((t) => t[0] === gx && t[1] === gy);
+    const lines = [`[${Math.round(x)}, ${Math.round(y)}]  tile [${gx}, ${gy}]`];
+    for (const c of Object.keys(level.channels)) {
+      const val = sample(level, c, x, y);
+      let flag = "";
+      if (c === "Heat" && val >= level.heat_damage) flag = "  burns";
+      if (c === "Light" && val >= level.npc_light_avoid && level.uv_fraction > 0.5) flag = "  UV";
+      lines.push(`${c.padEnd(9)}${fmt(val).padStart(7)}${flag}`);
+    }
+    if (wall) lines.push(`tile: ${wall[2]}`);
+    const near = nearest(x, y);
+    if (near) lines.push(near);
+    readout.textContent = lines.join("\n");
+    readout.hidden = false;
+    const wrapRect = mapwrap.getBoundingClientRect();
+    const left = e.clientX - wrapRect.left + 14, top = e.clientY - wrapRect.top + 14;
+    readout.style.left = Math.min(left, wrapRect.width - readout.offsetWidth - 4) + "px";
+    readout.style.top = top + "px";
+  });
+  canvas.addEventListener("mouseleave", () => { readout.hidden = true; });
+  canvas.addEventListener("click", (e) => {
+    const r = canvas.getBoundingClientRect();
+    const [x, y] = v.toWorld(e.clientX - r.left, e.clientY - r.top);
+    const text = `[${Math.round(x)}, ${Math.round(y)}]`;
+    const done = (msg) => { toast.textContent = msg; setTimeout(() => { toast.textContent = ""; }, 1800); };
+    navigator.clipboard.writeText(text).then(() => done(`copied ${text}`), () => done(`point ${text}`));
+  });
+
+  const sheet = el("aside", { class: "sheet" });
+  sheet.append(el("div", {}, el("div", { class: "row", style: "margin-bottom:6px" }, el("span", { class: "id hint", text: level.id }), statusChip(level)), el("h1", { text: level.name })));
+  if (level.summary) sheet.append(el("p", { text: level.summary }));
+  if (level.pillars.length) sheet.append(el("section", {}, el("h3", { text: "How the environment shapes it" }), el("ul", { class: "pillars" }, level.pillars.map((p) => el("li", { text: p })))));
+
+  const mobs = el("section", {}, el("h3", { text: `Creatures · ${level.spawns.length} + gate` }));
+  for (const [id, m] of Object.entries(level.mobs)) {
+    const img = sprites[m.sprite];
+    const role = m.key ? "key" : m.role;
+    mobs.append(el("div", { class: "mob" },
+      img ? el("img", { src: img.src, alt: "" }) : el("span"),
+      el("b", { text: m.label }),
+      el("span", { class: "count", text: `×${m.count}` }),
+      el("div", { class: "meta" },
+        el("span", { class: `role ${role}`, text: m.key ? "key gene" : m.role }),
+        el("span", { class: "chip plain", text: `runs as ${m.archetype}` }),
+        m.signature ? el("span", { class: "chip plain", text: m.signature }) : null),
+      m.proposed ? el("div", { class: "behaviour" }, el("em", { text: "proposed" }), m.proposed) : null,
+      m.notes ? el("div", { class: "behaviour", text: m.notes }) : null));
+  }
+  mobs.append(el("div", { class: "mob" },
+    sprites[level.gate.sprite] ? el("img", { src: sprites[level.gate.sprite].src, alt: "" }) : el("span"),
+    el("b", { text: "Gate cell" }), el("span", { class: "count", text: "×1" }),
+    el("div", { class: "meta" }, el("span", { class: "role ally", style: `color:${ROLE_COLOUR.gate}`, text: "gate" }), el("span", { class: "chip plain", text: `gives ${level.gate.gene}` }))));
+  sheet.append(mobs);
+
+  if (level.proposals.length) sheet.append(el("section", {}, el("h3", { text: "Needs from the engine" }), el("ul", { class: "proposals" }, level.proposals.map((p) => el("li", { text: p })))));
+
+  sheet.append(el("section", {}, el("h3", { text: "Currents (cells per second; yellow = set by this map)" }), factsTable(
+    Object.entries(level.currents).filter(([c]) => level.channels[c] || level.currents[c].changed)
+      .map(([c, p]) => [c, `drift (${fmt(p.drift[0])}, ${fmt(p.drift[1])}) · diffusion ${fmt(p.diffusion)} · decay ${fmt(p.decay)}`, p.changed ? "changed" : ""]))));
+
+  const probeRows = [];
+  for (const [where, values] of Object.entries(level.probes)) {
+    if (!values) continue;
+    probeRows.push([where, Object.entries(values).filter(([c]) => level.channels[c]).map(([c, val]) => `${c} ${fmt(val)}`).join(" · ")]);
+  }
+  sheet.append(el("section", {}, el("h3", { text: "Readings" }), factsTable([
+    ...probeRows,
+    ["vents", `${level.vents.length} (heat ${level.vents.map((x) => x.heat).join(", ")})`],
+    ["shelters", String(level.shelters.length)],
+    ["key gene", level.key_gene ? `${level.key_gene.gene} ×${level.key_gene.count}` : "none"],
+  ])));
+  sheet.append(el("section", {}, el("h3", { text: "Layout rules" }), level.errors.length
+    ? el("ul", { class: "errors" }, level.errors.map((e) => el("li", { text: e })))
+    : el("p", { class: "hint", text: "Passes layout::validate (start, shelter, key prey, chamber, overlaps)." })));
+  if (level.notes.length) sheet.append(el("section", {}, el("h3", { text: "Map notes" }), el("ul", {}, level.notes.map((n) => el("li", { text: (n.proposed ? "Proposed: " : "") + n.text })))));
+
+  main.replaceChildren(el("div", { class: "inspect" }, mapwrap, sheet));
+  redraw();
+  return redraw;
+}
+
+let currentRedraw = null;
+function openLevel(id) { state.level = id; location.hash = id.replace(/\//g, "."); route(); }
+function route() {
+  renderTabs();
+  currentRedraw = null;
+  const level = DATA.levels.find((l) => l.id === state.level);
+  if (level) { state.stage = level.stage; currentRedraw = renderInspect(level); window.scrollTo(0, 0); }
+  else { if (location.hash) history.replaceState(null, "", location.pathname); renderPanel(); }
+}
+
+if (!DATA || typeof DATA !== "object") {
+  document.getElementById("main").replaceChildren(el("div", { class: "empty" },
+    el("p", {}, "This is the viewer template without level data. Run ", el("code", { text: "cargo levels bake" }), " and open ", el("code", { text: "target/levels/viewer.html" }), ".")));
+} else {
+  const fromHash = location.hash.slice(1).replace(/\./g, "/");
+  if (DATA.levels.some((l) => l.id === fromHash)) state.level = fromHash;
+  route();
+  window.addEventListener("hashchange", () => {
+    const id = location.hash.slice(1).replace(/\./g, "/");
+    const next = DATA.levels.some((l) => l.id === id) ? id : null;
+    if (next !== state.level) { state.level = next; route(); }
+  });
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (currentRedraw) currentRedraw(); else renderPanel(); }, 150);
+  });
+  // Sprites decode after the first frame; draw again once they are ready.
+  Promise.all(Object.values(sprites).map((img) => img.decode().catch(() => {}))).then(() => { if (currentRedraw) currentRedraw(); else if (!state.level) renderPanel(); });
+}
+</script>

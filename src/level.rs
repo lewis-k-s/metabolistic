@@ -327,13 +327,16 @@ impl SurfaceLight {
 /// vent level from a seed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LevelDef {
-    pub name: &'static str,
+    pub name: String,
     pub seed: u64,
     /// Grid size in grid cells.
     pub width: usize,
     pub height: usize,
     /// How the channels move.
     pub field: FieldKind,
+    /// Channels that move in another way than `field` says (a level with a
+    /// strong current, or still water). See `LevelDef::params`.
+    pub field_overrides: Vec<(Channel, FieldParams)>,
     pub vents: Vec<Vent>,
     pub shafts: Vec<Shaft>,
     pub shaft_level: f32,
@@ -349,6 +352,9 @@ pub struct LevelDef {
     pub shelters: Vec<crate::shelter::Shelter>,
     pub chamber: Chamber,
     pub lines: Vec<WallLine>,
+    /// Free tiles besides the chamber and the lines: rock, mats, chimneys. A
+    /// level file paints them as text (see `level_file`).
+    pub tiles: Vec<((usize, usize), WallKind)>,
     pub npcs: Vec<NpcSpawn>,
     pub viruses: Vec<Vec2>,
     pub food_zones: Vec<(Vec2, f32)>,
@@ -466,11 +472,12 @@ impl LevelDef {
     /// The hand-made base layout of the vent level (the constants above).
     pub fn vents_base() -> Self {
         Self {
-            name: "Deep-sea vents",
+            name: "Deep-sea vents".into(),
             seed: 0,
             width: FIELD_WIDTH,
             height: FIELD_HEIGHT,
             field: FieldKind::Vents,
+            field_overrides: Vec::new(),
             vents: VENTS.to_vec(),
             shafts: SHAFTS.to_vec(),
             shaft_level: SHAFT_LEVEL,
@@ -502,6 +509,7 @@ impl LevelDef {
                     pores: LINE_SOUTH_PORES.to_vec(),
                 },
             ],
+            tiles: Vec::new(),
             npcs: NPC_SPAWNS.to_vec(),
             viruses: VIRUS_SPAWNS.to_vec(),
             food_zones: FOOD_ZONES.to_vec(),
@@ -549,7 +557,18 @@ impl LevelDef {
                 tiles.push((tile, kind));
             }
         }
+        tiles.extend(self.tiles.iter().copied());
         tiles
+    }
+
+    /// How a channel moves in this level: the override if there is one, else
+    /// the values of the field kind.
+    pub fn params(&self, channel: Channel) -> FieldParams {
+        self.field_overrides
+            .iter()
+            .find(|(c, _)| *c == channel)
+            .map(|(_, p)| *p)
+            .unwrap_or_else(|| self.field.params(channel))
     }
 
     /// The wall tiles as a `WallMap`.
@@ -565,7 +584,7 @@ impl LevelDef {
     pub fn cold_grid(&self) -> EnvGrid {
         let mut grid = EnvGrid::centered(self.width, self.height);
         for channel in Channel::ALL {
-            grid.set_params(channel, self.field.params(channel));
+            grid.set_params(channel, self.params(channel));
         }
         for vent in &self.vents {
             grid.add_emitter(Channel::Heat, vent.position, vent.radius, vent.heat);

@@ -129,6 +129,9 @@ pub struct RunState {
     /// Where the first cell starts, if a scenario sets it. Cleared when the
     /// stage changes.
     pub spawn: Option<Vec2>,
+    /// A level that replaces the stage's own level (a level file that a
+    /// scenario or `--level` names). Cleared when the stage changes.
+    pub level: Option<LevelDef>,
     /// The genes that were new to the codex when the run ended.
     pub new_genes: Vec<BlockKind>,
 }
@@ -150,7 +153,7 @@ impl RunState {
 
     /// The level of the current stage.
     pub fn level_def(&self) -> Option<LevelDef> {
-        self.stage().level_def(self.seed)
+        self.level.clone().or_else(|| self.stage().level_def(self.seed))
     }
 
     pub fn record_gene(&mut self, kind: BlockKind) {
@@ -172,6 +175,7 @@ impl RunState {
                 self.stage_index = next;
                 self.carry = Some(carry);
                 self.spawn = None;
+                self.level = None;
                 StageOutcome::NextStage
             }
             None => StageOutcome::RunComplete,

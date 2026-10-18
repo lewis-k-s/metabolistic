@@ -151,11 +151,12 @@ impl LevelDef {
     /// The hand-made base layout of the shallow-water level.
     pub fn shallow_base() -> Self {
         Self {
-            name: "Shallow water",
+            name: "Shallow water".into(),
             seed: 0,
             width: FIELD_WIDTH,
             height: FIELD_HEIGHT,
             field: FieldKind::Shallow,
+            field_overrides: Vec::new(),
             vents: vec![VENT],
             shafts: Vec::<Shaft>::new(),
             shaft_level: 0.0,
@@ -194,6 +195,7 @@ impl LevelDef {
                     pores: TOUGH_PORES.to_vec(),
                 },
             ],
+            tiles: Vec::new(),
             npcs: npc_spawns(),
             viruses: vec![
                 Vec2::new(-200.0, 60.0),

@@ -82,7 +82,7 @@ pub const PIGMENT_PREY_TARGET: usize = 3;
 pub const RESPAWN_CLEAR_DISTANCE: f32 = 260.0;
 
 /// The kinds of NPC.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Archetype {
     Prey,
     Predator,

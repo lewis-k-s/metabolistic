@@ -2,6 +2,8 @@
 name = "metabolistic3d"
 version = "0.1.0"
 edition = "2024"
+# `cargo run` starts the game; `cargo levels` runs the level tool.
+default-run = "metabolistic3d"
 
 [lib]
 name = "metabolistic3d"
@@ -26,6 +28,8 @@ tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_w
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# PNG previews of levels (the `levels` tool). Already in the tree through Bevy.
+png = "0.18"
 
 # These dependencies are only needed for full builds with UI
 # 2D physics for the player cell. Full builds only: `headless` must not need it.
