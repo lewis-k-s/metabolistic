@@ -6,8 +6,8 @@
 //!   right, back, forward; `SLOT_LABELS`), with keys 1-4 as a second binding.
 //!   `SlotHeld` follows them, for actions that need a hold (the pilus). Shift
 //!   fires the flagellum burst (`UseAction`), so WASD and the burst stay under
-//!   the left hand. The mouse wheel reels a held pilus in and out
-//!   (`ReelPilus`, `scroll_reel_pixels`).
+//!   the left hand. The mouse wheel reels a held pilus: scroll down pulls in,
+//!   scroll up pays out (`ReelPilus`, `scroll_reel_pixels`).
 //! - **Mouse aim**: the aim of the player's `ActionState` points from the cell
 //!   to the cursor (`aim_toward`). Without a cursor in the window, the old aim
 //!   (the last move direction) stays: the fallback for keyboard and gamepad.
@@ -128,10 +128,9 @@ fn slot_hotkeys(
 
 /// Scroll pixels (trackpads, smooth wheels) that count as one notch.
 const PIXELS_PER_NOTCH: f32 = 16.0;
-/// The wheel direction that reels in. On macOS with natural scrolling, a wheel
-/// turned towards the player gives a positive delta: like the crank of a
-/// fishing reel, that pulls in. Flip the sign to swap the directions.
-const REEL_IN_SIGN: f32 = 1.0;
+/// The wheel direction that reels in: scroll down (a negative delta) pulls in,
+/// scroll up pays out. Flip the sign to swap the directions.
+const REEL_IN_SIGN: f32 = -1.0;
 
 /// The reel order for a wheel delta: negative pixels reel in.
 pub fn scroll_reel_pixels(delta_y: f32, unit: MouseScrollUnit) -> f32 {
@@ -589,7 +588,8 @@ mod tests {
     #[test]
     fn the_wheel_reels_in_one_way_and_out_the_other() {
         let line = scroll_reel_pixels(1.0, MouseScrollUnit::Line);
-        assert_eq!(line.abs(), REEL_PIXELS_PER_NOTCH);
+        assert_eq!(line, REEL_PIXELS_PER_NOTCH, "scroll up pays out");
+        assert!(scroll_reel_pixels(-1.0, MouseScrollUnit::Line) < 0.0, "scroll down reels in");
         assert_eq!(scroll_reel_pixels(-1.0, MouseScrollUnit::Line), -line);
         assert_eq!(scroll_reel_pixels(PIXELS_PER_NOTCH, MouseScrollUnit::Pixel), line);
         assert_eq!(scroll_reel_pixels(0.0, MouseScrollUnit::Line), 0.0);

@@ -470,7 +470,7 @@ fn protein_facts(protein: MembraneProtein) -> (Facts, String) {
                 "Myxococcus and Bdellovibrio extend a type IV pilus (the ATPase PilB adds subunits). The tip sticks to a surface or to prey. The ATPase PilT then removes subunits, the fibre shrinks, and it pulls with a force of many piconewtons. This is twitching motility.",
             ),
             format!(
-                "Press to shoot along the aim (range {PILUS_RANGE} px). Hold to keep it attached, and turn the mouse wheel to reel in (at {PILUS_RETRACT_SPEED} px per second) or out. A smaller cell comes to you, so you can engulf it. A bigger cell or a wall pulls you to it. Release to let go."
+                "Press to shoot along the aim (range {PILUS_RANGE} px). Hold to keep it attached, and scroll down to reel in (at {PILUS_RETRACT_SPEED} px per second) or up to pay out. A smaller cell comes to you, so you can engulf it. A bigger cell or a wall pulls you to it. Release to let go."
             ),
         ),
         MembraneProtein::Injector => (
