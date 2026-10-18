@@ -44,6 +44,15 @@
 //!
 //! Ticks of 0.1 s, 0.2 s or 0.8 s all use sub-steps of 0.05 s, so the tick
 //! length does not change the result.
+//!
+//! ## Dormant channels
+//!
+//! A channel with no emission whose levels are all at or below
+//! `DORMANT_LEVEL` is dormant: `step` sets it to 0 and skips it. Most of the
+//! time no cell secretes, so the secreted channels (see `secretion`) cost
+//! nothing. `deposit`, `set_level`, an emitter and `set_params` wake a channel.
+//! The mass that a channel loses when it goes dormant is below
+//! `DORMANT_LEVEL` in each grid cell.
 
 use bevy::prelude::*;
 
@@ -55,6 +64,10 @@ pub const CELL_SIZE: f32 = 32.0;
 
 /// Largest sub-step of `EnvGrid::step`, in seconds.
 pub const MAX_SUBSTEP: f32 = 0.05;
+
+/// A channel with no emission and no level above this is dormant (see the
+/// module docs).
+pub const DORMANT_LEVEL: f32 = 1e-5;
 
 /// Largest share of a grid cell that diffusion moves to one neighbour in one
 /// sub-step. With 4 neighbours, 0.25 keeps levels at 0 or more.
@@ -441,6 +454,9 @@ pub struct EnvGrid {
     params: [FieldParams; Channel::ALL.len()],
     /// Channels that are settled: they are static, so `step` skips them.
     settled: [bool; Channel::ALL.len()],
+    /// Channels that are dormant: empty, with no emission (see the module
+    /// docs). `step` skips them.
+    dormant: [bool; Channel::ALL.len()],
     scratch: Vec<f32>,
     /// Wall cells: inert, they block drift and diffusion.
     walls: Vec<bool>,
@@ -467,6 +483,7 @@ impl EnvGrid {
             emission: std::array::from_fn(|_| blank()),
             params: [FieldParams::STILL; Channel::ALL.len()],
             settled: [false; Channel::ALL.len()],
+            dormant: [false; Channel::ALL.len()],
             scratch: Vec::new(),
             walls: vec![false; dims.len()],
             wall_count: 0,
@@ -590,6 +607,12 @@ impl EnvGrid {
     pub fn set_params(&mut self, channel: Channel, params: FieldParams) {
         self.params[channel.index()] = params;
         self.settled[channel.index()] = false;
+        self.dormant[channel.index()] = false;
+    }
+
+    /// Is the channel dormant (see the module docs)?
+    pub fn is_dormant(&self, channel: Channel) -> bool {
+        self.dormant[channel.index()]
     }
 
     /// Marks a channel as settled: it has reached its steady state and has
@@ -618,6 +641,7 @@ impl EnvGrid {
     pub fn set_level(&mut self, channel: Channel, x: usize, y: usize, level: f32) {
         let i = self.dims.index(x, y);
         self.layers[channel.index()][i] = level.max(0.0);
+        self.dormant[channel.index()] = false;
     }
 
     /// The sum of one channel over the grid.
@@ -639,6 +663,7 @@ impl EnvGrid {
     /// gets all of it.
     pub fn add_emitter(&mut self, channel: Channel, center: Vec2, radius: f32, rate: f32) {
         self.settled[channel.index()] = false;
+        self.dormant[channel.index()] = false;
         let mut weights: Vec<(usize, f32)> = Vec::new();
         let mut nearest = (0, f32::INFINITY);
         for y in 0..self.dims.height {
@@ -668,6 +693,7 @@ impl EnvGrid {
     /// rectangle. If no cell centre is inside, nothing is added.
     pub fn add_rect_emitter(&mut self, channel: Channel, min: Vec2, max: Vec2, rate_per_cell: f32) {
         self.settled[channel.index()] = false;
+        self.dormant[channel.index()] = false;
         for y in 0..self.dims.height {
             for x in 0..self.dims.width {
                 let c = self.cell_center(x, y);
@@ -684,6 +710,7 @@ impl EnvGrid {
     /// the nearest cell emits.
     pub fn add_disc_emitter(&mut self, channel: Channel, center: Vec2, radius: f32, rate_per_cell: f32) {
         self.settled[channel.index()] = false;
+        self.dormant[channel.index()] = false;
         let mut nearest = (0, f32::INFINITY);
         let mut any = false;
         for y in 0..self.dims.height {
@@ -730,6 +757,9 @@ impl EnvGrid {
     /// nothing). Returns what was added, which is all of `amount` unless the
     /// four cells round the position are walls.
     pub fn deposit(&mut self, channel: Channel, pos: Vec2, amount: f32) -> f32 {
+        if amount > 0.0 {
+            self.dormant[channel.index()] = false;
+        }
         let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
         add_to_layer(
             &mut self.layers[channel.index()],
@@ -745,7 +775,7 @@ impl EnvGrid {
     pub fn step(&mut self, dt: f32) {
         for channel in Channel::ALL {
             let i = channel.index();
-            if self.settled[i] {
+            if self.settled[i] || self.dormant[i] {
                 continue;
             }
             let walls = (self.wall_count > 0).then_some(self.walls.as_slice());
@@ -768,6 +798,12 @@ impl EnvGrid {
                 leak,
                 dt,
             );
+            let quiet = self.emission[i].iter().all(|&rate| rate == 0.0)
+                && self.layers[i].iter().all(|&level| level <= DORMANT_LEVEL);
+            if quiet {
+                self.layers[i].fill(0.0);
+                self.dormant[i] = true;
+            }
         }
     }
 }
@@ -1106,5 +1142,33 @@ mod tests {
         assert_eq!(grid.cell_at(Vec2::new(1e6, 0.0)), None);
         grid.set_wall(2, 2, false);
         assert_eq!(grid.wall_count(), 0);
+    }
+
+    #[test]
+    fn an_empty_channel_sleeps_and_a_deposit_wakes_it() {
+        let mut grid = EnvGrid::centered(8, 8);
+        grid.set_params(Channel::Microcin, FieldParams { diffusion: 1.0, decay: 2.0, ..FieldParams::STILL });
+        grid.step(0.2);
+        assert!(grid.is_dormant(Channel::Microcin), "nothing in it: dormant");
+        assert!(!grid.is_dormant(Channel::Heat) || grid.emission_total(Channel::Heat) == 0.0);
+
+        assert_eq!(grid.deposit(Channel::Microcin, Vec2::ZERO, 4.0), 4.0);
+        assert!(!grid.is_dormant(Channel::Microcin));
+        grid.step(0.2);
+        assert!(grid.total(Channel::Microcin) > 0.0, "a woken channel runs");
+        // Decay takes it to nothing, and it sleeps again with all levels 0.
+        for _ in 0..200 {
+            grid.step(0.2);
+        }
+        assert!(grid.is_dormant(Channel::Microcin));
+        assert_eq!(grid.total(Channel::Microcin), 0.0);
+    }
+
+    #[test]
+    fn a_channel_with_emission_never_sleeps() {
+        let mut grid = EnvGrid::centered(6, 6);
+        grid.add_emitter(Channel::Minerals, Vec2::ZERO, 40.0, 1e-7);
+        grid.step(0.2);
+        assert!(!grid.is_dormant(Channel::Minerals));
     }
 }

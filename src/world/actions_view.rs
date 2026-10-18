@@ -87,6 +87,9 @@ const SLOT_KEYS: [KeyCode; SLOT_COUNT] = [
 /// The keys of the flagellum burst.
 const BURST_KEYS: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
 
+/// The secretion keys (see `secretion::KEY_LABELS`): each press toggles.
+const SECRETION_KEYS: [KeyCode; crate::secretion::KEY_COUNT] = [KeyCode::KeyQ, KeyCode::KeyE];
+
 /// Presses and holds of the slot buttons, and the burst key. Only the Run
 /// screen takes them: in Manage the mouse and keys are for the editor, so
 /// nothing is held.
@@ -98,6 +101,7 @@ fn slot_hotkeys(
     mut held: Query<&mut SlotHeld, With<Cell>>,
     mut orders: MessageWriter<UseSlot>,
     mut direct: MessageWriter<UseAction>,
+    mut toggles: MessageWriter<crate::secretion::ToggleSecretion>,
 ) {
     let on_run = *state.get() == GameState::Run;
     for controlled in &players {
@@ -117,6 +121,14 @@ fn slot_hotkeys(
                 cell: controlled.0,
                 kind: ActionKind::FlagellumBurst,
             });
+        }
+        for (key, code) in SECRETION_KEYS.iter().enumerate() {
+            if on_run && keys.just_pressed(*code) {
+                toggles.write(crate::secretion::ToggleSecretion {
+                    cell: controlled.0,
+                    key,
+                });
+            }
         }
         if let Ok(mut held) = held.get_mut(controlled.0)
             && held.0 != now

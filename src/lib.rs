@@ -33,6 +33,7 @@ pub mod prepare;
 pub mod proteins;
 pub mod run;
 pub mod scenario;
+pub mod secretion;
 pub mod shallow;
 pub mod shelter;
 pub mod shared;
@@ -53,6 +54,8 @@ pub mod inspector;
 pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
+#[cfg(feature = "full")]
+pub mod playtest;
 #[cfg(feature = "full")]
 pub mod sprites;
 #[cfg(feature = "full")]
@@ -142,7 +145,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
-            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin, secretion::SecretionPlugin))
             // The game picks mutated genes at random; tests use a fixed seed.
             .insert_resource(genome_damage::GeneRng::from_entropy())
             .insert_resource(npc::NpcRng::from_entropy());
@@ -163,6 +166,9 @@ impl MetabolisticApp {
             }
             if smoke_test::requested() {
                 app.add_plugins(smoke_test::plugin);
+            }
+            if playtest::requested() {
+                app.add_plugins(playtest::plugin);
             }
         }
 
@@ -201,7 +207,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
-            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin, secretion::SecretionPlugin))
             // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not
             // from real time.
             .insert_resource(metabolism::FlowmapTimingConfig::manual());

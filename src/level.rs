@@ -156,8 +156,17 @@ pub fn field_params(channel: Channel) -> FieldParams {
         },
         // No water channel in the vents: the sea is not a "wet zone".
         Channel::Water => FieldParams::STILL,
+        // Clouds that cells secrete drift with the water, like the minerals.
+        Channel::Microcin
+        | Channel::Slime
+        | Channel::Siderophore
+        | Channel::FeSiderophore
+        | Channel::Autoinducer => crate::secretion::cloud_params(channel, Vec2::new(0.7, 0.25)),
     }
 }
+
+/// Share of the metal pickups that are rust in the oxic stages. **Playtest.**
+pub const RUST_SHARE_OXIC: f32 = 0.6;
 
 /// Light decay per second. With a source of `SHAFT_LEVEL x LIGHT_DECAY` in each
 /// grid cell, the level inside a shaft is `SHAFT_LEVEL`.
@@ -216,9 +225,10 @@ pub const NPC_SPAWNS: [NpcSpawn; 15] = [
     npc(Archetype::Prey, 300.0, 50.0, Some(BlockKind::SecondaryMetabolites)),
     npc(Archetype::Prey, 345.0, 40.0, Some(BlockKind::SecondaryMetabolites)),
     npc(Archetype::Prey, 255.0, 75.0, Some(BlockKind::SecondaryMetabolites)),
-    npc(Archetype::Prey, 60.0, 170.0, None),
+    // Two strains carry a secretion gene: microcin (`cvaC`) and slime (`pelA`).
+    npc(Archetype::Prey, 60.0, 170.0, Some(BlockKind::Microcin)),
     npc(Archetype::Prey, 250.0, -70.0, None),
-    npc(Archetype::Prey, -150.0, 100.0, None),
+    npc(Archetype::Prey, -150.0, 100.0, Some(BlockKind::Slime)),
     npc(Archetype::Prey, 210.0, -330.0, None),
     npc(Archetype::Prey, 700.0, 250.0, None),
     npc(Archetype::Predator, 760.0, 330.0, None),
@@ -226,8 +236,8 @@ pub const NPC_SPAWNS: [NpcSpawn; 15] = [
     npc(Archetype::Symbiont, 60.0, -70.0, None),
     npc(Archetype::Symbiont, 450.0, 150.0, None),
     npc(Archetype::Symbiont, 260.0, -340.0, None),
-    npc(Archetype::Prey, 470.0, 440.0, None),
-    npc(Archetype::Prey, -40.0, 330.0, None),
+    npc(Archetype::Prey, 470.0, 440.0, Some(BlockKind::Microcin)),
+    npc(Archetype::Prey, -40.0, 330.0, Some(BlockKind::Slime)),
 ];
 
 /// Where the viruses start. They drift.
@@ -430,6 +440,16 @@ impl FieldKind {
         match self {
             FieldKind::Land => crate::oxygen::AIR_EXCHANGE_RATE,
             _ => crate::oxygen::O2_EXCHANGE_RATE,
+        }
+    }
+
+    /// Share of the metal pickups that are rust (Fe(III) oxide). In the anoxic
+    /// vents iron is Fe(II) and iron sulfide, so there is none. Where there is
+    /// O2, most iron is rust (see `secretion::siderophore`).
+    pub fn rust_share(self) -> f32 {
+        match self {
+            FieldKind::Vents => 0.0,
+            FieldKind::Shallow | FieldKind::Land => RUST_SHARE_OXIC,
         }
     }
 

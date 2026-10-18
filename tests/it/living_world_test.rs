@@ -401,6 +401,7 @@ fn slow_spawns_stop_at_the_caps() {
     app.insert_resource(ParticleZones {
         food: vec![(Vec2::new(0.0, 500.0), 100.0)],
         metals: vec![(Vec2::new(500.0, 0.0), 100.0)],
+        ..Default::default()
     });
     frames(&mut app, 3000); // 300 s
     let count = |app: &mut App| {

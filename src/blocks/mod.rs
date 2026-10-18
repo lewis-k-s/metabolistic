@@ -38,6 +38,9 @@
 //! - **Pigments** (`secondary_metabolites`): CarbonSkeletons + ATP -> Pigments,
 //!   up to a target. They screen UV.
 //! - **Vesicle export** (`VesicleExportBlock`): removes Waste from the cell.
+//! - **Secretions** (`secretion::SecretionBlock`, genes `Microcin`, `Slime`,
+//!   `Siderophore`, `Autoinducer`): ATP and a material go out into the grid as
+//!   a cloud. `Drive` 0 until the player switches the secretion on.
 
 pub mod biosynthesis;
 pub mod catalase;
@@ -145,6 +148,9 @@ pub fn block_spec(kind: BlockKind) -> Option<BlockSpec> {
         BlockKind::SecondaryMetabolites => {
             Some(BlockSpec::new(secondary_metabolites::flux_profile()))
         }
+        BlockKind::Microcin | BlockKind::Slime | BlockKind::Siderophore | BlockKind::Autoinducer => {
+            crate::secretion::Secretion::from_gene(kind).map(|s| BlockSpec::new(s.flux_profile()))
+        }
         _ => None,
     }
 }
@@ -242,6 +248,12 @@ pub fn spawn_block(
         }
         BlockKind::SecondaryMetabolites => {
             entity.insert(secondary_metabolites::PigmentBlock);
+        }
+        BlockKind::Microcin | BlockKind::Slime | BlockKind::Siderophore | BlockKind::Autoinducer => {
+            if let Some(secretion) = crate::secretion::Secretion::from_gene(kind) {
+                // Off until the player switches it on.
+                entity.insert((crate::secretion::SecretionBlock(secretion), Drive(0.0)));
+            }
         }
         _ => {}
     }

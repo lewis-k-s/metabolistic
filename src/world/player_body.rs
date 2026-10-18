@@ -178,6 +178,7 @@ fn apply_thrust(
             &CellSize,
             &ActionState,
             &CuticleShield,
+            &crate::blocks::genome::Genome,
             Has<Stunned>,
             &mut ConstantForce,
             &mut LinearDamping,
@@ -187,11 +188,20 @@ fn apply_thrust(
     >,
 ) {
     let field = level.as_ref().map(|l| l.0.field);
-    for (transform, input, proteome, size, actions, shield, stunned, mut force, mut damping, mut effort) in &mut cells {
+    for (transform, input, proteome, size, actions, shield, genome, stunned, mut force, mut damping, mut effort) in
+        &mut cells
+    {
         // The field sets the drag at the cell's position (dry ground on land is
-        // much heavier than water); a cuticle adds a little.
-        let water = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Water, transform.translation.truncate()));
-        let multiplier = field.map_or(1.0, |f| f.drag_multiplier(water));
+        // much heavier than water); a cuticle adds a little. Slime that another
+        // cell secreted makes the water thick.
+        let position = transform.translation.truncate();
+        let water = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Water, position));
+        let slime = grid
+            .as_deref()
+            .filter(|g| !g.is_dormant(Channel::Slime))
+            .map_or(0.0, |g| g.sample(Channel::Slime, position));
+        let multiplier = field.map_or(1.0, |f| f.drag_multiplier(water))
+            * crate::secretion::slime::cell_drag_multiplier(slime, genome);
         let drag = drag_in_field(action_damping(body_drag(size), actions), multiplier, shield.0);
         let on_mat = grid
             .as_deref()

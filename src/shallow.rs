@@ -111,6 +111,12 @@ pub fn field_params(channel: Channel) -> FieldParams {
             open_drift_edges: false,
         },
         Channel::Water => FieldParams::STILL,
+        // Clouds that cells secrete drift with the water, like the minerals.
+        Channel::Microcin
+        | Channel::Slime
+        | Channel::Siderophore
+        | Channel::FeSiderophore
+        | Channel::Autoinducer => crate::secretion::cloud_params(channel, Vec2::new(0.2, 0.1)),
     }
 }
 
@@ -134,16 +140,16 @@ pub fn npc_spawns() -> Vec<NpcSpawn> {
         npc(Archetype::Prey, 200.0, 600.0, cyano),
         npc(Archetype::Prey, 350.0, 450.0, cyano),
         npc(Archetype::Prey, -650.0, 300.0, cyano),
-        // Deep prey.
-        npc(Archetype::Prey, -300.0, -200.0, None),
-        npc(Archetype::Prey, 100.0, -300.0, None),
+        // Deep prey: they carry the siderophore gene (`entF`).
+        npc(Archetype::Prey, -300.0, -200.0, Some(BlockKind::Siderophore)),
+        npc(Archetype::Prey, 100.0, -300.0, Some(BlockKind::Siderophore)),
         // Grazers.
         npc(Archetype::Predator, 340.0, 100.0, None),
         npc(Archetype::Predator, -100.0, -350.0, None),
-        // Symbionts.
-        npc(Archetype::Symbiont, -600.0, -60.0, None),
-        npc(Archetype::Symbiont, 100.0, -100.0, None),
-        npc(Archetype::Symbiont, 340.0, -300.0, None),
+        // Symbionts: they carry the AI-2 gene (`luxS`).
+        npc(Archetype::Symbiont, -600.0, -60.0, Some(BlockKind::Autoinducer)),
+        npc(Archetype::Symbiont, 100.0, -100.0, Some(BlockKind::Autoinducer)),
+        npc(Archetype::Symbiont, 340.0, -300.0, Some(BlockKind::Autoinducer)),
     ]
 }
 

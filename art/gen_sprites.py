@@ -1109,6 +1109,8 @@ PATHWAY_ICONS = {  # BlockKind with a block_spec -> file suffix
     "LightCapture": "light_capture", "Respiration": "respiration", "Catalase": "catalase",
     "Cuticle": "cuticle", "NucleotideCofactorSynthesis": "nucleotide_cofactor_synthesis",
     "SecondaryMetabolites": "secondary_metabolites",
+    "Microcin": "microcin", "Slime": "slime", "Siderophore": "siderophore",
+    "Autoinducer": "autoinducer",
 }
 
 
@@ -1208,6 +1210,33 @@ def pathway_icon(kind: str) -> Canvas:
         shade_mask(c, drop_mask(c, 5.2, 10, 3.0), RAMPS["pigment"])
         shade_mask(c, drop_mask(c, 11.2, 8, 2.6), RAMPS["toxin"])
         c.outline(RAMPS["toxin"][0])
+    elif kind == "microcin":  # a cell sprays a cloud of small toxic peptides
+        T = RAMPS["toxin"]
+        c.disc(4.6, 11.2, 3.4, RAMPS["player"])
+        for x, y, r in [(10.5, 4.5, 1.6), (13.2, 8.2, 1.3), (8.6, 8.4, 1.2), (12.4, 12.6, 1.1), (6.8, 3.6, 1.0)]:
+            c.disc(x, y, r, T, outline=False)
+        c.outline(T[0])
+    elif kind == "slime":  # a gel blob with a drip
+        G = RAMPS["phb"]
+        shade_mask(c, (blob_sdf(c, 8, 7, 5.6) < 0) | drop_mask(c, 11.5, 12.2, 1.8), G)
+        c.spark([(5, 4), (6, 4)], G[4])
+        c.outline(G[0])
+    elif kind == "siderophore":  # a ring of three claws holds an iron ball
+        C, M = RAMPS["carbon"], RAMPS["metal"]
+        for a in range(3):
+            ang = a * 2 * np.pi / 3 - np.pi / 2
+            c.disc(8 + 5.0 * np.cos(ang), 8 + 5.0 * np.sin(ang), 2.2, C, outline=False)
+        c.disc(8, 8, 3.0, M, outline=False)
+        c.outline(C[0])
+    elif kind == "autoinducer":  # a call: waves round a small signal molecule
+        P = RAMPS["player"]
+        d = np.hypot(c.X - 4.5, c.Y - 11.5)
+        ang = np.arctan2(c.Y - 11.5, c.X - 4.5)
+        arc = (ang < -0.15) & (ang > -1.45)
+        for r in (5.5, 9.0):
+            c.paint(arc & (np.abs(d - r) < 0.75), P[3])
+        c.disc(4.5, 11.5, 2.4, P)
+        c.outline(P[0])
     else:
         raise ValueError(kind)
     return c

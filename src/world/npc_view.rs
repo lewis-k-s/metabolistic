@@ -24,7 +24,7 @@ use crate::cell::{Cell, CellSize};
 use crate::engulf::{EngulfEvent, EngulfIntent};
 use crate::gate::GateWon;
 use crate::npc::{Archetype, Npc, NpcDied, spec};
-use crate::particles::{FoodParticle, MetalPickup, Virus};
+use crate::particles::{FoodParticle, MetalPickup, RustPickup, Virus};
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row};
 use crate::world::player_body::{BlobSprite, attach_body_for};
@@ -48,6 +48,7 @@ pub struct EngulfFx {
 pub fn plugin(app: &mut App) {
     app.add_observer(food_sprite)
         .add_observer(metal_sprite)
+        .add_observer(rust_sprite)
         .add_observer(virus_sprite)
         .add_observer(droplet_sprite)
         .add_systems(
@@ -141,6 +142,21 @@ fn metal_sprite(
     ));
     commands.queue(set_z(added.entity, PARTICLE_Z));
 }
+
+/// Rust: the metal sprite in a rust-brown tint until it has its own art.
+fn rust_sprite(
+    added: On<Add, RustPickup>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    let mut sprite = Sprite::from_image(asset_server.load("sprites/pickup_metal_fes.png"));
+    sprite.color = RUST_TINT;
+    commands.entity(added.entity).insert((sprite, Visibility::default(), DespawnOnExit(InRun)));
+    commands.queue(set_z(added.entity, PARTICLE_Z));
+}
+
+/// The tint of a rust pickup: the shadow tone of the `pigment` ramp, `#d0541a`.
+const RUST_TINT: Color = Color::srgb(0.816, 0.329, 0.102);
 
 fn virus_sprite(added: On<Add, Virus>, sheets: Res<Sheets>, mut commands: Commands) {
     if let Some(sprite) = sheets.bundle("virus_phage", clip::IDLE) {

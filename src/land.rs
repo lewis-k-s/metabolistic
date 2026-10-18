@@ -119,6 +119,12 @@ pub fn field_params(channel: Channel) -> FieldParams {
             drift: Vec2::ZERO,
             open_drift_edges: false,
         },
+        // Clouds that cells secrete: no current on land.
+        Channel::Microcin
+        | Channel::Slime
+        | Channel::Siderophore
+        | Channel::FeSiderophore
+        | Channel::Autoinducer => crate::secretion::cloud_params(channel, Vec2::ZERO),
     }
 }
 

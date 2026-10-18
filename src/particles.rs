@@ -9,6 +9,10 @@
 //! - **Metals** (`MetalPickup`, sprite `pickup_metal_fes`): gives Metals on
 //!   contact. It spawns slowly near the vents (`MAX_METALS`). This is the
 //!   source of the cofactor.
+//! - **Rust** (`RustPickup`): Fe(III) oxide (ferrihydrite) in the oxic stages.
+//!   A cell cannot take it by contact: only a siderophore dissolves it (see
+//!   `secretion::siderophore`). The level sets the share of the metal spawns
+//!   that are rust (`ParticleZones::rust_share`).
 //! - **Virus** (`Virus`, sprite `virus_phage`): drifts. On contact with a cell:
 //!   50% a gene from `VIRAL_GENES` (queued like an engulfed gene, see
 //!   `engulf::take_gene`), 50% `VIRUS_MUTATION_LOAD` of mutation load. The virus
@@ -40,6 +44,9 @@ use crate::walls::WallMap;
 pub const FOOD_CARBON: f32 = 6.0;
 /// Metals from one metal pickup.
 pub const METAL_AMOUNT: f32 = 1.0;
+/// Metals in one rust pickup. More than a metal pickup: a siderophore costs
+/// carbon first.
+pub const RUST_AMOUNT: f32 = 2.0;
 /// Contact radius of a food particle or a metal pickup, in pixels.
 pub const PICKUP_RADIUS: f32 = 7.0;
 /// Contact radius of a virus, in pixels (its sprite is 44 x 28).
@@ -85,6 +92,13 @@ pub struct MetalPickup {
     pub amount: f32,
 }
 
+/// Rust (ferrihydrite): Metals that only a siderophore can dissolve.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct RustPickup {
+    /// Metals left in it.
+    pub remaining: f32,
+}
+
 /// A virus. It drifts with `velocity` (pixels per second).
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct Virus {
@@ -96,6 +110,8 @@ pub struct Virus {
 pub struct ParticleZones {
     pub food: Vec<(Vec2, f32)>,
     pub metals: Vec<(Vec2, f32)>,
+    /// Share of the metal spawns that are rust (0 in the vents).
+    pub rust_share: f32,
 }
 
 /// Timers of the slow spawns.
@@ -127,6 +143,28 @@ pub fn spawn_metal(commands: &mut Commands, position: Vec2) -> Entity {
             Transform::from_translation(position.round().extend(0.0)),
         ))
         .id()
+}
+
+pub fn spawn_rust(commands: &mut Commands, position: Vec2) -> Entity {
+    commands
+        .spawn((
+            Name::new("Rust"),
+            RustPickup {
+                remaining: RUST_AMOUNT,
+            },
+            Transform::from_translation(position.round().extend(0.0)),
+        ))
+        .id()
+}
+
+/// Spawns a metal pickup, or rust with the chance `rust_share`. With a share
+/// of 0 it uses no random number.
+pub fn spawn_metal_or_rust(commands: &mut Commands, position: Vec2, rust_share: f32, rng: &mut impl Rng) -> Entity {
+    if rust_share > 0.0 && rng.random::<f32>() < rust_share {
+        spawn_rust(commands, position)
+    } else {
+        spawn_metal(commands, position)
+    }
 }
 
 pub fn spawn_virus(commands: &mut Commands, position: Vec2, velocity: Vec2) -> Entity {
@@ -169,7 +207,7 @@ pub fn particle_spawn_system(
     mut timers: ResMut<ParticleTimers>,
     mut rng: ResMut<NpcRng>,
     food: Query<(), With<FoodParticle>>,
-    metals: Query<(), With<MetalPickup>>,
+    metals: Query<(), Or<(With<MetalPickup>, With<RustPickup>)>>,
     mut commands: Commands,
 ) {
     let dt = time.delta_secs();
@@ -187,7 +225,8 @@ pub fn particle_spawn_system(
         timers.metals = left;
         for _ in 0..spawns {
             let (centre, radius) = zones.metals[rng.0.random_range(0..zones.metals.len())];
-            spawn_metal(&mut commands, point_in_circle(centre, radius, &mut rng.0));
+            let position = point_in_circle(centre, radius, &mut rng.0);
+            spawn_metal_or_rust(&mut commands, position, zones.rust_share, &mut rng.0);
         }
     }
 }

@@ -70,11 +70,19 @@ pub enum BlockKind {
     /// Placeholder gene of the land gate cell: cells that live together. It has
     /// no block yet, and it costs 0 in Prepare.
     Multicellularity,
+    /// Secretes microcin V, a bacteriocin that kills prey (see `secretion`).
+    Microcin,
+    /// Secretes slime (extracellular polysaccharide) that slows other cells.
+    Slime,
+    /// Secretes a siderophore that dissolves rust into Metals.
+    Siderophore,
+    /// Secretes autoinducer-2, a quorum call for symbionts.
+    Autoinducer,
 }
 
 impl BlockKind {
     /// Every block kind, in declaration order.
-    pub const ALL: [BlockKind; 19] = [
+    pub const ALL: [BlockKind; 23] = [
         BlockKind::LightCapture,
         BlockKind::SugarCatabolism,
         BlockKind::OrganicAcidOxidation,
@@ -94,6 +102,10 @@ impl BlockKind {
         BlockKind::Catalase,
         BlockKind::Cuticle,
         BlockKind::Multicellularity,
+        BlockKind::Microcin,
+        BlockKind::Slime,
+        BlockKind::Siderophore,
+        BlockKind::Autoinducer,
     ];
 
     /// Human-readable description of each metabolic block
@@ -118,6 +130,10 @@ impl BlockKind {
             BlockKind::Catalase => "Turn reactive oxygen species back into O2 (costs ATP)",
             BlockKind::Cuticle => "A waxy cuticle: less water loss on land (costs lipids, adds drag)",
             BlockKind::Multicellularity => "Cells that live together (no effect yet)",
+            BlockKind::Microcin => "Secrete microcin: a cloud that kills prey (key Q or E)",
+            BlockKind::Slime => "Secrete slime: a gel that slows other cells (key Q or E)",
+            BlockKind::Siderophore => "Secrete a siderophore: it dissolves rust into Metals (key Q or E)",
+            BlockKind::Autoinducer => "Secrete AI-2: a call that gathers symbionts (key Q or E)",
         }
     }
 }

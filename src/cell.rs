@@ -78,7 +78,10 @@ use crate::proteins::{Proteome, SynthesisQueue};
     CellTick,
     EngulfIntent,
     Hydration,
-    CuticleShield
+    CuticleShield,
+    crate::secretion::SecretionBar,
+    crate::secretion::Secreting,
+    crate::secretion::autoinducer::Clump
 )]
 pub struct Cell;
 
@@ -93,6 +96,8 @@ pub enum DamageSource {
     Ros,
     /// Too little water in the cell (see `desiccation`).
     Desiccation,
+    /// A microcin cloud (see `secretion::microcin`).
+    Microcin,
 }
 
 /// Membrane damage that a cell took, by source, since it was spawned. It lets
@@ -103,6 +108,7 @@ pub struct DamageTaken {
     pub uv: f32,
     pub ros: f32,
     pub desiccation: f32,
+    pub microcin: f32,
 }
 
 impl DamageTaken {
@@ -113,6 +119,7 @@ impl DamageTaken {
             DamageSource::Uv => self.uv += amount.max(0.0),
             DamageSource::Ros => self.ros += amount.max(0.0),
             DamageSource::Desiccation => self.desiccation += amount.max(0.0),
+            DamageSource::Microcin => self.microcin += amount.max(0.0),
         }
     }
 
@@ -123,6 +130,7 @@ impl DamageTaken {
             (DamageSource::Uv, self.uv),
             (DamageSource::Ros, self.ros),
             (DamageSource::Desiccation, self.desiccation),
+            (DamageSource::Microcin, self.microcin),
         ];
         all.into_iter()
             .filter(|&(_, amount)| amount > 0.0)

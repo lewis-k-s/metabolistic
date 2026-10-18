@@ -297,7 +297,7 @@ pub fn available_actions(proteome: &Proteome) -> Vec<ActionKind> {
 /// The next content of a slot when the player cycles it: empty, then each
 /// option in order, then empty again. A content that is not in the options
 /// (for example the action of a recycled protein) is cleared.
-pub fn next_assignment(current: Option<ActionKind>, options: &[ActionKind]) -> Option<ActionKind> {
+pub fn next_assignment<T: Copy + PartialEq>(current: Option<T>, options: &[T]) -> Option<T> {
     match current {
         None => options.first().copied(),
         Some(kind) => options
@@ -1075,7 +1075,7 @@ mod tests {
         assert_eq!(slot, Some(ActionKind::Toxin));
         slot = next_assignment(slot, &options);
         assert_eq!(slot, None);
-        assert_eq!(next_assignment(None, &[]), None);
+        assert_eq!(next_assignment::<ActionKind>(None, &[]), None);
         // A content that left the options is cleared.
         assert_eq!(next_assignment(Some(ActionKind::FlagellumBurst), &options), None);
     }
