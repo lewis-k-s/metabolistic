@@ -6,6 +6,9 @@
 //!   enzymes, and pipes with molecules that flow at the live rate
 //!   (`diagram`, placed by `layout`);
 //! - the ribosome at the bottom, with the synthesis queue;
+//! - the cytoplasm behind it all, lit by the outside through the membrane and
+//!   by the pathways that run (`light`). Pipes are drawn by a shader too
+//!   (`diagram::PipeMaterial`): lit tubes, packets that flow, a red jam;
 //! - a small live inset of the run in the top right corner (`inset`);
 //! - the side panel and the tooltips (`panel`), and the action bar (keys 1-4 assign the mouse-button slots).
 //!
@@ -47,6 +50,7 @@ use crate::shelter::{InShelter, sim_paused};
 mod diagram;
 mod inset;
 pub mod layout;
+mod light;
 mod membrane_view;
 mod outside;
 mod panel;
@@ -72,6 +76,7 @@ pub(super) fn plugin(app: &mut App) {
             outside::plugin,
             panel::plugin,
             inset::plugin,
+            light::plugin,
         ))
         .add_systems(
             OnEnter(GameState::Manage),

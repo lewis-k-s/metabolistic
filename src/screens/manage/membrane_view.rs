@@ -36,6 +36,7 @@ pub(super) fn plugin(app: &mut App) {
             sync_slots,
             update_slots,
             tint_band,
+            ripple_band,
         )
             .chain()
             .after(super::fit_map)
@@ -157,6 +158,18 @@ fn tint_band(
     for mut sprite in &mut tiles {
         if sprite.color != color {
             sprite.color = color;
+        }
+    }
+}
+
+/// The bilayer ripples: a slow wave, one pixel high, runs along the band, as
+/// along the genome strand. The steps are whole pixels.
+fn ripple_band(time: Res<Time<Real>>, layout: Res<MapLayout>, mut tiles: Query<&mut Transform, With<BandTile>>) {
+    let t = time.elapsed_secs_wrapped();
+    for mut transform in &mut tiles {
+        let y = layout.band_y + (0.9 * (transform.translation.x / 40.0 - 1.1 * t).sin()).round();
+        if transform.translation.y != y {
+            transform.translation.y = y;
         }
     }
 }

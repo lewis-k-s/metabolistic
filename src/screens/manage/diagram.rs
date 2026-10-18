@@ -15,7 +15,10 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::shader::ShaderRef;
 use bevy::sprite::{Anchor, BorderRect, SliceScaleMode, SpriteImageMode, TextureSlicer};
+use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 
 use super::layout::{self, Layout, Router};
 use super::{BAD, GOOD, MapEntity, MapLayout, Pick, make_pickable, make_valve_clickable, map_layer};
@@ -35,7 +38,9 @@ use crate::proteins::{SynthesisQueue, UNITS_PER_PROTEIN, synthesis_eta};
 use crate::sprites::Sheets;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<PipeIndex>().add_systems(
+    app.add_plugins(Material2dPlugin::<PipeMaterial>::default())
+        .init_resource::<PipeIndex>()
+        .add_systems(
         Update,
         (
             spawn_map.run_if(resource_exists_and_changed::<MapLayout>),
@@ -257,7 +262,7 @@ fn pathway_icon(kind: BlockKind) -> Option<&'static str> {
 }
 
 /// The tint of a pathway: its stand-in icon and its enzymes.
-fn accent(kind: BlockKind) -> Color {
+pub(super) fn accent(kind: BlockKind) -> Color {
     match kind {
         BlockKind::Chemosynthesis => Color::srgb(0.95, 0.5, 0.3),
         BlockKind::LightCapture => Color::srgb(1.0, 0.95, 0.5),
@@ -331,12 +336,61 @@ struct Valve(BlockKind);
 #[derive(Component)]
 struct RibosomeText;
 
-/// A pipe. Its sprites are `segments`.
+/// The most route points that the pipe shader takes.
+const MAX_PIPE_POINTS: usize = 16;
+
+#[derive(ShaderType, Debug, Clone)]
+pub struct PipeParams {
+    points: [Vec4; MAX_PIPE_POINTS],
+    color: Vec4,
+    bad: Vec4,
+    info: Vec4,
+    state: Vec4,
+}
+
+/// The look of a pipe (`assets/shaders/pipe.wgsl`): one material for the
+/// route, drawn on the quad of each segment.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct PipeMaterial {
+    #[uniform(0)]
+    params: PipeParams,
+}
+
+impl Material2d for PipeMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/pipe.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Mask(0.5)
+    }
+}
+
+/// The route points with the arc length at each one, for the shader.
+pub fn pipe_points(route: &[Vec2]) -> [Vec4; MAX_PIPE_POINTS] {
+    let mut out = [Vec4::ZERO; MAX_PIPE_POINTS];
+    let mut s = 0.0;
+    for (i, p) in route.iter().take(MAX_PIPE_POINTS).enumerate() {
+        if i > 0 {
+            s += p.distance(route[i - 1]);
+        }
+        out[i] = Vec4::new(p.x, p.y, s, 0.0);
+    }
+    out
+}
+
+fn linear4(color: Color) -> Vec4 {
+    let l = LinearRgba::from(color);
+    Vec4::new(l.red, l.green, l.blue, 1.0)
+}
+
+/// A pipe. Its quads are `segments`.
 #[derive(Component)]
 pub(super) struct Pipe {
     route: Vec<Vec2>,
     length: f32,
     segments: Vec<Entity>,
+    material: Handle<PipeMaterial>,
     kind: EdgeKind,
     color: Color,
     /// The icon of the molecules on it.
@@ -853,10 +907,25 @@ fn edge_color(edge: &EdgeView) -> Color {
 fn spawn_pipe(
     commands: &mut Commands,
     server: &AssetServer,
+    quad: &Handle<Mesh>,
+    materials: &mut Assets<PipeMaterial>,
     edge: &EdgeView,
-    route: Vec<Vec2>,
+    mut route: Vec<Vec2>,
 ) -> Entity {
     let color = edge_color(edge);
+    if route.len() > MAX_PIPE_POINTS {
+        warn!("a pipe route has {} points; the shader takes {MAX_PIPE_POINTS}", route.len());
+        route.truncate(MAX_PIPE_POINTS);
+    }
+    let material = materials.add(PipeMaterial {
+        params: PipeParams {
+            points: pipe_points(&route),
+            color: linear4(color),
+            bad: linear4(BAD),
+            info: Vec4::new(route.len() as f32, 1.0, 0.0, 0.0),
+            state: Vec4::new(0.0, (edge.kind == EdgeKind::Cofactor) as u32 as f32, SPECK_SPEED, 0.0),
+        },
+    });
     let speck_image = match (edge.kind, edge.currency) {
         (EdgeKind::Outside, _) => None,
         (_, Some(c)) => mol_icon(c).map(|p| server.load(p)),
@@ -868,9 +937,11 @@ fn spawn_pipe(
             commands
                 .spawn((
                     PipeSegment,
-                    Sprite::from_color(color, Vec2::ONE),
+                    Mesh2d(quad.clone()),
+                    MeshMaterial2d(material.clone()),
                     Transform::default(),
                     map_layer(),
+                    Pickable::IGNORE,
                 ))
                 .id(),
         );
@@ -884,6 +955,7 @@ fn spawn_pipe(
                 route: route.clone(),
                 length,
                 segments: segments.clone(),
+                material,
                 kind: edge.kind,
                 color,
                 speck_image,
@@ -928,9 +1000,13 @@ fn spawn_pipe(
     pipe
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_pipes(
     mut commands: Commands,
     server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<PipeMaterial>>,
+    mut quad: Local<Option<Handle<Mesh>>>,
     view: Res<LocalMetabolismView>,
     layout: Res<MapLayout>,
     mut index: ResMut<PipeIndex>,
@@ -956,7 +1032,8 @@ fn sync_pipes(
             Some(entity) => *entity,
             None => {
                 let route = pipe_route(edge, &layout, &mut index);
-                let entity = route.map(|r| spawn_pipe(&mut commands, &server, edge, r));
+                let quad = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0)));
+                let entity = route.map(|r| spawn_pipe(&mut commands, &server, quad, &mut materials, edge, r));
                 index.pipes.insert(key, entity);
                 entity
             }
@@ -1010,11 +1087,12 @@ pub fn is_limiting(edge: &EdgeView, view: &MetabolismView) -> bool {
 }
 
 fn draw_pipes(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     mut pipes: Query<(&Pipe, &mut Visibility)>,
-    mut segments: Query<(&mut Sprite, &mut Transform), With<PipeSegment>>,
+    mut segments: Query<&mut Transform, With<PipeSegment>>,
+    mut materials: ResMut<Assets<PipeMaterial>>,
 ) {
-    let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 6.0).sin();
+    let t = time.elapsed_secs_wrapped();
     for (pipe, mut visibility) in &mut pipes {
         let want = if pipe.hidden { Visibility::Hidden } else { Visibility::Inherited };
         if *visibility != want {
@@ -1027,29 +1105,25 @@ fn draw_pipes(
             EdgeKind::Cofactor => 1.0,
             _ => width_tier(pipe.flux),
         };
-        let mut color = match pipe.kind {
-            // A cofactor is a thin dim pin: needed, not used up.
-            EdgeKind::Cofactor => pipe.color.with_alpha(0.4),
-            _ if pipe.flux > 0.0 => pipe.color.with_alpha(0.75),
-            _ => pipe.color.with_alpha(0.28),
-        };
         if pipe.limiting {
             width = width.max(2.0);
-            color = color.with_alpha(1.0).mix(&BAD, 0.4 + 0.6 * pulse);
         }
+        if let Some(mut material) = materials.get_mut(&pipe.material) {
+            let p = &mut material.params;
+            p.info = Vec4::new(p.info.x, width, pipe.flux, t);
+            p.state.x = pipe.limiting as u32 as f32;
+            p.state.w = pipe.flux.min(1.0);
+        }
+        // Each quad covers its segment, the wall and a pixel to spare.
+        let pad = width + 4.0;
         for (i, &entity) in pipe.segments.iter().enumerate() {
-            let Ok((mut sprite, mut transform)) = segments.get_mut(entity) else {
+            let (Ok(mut transform), Some(&a), Some(&b)) =
+                (segments.get_mut(entity), pipe.route.get(i), pipe.route.get(i + 1))
+            else {
                 continue;
             };
-            let (a, b) = (pipe.route[i], pipe.route[i + 1]);
-            let size = if (a.y - b.y).abs() < 1e-3 {
-                Vec2::new((a.x - b.x).abs() + width, width)
-            } else {
-                Vec2::new(width, (a.y - b.y).abs() + width)
-            };
-            sprite.custom_size = Some(size);
-            sprite.color = color;
-            transform.translation = ((a + b) / 2.0).round().extend(Z_PIPE);
+            let size = (b - a).abs() + Vec2::splat(pad);
+            *transform = Transform::from_translation(((a + b) / 2.0).extend(Z_PIPE)).with_scale(size.extend(1.0));
         }
     }
 }

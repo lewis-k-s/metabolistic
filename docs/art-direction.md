@@ -517,3 +517,25 @@ Next step: **nucleosomes.** A later gene (histones) can wrap the linker DNA
 round beads. This is the first step of genome protection against UV: the
 shader can draw the beads on linkers, and `genome_damage` can lower the UV
 damage to the genome.
+
+## Light on the metabolic map
+
+The Manage map uses the same rules as the genome view: pixel-snapped shaders,
+tone bands, a 1 px dark outline, and dithered glow.
+
+- **Cytoplasm** (`assets/shaders/cytoplasm.wgsl`, `screens::manage::light`).
+  One quad behind the map, from the membrane down to the genome. Its light is
+  ambient, plus light through the membrane (warm with outside heat, cool with
+  outside light), plus emitters. A pathway that runs is an emitter in its own
+  colour, and it breathes faster when it runs harder. A full pool glows a
+  little. The light is cut into five bands of the cytoplasm ramp, with a
+  dithered edge. The ambient light sits in the middle of a band, so calm
+  cytoplasm is flat and the dither shows only where the light changes. Slow
+  noise streams through the light, and specks drift with it.
+- **Pipes** (`assets/shaders/pipe.wgsl`). One material per pipe and a quad per
+  segment. A pipe is a lit tube: a dark wall, a core in the pipe colour, and a
+  light line on the upper or left side. Packets move at the speed of the
+  molecule icons. A pipe that limits its pathway shows a red pulse that runs
+  backwards. A cofactor is a dotted pin. A still pipe is dark, not see-through.
+- **Membrane band.** The bilayer tiles ripple one pixel in a slow wave.
+
