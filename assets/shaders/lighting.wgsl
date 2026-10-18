@@ -15,14 +15,15 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> dark: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var lightmap: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var lightmap_sampler: sampler;
-// Size of the quad in world units (xy).
+// The field: size (xy) and lower-left corner (zw), in world units. The quad
+// reaches past the field, and the lightmap clamps to its edge there.
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> size: vec4<f32>;
 
 // Input brightness of each band edge, and the share of the scene that shows
 // at that band. The first band keeps a little of the scene, so the player can
 // still navigate.
 const IN: array<f32, 5> = array<f32, 5>(0.08, 0.25, 0.45, 0.70, 1.0);
-const OUT: array<f32, 5> = array<f32, 5>(0.10, 0.30, 0.55, 0.80, 1.0);
+const OUT: array<f32, 5> = array<f32, 5>(0.20, 0.38, 0.60, 0.82, 1.0);
 // Strength of the additive tint.
 const TINT: f32 = 0.45;
 
@@ -55,9 +56,9 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sprite pixel of this fragment, and its centre in the quad's uv.
     let pixel = vec2<i32>(floor(in.world_position.xy));
     let snapped = vec2<f32>(pixel) + vec2<f32>(0.5);
-    let shift = snapped - in.world_position.xy;
     // Sample at the pixel centre, so a sprite pixel has one light value.
-    let uv = in.uv + vec2<f32>(shift.x, -shift.y) / size.xy;
+    let local = (snapped - size.zw) / size.xy;
+    let uv = vec2<f32>(local.x, 1.0 - local.y);
     let rgb = textureSampleLevel(lightmap, lightmap_sampler, uv, 0.0).rgb;
     let lum = max(rgb.r, max(rgb.g, rgb.b));
     let level = banded(lum, bayer4(pixel));

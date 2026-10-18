@@ -87,6 +87,7 @@ uv run --with numpy art/gen_sprites.py
 | `wall_membrane_pore` | 32x26 | M5, wall with a transporter |
 | `vent_chimney_top` | 128x128 | M2, vent core: Heat and Minerals source |
 | `vent_plume_top` | 128x128 | M2, smoke overlay. Draw above creatures |
+| `seafloor` | 128x128, tiles | Vent level: the deep-sea floor (sediment, pebbles, fine cracks, low contrast). Tiled under the grid image |
 | `vent_chimney_side` | 72x120 | Menu, loading and codex art. Not for the Run screen |
 
 ## Animation
@@ -382,7 +383,19 @@ pixel (the cell frames are centred on 32.5).
 
 ## Light and darkness
 
-Status: plan, 2026-10-18. Phase 1 (lightmap, darkness overlay, debug key F6) is in the game. The other phases are not.
+Status: 2026-10-18. Phase 1 (lightmap, darkness overlay, debug key F6) is in
+the game, and so are the floor sprite and the vent particles (moved forward
+from phase 3). The other phases are not.
+
+**Changes after the first phase-1 build.** The grid image no longer draws the
+Heat and Light bands (the orange glow round the vents and the yellow and
+violet light zones). The lighting shows the vents and the UV shafts on its
+own. The grid still draws minerals, O2 and water. The vent level has a
+textured floor sprite (`seafloor`, tiled at z -20, under the grid image), and
+the darkness darkens it like the rest. The burn zone (heat from about 30 to
+60) turns white in the light, so it is the brightest and whitest area. The
+quads reach 1200 units past the field and the lightmap is clamped at its
+edge, so there is no seam at the field edge.
 
 The sprites carry their own light (rule 2), and the background is one flat
 colour. This plan adds scene light: the field is dark far from a vent or a
@@ -499,11 +512,21 @@ fluorescence, the pigment glimmer and the UV burn sparkle.
 
 ### Particles
 
+Status: the vent smoke and sparkles are in the game (`world::vfx`). The rest
+is not.
+
 Use `bevy_enoki` 0.7 (it supports Bevy 0.19). It is made for 2D, works on
 WebGL2 and hot-reloads its effect files. `bevy_hanabi` needs compute shaders,
 so it does not run on WebGL2. The module is `world::vfx`: `particles.rs` is
 already the pickups module.
 
+- **Vent smoke and sparkles (in the game).** Each vent has dense smoke (dark
+  grey-brown puffs, the `waste` ramp) that rises and drifts with the Heat
+  drift of the grid, in the lit layer (z 6, below the darkness). It also has
+  sparkles (small light-orange and yellow specks, the `vent` ramp) that rise
+  and twinkle out. Sparkles are emissive: they are drawn above the darkness
+  (z 30). A replacement vertex shader snaps every particle to the sprite pixel
+  grid, and the particle shader draws palette tones with a dither fade.
 - A small particle material snaps each particle to a sprite pixel and uses
   palette colours only. Particles fade out with dither, not with alpha.
 - Particles are drawn in the lit layer, so the darkness hides them, unless
@@ -521,7 +544,7 @@ already the pickups module.
    screenshot.
 2. Emissive masks from the generator, `DitherGlow`, glow data for each NPC
    kind, bloom.
-3. Marine snow and vent particles (`bevy_enoki`).
+3. Marine snow (`bevy_enoki`). Vent smoke and sparkles are done.
 4. Action and event effects.
 5. Pigment glimmer and tint, ambient for shallow water and land.
 

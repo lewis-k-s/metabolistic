@@ -844,6 +844,59 @@ def vent_plume() -> Canvas:
     return c
 
 
+def seafloor(S: int = 128) -> Canvas:
+    """A tile of the deep-sea floor, seen from above: sediment, small pebbles and
+    fine cracks. Low contrast, so cells and pickups still read on it. It tiles:
+    the noise comes from a Fourier filter, and pebbles and cracks wrap round the
+    edges. Tones come from the WATER and rock ramps."""
+    c = Canvas(S, S)
+    rng = np.random.RandomState(11)
+    # Sediment: low-pass noise (periodic by construction), 4 tones with dither.
+    f = np.fft.fftfreq(S)
+    k = np.hypot(f[:, None], f[None, :])
+    noise = np.fft.ifft2(np.fft.fft2(rng.standard_normal((S, S))) * np.exp(-((k / 0.07) ** 2))).real
+    noise = (noise - noise.mean()) / noise.std()
+    fine = rng.uniform(-0.3, 0.3, (S, S))
+    v = noise * 0.8 + fine + BAYER4_FULL(S) * 0.5
+    tones = [WATER[2], WATER[3], RAMPS["rock"][1], RAMPS["rock"][2]]
+    cuts = [-0.35, 0.65, 1.45]
+    c.px[..., 3] = 255
+    for y in range(S):
+        for x in range(S):
+            c.px[y, x, :3] = tones[sum(v[y, x] > t for t in cuts)]
+
+    def wrap_set(x: int, y: int, col) -> None:
+        c.px[y % S, x % S, :3] = col
+
+    # Pebbles: a lit disc (rock ramp), a shadow on the lower right.
+    for _ in range(26):
+        cx, cy = rng.randint(0, S), rng.randint(0, S)
+        r = rng.choice([1, 1, 2, 2, 3])
+        for dy in range(-r - 1, r + 2):
+            for dx in range(-r - 1, r + 2):
+                d = np.hypot(dx, dy)
+                if d <= r:
+                    lit = (dx + dy) < -r * 0.4
+                    wrap_set(cx + dx, cy + dy, RAMPS["rock"][3] if lit and r > 1 else RAMPS["rock"][2])
+                elif d <= r + 1.2 and dx + dy > 0:
+                    wrap_set(cx + dx, cy + dy, RAMPS["rock"][0])
+    # Fine cracks: short random walks of 1 px, WATER[0].
+    for _ in range(9):
+        x, y = rng.randint(0, S), rng.randint(0, S)
+        ang = rng.uniform(0, 2 * np.pi)
+        for _ in range(rng.randint(10, 26)):
+            wrap_set(int(x), int(y), WATER[0])
+            ang += rng.uniform(-0.6, 0.6)
+            x += np.cos(ang)
+            y += np.sin(ang)
+    return c
+
+
+def BAYER4_FULL(S: int) -> np.ndarray:
+    """The BAYER4 matrix tiled over S x S, centred on 0 (S is a multiple of 4)."""
+    return np.tile(BAYER4, (S // 4, S // 4)) - 0.5
+
+
 # --------------------------------------------------------------------------
 # Metabolism view: pool icons, enzymes, pathway plates, valves
 # --------------------------------------------------------------------------
@@ -1264,6 +1317,7 @@ SPRITES = {
     "vent_chimney_top": vent_top,
     "vent_plume_top": vent_plume,
     "vent_chimney_side": vent_side,
+    "seafloor": seafloor,
     "overlay_flagellum": lambda: overlay_flagellum(0, 0, "idle"),
     "overlay_adhesin": lambda: overlay_adhesin(0, 0, "idle"),
     "overlay_toxin": lambda: overlay_toxin(0, 0, "idle"),

@@ -20,17 +20,23 @@ use crate::envgrid::EnvGrid;
 use crate::environment::Channel;
 
 /// Strength of the heat light. Tuned in the vent stage.
-pub const K_HEAT: f32 = 0.9;
+pub const K_HEAT: f32 = 0.95;
 /// Strength of the shaft light. Tuned in the vent stage.
 pub const K_LIGHT: f32 = 0.8;
 /// Heat level at which the heat light has reached 63 % of its strength.
-pub const HEAT_SCALE: f32 = 12.0;
+pub const HEAT_SCALE: f32 = 28.0;
 /// Light level at which the shaft light has reached 63 % of its strength.
-pub const LIGHT_SCALE: f32 = 3.0;
+pub const LIGHT_SCALE: f32 = 6.0;
 /// Colour of the heat light (the `vent` ramp, warm).
 pub const WARM: [f32; 3] = [1.0, 0.62, 0.25];
 /// Colour of the shaft light (pale violet, a blacklight).
 pub const COOL: [f32; 3] = [0.62, 0.5, 1.0];
+/// Heat from which the light turns white-hot: the burn zone (the membrane
+/// takes damage from `exchange::HEAT_DAMAGE_THRESHOLD`, 40) is the brightest
+/// and whitest area.
+pub const BURN_START: f32 = 30.0;
+/// Heat at which the burn light is fully white.
+pub const BURN_FULL: f32 = 60.0;
 /// Ambient light of the vent stage.
 pub const VENT_AMBIENT: f32 = 0.08;
 
@@ -71,9 +77,10 @@ pub struct Splat {
 pub fn light_at(ambient: f32, heat: f32, light: f32, position: Vec2, splats: &[Splat]) -> [f32; 3] {
     let heat_t = K_HEAT * (1.0 - (-heat.max(0.0) / HEAT_SCALE).exp());
     let light_t = K_LIGHT * (1.0 - (-light.max(0.0) / LIGHT_SCALE).exp());
+    let burn = ((heat - BURN_START) / (BURN_FULL - BURN_START)).clamp(0.0, 1.0);
     let mut out = [0.0; 3];
     for (i, channel) in out.iter_mut().enumerate() {
-        *channel = ambient + heat_t * WARM[i] + light_t * COOL[i];
+        *channel = ambient + heat_t * (WARM[i] + burn * (1.0 - WARM[i])) + light_t * COOL[i];
     }
     for splat in splats {
         let distance = position.distance(splat.position);
@@ -132,7 +139,7 @@ mod tests {
         for heat in [0.0, 0.5, 5.0, 100.0] {
             for light in [0.0, 1.0, 10.0] {
                 for c in light_at(0.08, heat, light, Vec2::ZERO, &[]) {
-                    assert!(c >= 0.08 && c <= 1.0);
+                    assert!((0.08..=1.0).contains(&c));
                 }
             }
         }
@@ -145,6 +152,15 @@ mod tests {
         let [r, g, b] = light_at(0.08, 0.0, 10.0, Vec2::ZERO, &[]);
         assert!(b > 0.5, "a shaft is lit");
         assert!(b > r && b > g.min(r), "a shaft is violet: {r} {g} {b}");
+    }
+
+    #[test]
+    fn the_burn_zone_is_white() {
+        let warm = light_at(0.08, 20.0, 0.0, Vec2::ZERO, &[]);
+        let burn = light_at(0.08, 70.0, 0.0, Vec2::ZERO, &[]);
+        // Bluer (whiter) and not darker than the warm light.
+        assert!(burn[2] > warm[2] + 0.3);
+        assert!(burn[0] >= warm[0]);
     }
 
     #[test]

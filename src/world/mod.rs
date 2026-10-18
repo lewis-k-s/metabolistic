@@ -18,6 +18,7 @@
 //! - `npc_view`: NPC bodies, particle sprites, death, engulf and victory clips.
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
 //! - `lighting_view`: the lightmap and the darkness overlay (F6 turns it off).
+//! - `vfx`: vent smoke and sparkles (`bevy_enoki`).
 //! - `shader_cells`: spike, off by default: the player's body as an SDF shader
 //!   on a low-res canvas (F7).
 
@@ -49,6 +50,7 @@ pub mod npc_view;
 pub mod pilus_view;
 pub mod player_body;
 pub mod shader_cells;
+pub mod vfx;
 pub mod walls_view;
 
 /// Collision layers of the world. Cells collide with the field walls and vents
@@ -97,6 +99,7 @@ pub fn plugin(app: &mut App) {
             npc_view::plugin,
             shader_cells::plugin,
             lighting_view::plugin,
+            vfx::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
         .add_systems(OnExit(InRun), (remove_grid, reset_background));
@@ -123,9 +126,13 @@ fn spawn_world(
     let world_size = grid.world_size();
     let origin = grid.origin();
 
+    if def.field == crate::level::FieldKind::Vents {
+        grid_view::spawn_floor(&mut commands, &asset_server, origin, world_size);
+    }
     grid_view::spawn_grid_view(&mut commands, &grid, grid_view::GridStyle::for_field(def.field));
     for vent in def.vents.iter().copied() {
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
+        vfx::spawn_vent_particles(&mut commands, vent, grid.params(crate::environment::Channel::Heat).drift);
     }
     grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);

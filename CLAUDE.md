@@ -25,7 +25,7 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
 - `level.rs`: the hand-built vent field
 - `run.rs`: death detection and `RunSummary`
-- `world/`: the run world (full only): grid texture, vents, player body (avian2d), camera, HUD
+- `world/`: the run world (full only): grid texture (minerals, O2, water; heat and light are drawn by the lighting), sea floor, vents, `vfx` (vent smoke and sparkles, `bevy_enoki`), player body (avian2d), camera, HUD
 - `metabolism/`: Core metabolic flow simulation and graph management
 - `codex_catalog.rs`: the catalog of all genes and membrane proteins (`CodexEntry`), pure state and edit rules. A new `BlockKind` or `MembraneProtein` needs one arm in `gene_facts` or `protein_facts`
 - `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`, `run_over`), the Codex overlay (`codex`, key C in Manage), the shared 2D camera, and UI helpers

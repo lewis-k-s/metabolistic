@@ -31,6 +31,9 @@ use crate::InRun;
 const SHADER_PATH: &str = "shaders/lighting.wgsl";
 /// Z of the overlay: above the world sprites (the highest is the plume, 5).
 const DARKNESS_Z: f32 = 20.0;
+/// The quads reach this far past the field, so the camera never sees an
+/// undarkened edge. The lightmap is clamped there: the edge light goes on.
+const MARGIN: f32 = 1200.0;
 /// The darkest tone of the `WATER` ramp, `#04060d`.
 const DARK_COLOR: Color = Color::srgb(0.0157, 0.0235, 0.051);
 /// The debug key.
@@ -71,7 +74,8 @@ pub struct LightingMaterial {
     #[texture(1)]
     #[sampler(2)]
     pub lightmap: Handle<Image>,
-    /// Size of the quad in world units (xy).
+    /// The field: size (xy) and lower-left corner (zw), in world units. The
+    /// lightmap covers the field, and the quad reaches `MARGIN` beyond it.
     #[uniform(3)]
     pub size: Vec4,
     pub additive: bool,
@@ -140,7 +144,8 @@ pub fn spawn_lighting(commands: &mut Commands, grid: &EnvGrid, ambient: Ambient)
     let dims = grid.dims();
     let data = render_lightmap(grid, ambient, &[]);
     let size = grid.world_size();
-    let center = grid.origin() + size * 0.5;
+    let origin = grid.origin();
+    let center = origin + size * 0.5;
     commands.queue(move |world: &mut World| {
         let mut image = Image::new(
             Extent3d { width: dims.width as u32, height: dims.height as u32, depth_or_array_layers: 1 },
@@ -153,14 +158,14 @@ pub fn spawn_lighting(commands: &mut Commands, grid: &EnvGrid, ambient: Ambient)
         image.sampler = ImageSampler::linear();
         let handle = world.resource_mut::<Assets<Image>>().add(image);
         world.insert_resource(LightmapImage { handle: handle.clone(), ambient });
-        let mesh = world.resource_mut::<Assets<Mesh>>().add(Rectangle::new(size.x, size.y));
+        let mesh = world.resource_mut::<Assets<Mesh>>().add(Rectangle::new(size.x + 2.0 * MARGIN, size.y + 2.0 * MARGIN));
         let dark = LinearRgba::from(DARK_COLOR);
         let visible = if world.resource::<LightingOn>().0 { Visibility::Inherited } else { Visibility::Hidden };
         for (name, additive, z) in [("Darkness", false, DARKNESS_Z), ("Light Tint", true, DARKNESS_Z + 0.1)] {
             let material = world.resource_mut::<Assets<LightingMaterial>>().add(LightingMaterial {
                 dark: Vec4::new(dark.red, dark.green, dark.blue, if additive { 1.0 } else { 0.0 }),
                 lightmap: handle.clone(),
-                size: Vec4::new(size.x, size.y, 0.0, 0.0),
+                size: Vec4::new(size.x, size.y, origin.x, origin.y),
                 additive,
             });
             world.spawn((
