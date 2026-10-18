@@ -71,8 +71,11 @@ pub fn plugin(app: &mut App) {
 // --- Bodies ---
 
 /// Adds the body and the sprite to each new NPC.
+///
+/// An NPC can be despawned in the frame it appears (engulfed, or dead) before
+/// this system's commands run, so the body goes on in a command that checks
+/// that the NPC is still there.
 fn attach_npc_bodies(
-    sheets: Res<Sheets>,
     npcs: Query<(Entity, &Npc, &CellSize, Option<&crate::gate::GateSprite>), Added<Npc>>,
     mut commands: Commands,
 ) {
@@ -80,8 +83,18 @@ fn attach_npc_bodies(
         // The level picks the sprite of its gate cell.
         let sprite = gate_sprite.map_or(spec(npc.archetype).sprite, |g| g.0);
         let gate = npc.archetype == Archetype::Gate;
-        let first = if gate { clip::IDLE } else { clip::SPAWN };
-        attach_body_for(&mut commands, &sheets, entity, size, sprite, first, gate);
+        let size = *size;
+        commands.queue(move |world: &mut World| {
+            if world.get_entity(entity).is_err() {
+                return;
+            }
+            let first = if gate { clip::IDLE } else { clip::SPAWN };
+            world.resource_scope(|world, sheets: Mut<Sheets>| {
+                let mut commands = world.commands();
+                attach_body_for(&mut commands, &sheets, entity, &size, sprite, first, gate);
+            });
+            world.flush();
+        });
     }
 }
 
@@ -278,5 +291,46 @@ fn hide_body_during_engulf(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An NPC that is despawned in the frame it appears must not crash the
+    /// attach step (it did, when engulfed by a predator on its first frame).
+    #[test]
+    fn an_npc_despawned_in_its_first_frame_gets_no_body() {
+        let mut app = App::new();
+        app.init_resource::<Sheets>().add_systems(
+            Update,
+            (
+                attach_npc_bodies,
+                |npcs: Query<Entity, With<Npc>>, mut commands: Commands| {
+                    for entity in &npcs {
+                        commands.entity(entity).despawn();
+                    }
+                },
+            ),
+        );
+        let npc = app
+            .world_mut()
+            .spawn((Npc { archetype: Archetype::Prey }, CellSize::default()))
+            .id();
+        app.update();
+        assert!(app.world().get_entity(npc).is_err());
+    }
+
+    #[test]
+    fn a_living_npc_gets_a_body() {
+        let mut app = App::new();
+        app.init_resource::<Sheets>().add_systems(Update, attach_npc_bodies);
+        let npc = app
+            .world_mut()
+            .spawn((Npc { archetype: Archetype::Prey }, CellSize::default()))
+            .id();
+        app.update();
+        assert!(app.world().entity(npc).contains::<avian2d::prelude::RigidBody>());
     }
 }
