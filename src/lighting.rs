@@ -1,0 +1,195 @@
+//! # Scene light
+//!
+//! The light at a point is a pure function of the environment grid (see
+//! `docs/art-direction.md`, "Light and darkness"):
+//!
+//! ```text
+//! light(x) = ambient(level) + k_heat * Heat(x) + k_light * Light(x) + splats(x)
+//! ```
+//!
+//! The result is an RGB colour in [0, 1]. Heat gives a warm tint (the `vent`
+//! ramp). Light gives a cool tint: in the vents all light is UV, so it is a
+//! pale violet. The function has no graphics dependency, so `cargo th` tests
+//! it. `world::lighting_view` writes the result to a texture and draws the
+//! darkness. The light is for the player's view only: it never changes the
+//! simulation.
+
+use bevy::math::Vec2;
+
+use crate::envgrid::EnvGrid;
+use crate::environment::Channel;
+
+/// Strength of the heat light. Tuned in the vent stage.
+pub const K_HEAT: f32 = 0.9;
+/// Strength of the shaft light. Tuned in the vent stage.
+pub const K_LIGHT: f32 = 0.8;
+/// Heat level at which the heat light has reached 63 % of its strength.
+pub const HEAT_SCALE: f32 = 12.0;
+/// Light level at which the shaft light has reached 63 % of its strength.
+pub const LIGHT_SCALE: f32 = 3.0;
+/// Colour of the heat light (the `vent` ramp, warm).
+pub const WARM: [f32; 3] = [1.0, 0.62, 0.25];
+/// Colour of the shaft light (pale violet, a blacklight).
+pub const COOL: [f32; 3] = [0.62, 0.5, 1.0];
+/// Ambient light of the vent stage.
+pub const VENT_AMBIENT: f32 = 0.08;
+
+/// The ambient light of a level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Ambient {
+    /// The same everywhere.
+    Flat(f32),
+    /// Falls with depth: `surface` at the top of the field, `bottom` at the
+    /// bottom edge.
+    Depth { surface: f32, bottom: f32 },
+}
+
+impl Ambient {
+    /// The ambient at a depth fraction: 0 is the top edge, 1 is the bottom edge.
+    pub fn at(self, depth: f32) -> f32 {
+        match self {
+            Ambient::Flat(level) => level,
+            Ambient::Depth { surface, bottom } => {
+                surface + (bottom - surface) * depth.clamp(0.0, 1.0)
+            }
+        }
+    }
+}
+
+/// A small light from an emitter (a fluorescent cell, a toxin droplet, a stun
+/// flash). Phase 1 has no emitters: the list is empty.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Splat {
+    pub position: Vec2,
+    pub radius: f32,
+    pub color: [f32; 3],
+    pub strength: f32,
+}
+
+/// The light at a point, from the ambient and the heat and light levels there.
+/// Each channel is at least `ambient` and at most 1.
+pub fn light_at(ambient: f32, heat: f32, light: f32, position: Vec2, splats: &[Splat]) -> [f32; 3] {
+    let heat_t = K_HEAT * (1.0 - (-heat.max(0.0) / HEAT_SCALE).exp());
+    let light_t = K_LIGHT * (1.0 - (-light.max(0.0) / LIGHT_SCALE).exp());
+    let mut out = [0.0; 3];
+    for (i, channel) in out.iter_mut().enumerate() {
+        *channel = ambient + heat_t * WARM[i] + light_t * COOL[i];
+    }
+    for splat in splats {
+        let distance = position.distance(splat.position);
+        if distance < splat.radius {
+            let falloff = (1.0 - distance / splat.radius).powi(2) * splat.strength;
+            for (i, channel) in out.iter_mut().enumerate() {
+                *channel += falloff * splat.color[i];
+            }
+        }
+    }
+    out.map(|c| c.clamp(ambient.clamp(0.0, 1.0), 1.0))
+}
+
+/// RGBA8 texels of the lightmap, one for each grid cell, row 0 at the top (the
+/// highest world y). Alpha is 255.
+pub fn render_lightmap(grid: &EnvGrid, ambient: Ambient, splats: &[Splat]) -> Vec<u8> {
+    let dims = grid.dims();
+    let heat = grid.layer(Channel::Heat);
+    let light = grid.layer(Channel::Light);
+    let mut data = vec![255u8; dims.width * dims.height * 4];
+    for row in 0..dims.height {
+        // Image rows go down; world y goes up.
+        let y = dims.height - 1 - row;
+        let depth = row as f32 / (dims.height.max(2) - 1) as f32;
+        let base = ambient.at(depth);
+        for x in 0..dims.width {
+            let i = dims.index(x, y);
+            let rgb = light_at(base, heat[i], light[i], grid.cell_center(x, y), splats);
+            let t = (row * dims.width + x) * 4;
+            for (k, c) in rgb.iter().enumerate() {
+                data[t + k] = (c * 255.0).round() as u8;
+            }
+        }
+    }
+    data
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn brightness(rgb: [f32; 3]) -> f32 {
+        rgb.into_iter().fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn light_falls_as_heat_falls() {
+        let near = brightness(light_at(0.08, 40.0, 0.0, Vec2::ZERO, &[]));
+        let mid = brightness(light_at(0.08, 8.0, 0.0, Vec2::ZERO, &[]));
+        let far = brightness(light_at(0.08, 1.0, 0.0, Vec2::ZERO, &[]));
+        assert!(near > mid && mid > far, "{near} {mid} {far}");
+    }
+
+    #[test]
+    fn light_never_goes_below_ambient() {
+        for heat in [0.0, 0.5, 5.0, 100.0] {
+            for light in [0.0, 1.0, 10.0] {
+                for c in light_at(0.08, heat, light, Vec2::ZERO, &[]) {
+                    assert!(c >= 0.08 && c <= 1.0);
+                }
+            }
+        }
+        // Without sources the light is the ambient.
+        assert_eq!(light_at(0.3, 0.0, 0.0, Vec2::ZERO, &[]), [0.3; 3]);
+    }
+
+    #[test]
+    fn a_shaft_is_lit_and_cool() {
+        let [r, g, b] = light_at(0.08, 0.0, 10.0, Vec2::ZERO, &[]);
+        assert!(b > 0.5, "a shaft is lit");
+        assert!(b > r && b > g.min(r), "a shaft is violet: {r} {g} {b}");
+    }
+
+    #[test]
+    fn heat_is_warm() {
+        let [r, _, b] = light_at(0.08, 40.0, 0.0, Vec2::ZERO, &[]);
+        assert!(r > b);
+    }
+
+    #[test]
+    fn a_splat_adds_light_inside_its_radius() {
+        let splat = Splat { position: Vec2::ZERO, radius: 10.0, color: [0.0, 1.0, 0.0], strength: 0.5 };
+        let inside = light_at(0.08, 0.0, 0.0, Vec2::new(2.0, 0.0), &[splat]);
+        let outside = light_at(0.08, 0.0, 0.0, Vec2::new(20.0, 0.0), &[splat]);
+        assert!(inside[1] > outside[1]);
+        assert_eq!(outside, [0.08; 3]);
+    }
+
+    #[test]
+    fn the_output_is_deterministic() {
+        let a = light_at(0.08, 12.3, 4.5, Vec2::new(1.0, 2.0), &[]);
+        let b = light_at(0.08, 12.3, 4.5, Vec2::new(1.0, 2.0), &[]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn ambient_depth_gradient() {
+        let a = Ambient::Depth { surface: 0.9, bottom: 0.3 };
+        assert_eq!(a.at(0.0), 0.9);
+        assert!((a.at(1.0) - 0.3).abs() < 1e-6);
+        assert!(a.at(0.5) < a.at(0.2));
+        assert_eq!(Ambient::Flat(1.0).at(0.7), 1.0);
+    }
+
+    #[test]
+    fn lightmap_is_brighter_near_a_vent_and_never_below_ambient() {
+        let mut grid = EnvGrid::new(16, 16, Vec2::ZERO);
+        grid.set_level(Channel::Heat, 8, 8, 60.0);
+        let map = render_lightmap(&grid, Ambient::Flat(VENT_AMBIENT), &[]);
+        let texel = |x: usize, y: usize| {
+            // Row 0 is the top: grid y 8 is image row 15 - 8.
+            let t = ((15 - y) * 16 + x) * 4;
+            map[t]
+        };
+        assert!(texel(8, 8) > texel(0, 0));
+        let floor = (VENT_AMBIENT * 255.0).round() as u8;
+        assert!(map.chunks(4).all(|p| p[0] >= floor && p[3] == 255));
+    }
+}

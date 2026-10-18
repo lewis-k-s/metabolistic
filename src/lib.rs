@@ -18,6 +18,7 @@ pub mod genome_damage;
 pub mod land;
 pub mod layout;
 pub mod level;
+pub mod lighting;
 pub mod membrane;
 pub mod metabolism;
 pub mod molecules;

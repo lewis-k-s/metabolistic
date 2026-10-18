@@ -17,6 +17,7 @@
 //! - `interior_view`: interior pieces of a cell (genome and pathways), display mode key.
 //! - `npc_view`: NPC bodies, particle sprites, death, engulf and victory clips.
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
+//! - `lighting_view`: the lightmap and the darkness overlay (F6 turns it off).
 //! - `shader_cells`: spike, off by default: the player's body as an SDF shader
 //!   on a low-res canvas (F7).
 
@@ -43,6 +44,7 @@ pub mod actions_view;
 pub mod grid_view;
 pub mod hud;
 pub mod interior_view;
+pub mod lighting_view;
 pub mod npc_view;
 pub mod pilus_view;
 pub mod player_body;
@@ -94,6 +96,7 @@ pub fn plugin(app: &mut App) {
             walls_view::plugin,
             npc_view::plugin,
             shader_cells::plugin,
+            lighting_view::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
         .add_systems(OnExit(InRun), (remove_grid, reset_background));
@@ -129,6 +132,7 @@ fn spawn_world(
     let walls = def.wall_map();
     walls_view::spawn_walls(&mut commands, &asset_server, &walls, &grid);
     commands.insert_resource(walls);
+    lighting_view::spawn_lighting(&mut commands, &grid, def.field.ambient());
     commands.insert_resource(grid);
     commands.insert_resource(UvFraction(def.uv_fraction));
     for shelter in def.shelters.iter().copied() {

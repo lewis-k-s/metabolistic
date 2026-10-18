@@ -438,6 +438,17 @@ impl FieldKind {
         matches!(self, FieldKind::Land)
     }
 
+    /// The ambient light of the field (see `lighting`): dark in the vents, a
+    /// gradient with depth in shallow water, full on land.
+    pub fn ambient(self) -> crate::lighting::Ambient {
+        use crate::lighting::Ambient;
+        match self {
+            FieldKind::Vents => Ambient::Flat(crate::lighting::VENT_AMBIENT),
+            FieldKind::Shallow => Ambient::Depth { surface: 0.9, bottom: 0.3 },
+            FieldKind::Land => Ambient::Flat(1.0),
+        }
+    }
+
     /// The background colour of the field: deep water, or dry earth.
     pub fn background(self) -> [f32; 3] {
         match self {
