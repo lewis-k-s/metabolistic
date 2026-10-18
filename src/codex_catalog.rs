@@ -172,6 +172,9 @@ pub struct Cost {
 pub struct CodexEntry {
     pub id: EntryId,
     pub name: &'static str,
+    /// The gene symbol of a real gene that does the job (`gene_symbol`). The
+    /// genome view of the codex writes it on the locus.
+    pub symbol: &'static str,
     pub category: Category,
     /// The first stage where the player can get it. `None`: never yet.
     pub stage: Option<Stage>,
@@ -347,6 +350,70 @@ fn gene_facts(kind: BlockKind) -> Facts {
     Facts { name, category, stage, sources, note }
 }
 
+/// The symbol of a real gene for the entry: one gene of the pathway, or the
+/// gene of the protein. A membrane protein is a gene product too, so it has a
+/// locus on the genome. No wildcard arm.
+pub fn gene_symbol(id: EntryId) -> &'static str {
+    match id {
+        EntryId::Gene(kind) => match kind {
+            // Photosystem II, protein D1.
+            BlockKind::LightCapture => "psbA",
+            // Phosphofructokinase, the gate of glycolysis.
+            BlockKind::SugarCatabolism => "pfkA",
+            // Citrate synthase, the first step of the TCA cycle.
+            BlockKind::OrganicAcidOxidation => "gltA",
+            // Cytochrome bo3 oxidase.
+            BlockKind::Respiration => "cyoA",
+            // Lactate dehydrogenase.
+            BlockKind::Fermentation => "ldhA",
+            // Glutamine synthetase.
+            BlockKind::NitrogenSulfurAssimilation => "glnA",
+            // Acetohydroxy acid isomeroreductase (branched-chain amino acids).
+            BlockKind::AminoAcidBiosynthesis => "ilvC",
+            // The first condensing enzyme of fatty acid synthesis.
+            BlockKind::LipidMetabolism => "fabH",
+            // The first step of purine synthesis.
+            BlockKind::NucleotideCofactorSynthesis => "purF",
+            // Phytoene synthase: carotenoid pigments.
+            BlockKind::SecondaryMetabolites => "crtB",
+            // EPSP synthase of the shikimate pathway.
+            BlockKind::AromaticPrecursorSynthesis => "aroA",
+            // Phenylalanine ammonia-lyase, the entry to lignin.
+            BlockKind::Polymerization => "pal1",
+            // Wax ester synthase / DGAT of Acinetobacter.
+            BlockKind::FatStorage => "atfA",
+            // The SecA export ATPase.
+            BlockKind::VesicleExport => "secA",
+            // Sulfur oxidation (Sox) enzyme.
+            BlockKind::Chemosynthesis => "soxB",
+            // Ribosomal protein S12.
+            BlockKind::ProteinSynthesis => "rpsL",
+            BlockKind::Catalase => "katE",
+            // ECERIFERUM 1, cuticle wax of Arabidopsis.
+            BlockKind::Cuticle => "cer1",
+            // Curli fibres that hold a biofilm together.
+            BlockKind::Multicellularity => "csgA",
+        },
+        EntryId::Protein(protein) => match protein {
+            // Phosphate transporter.
+            MembraneProtein::Transporter => "pitA",
+            // Flagellin.
+            MembraneProtein::Flagellum => "fliC",
+            MembraneProtein::Adhesin => "fimH",
+            // Alpha-hemolysin.
+            MembraneProtein::Toxin => "hla",
+            // Aspartate chemoreceptor.
+            MembraneProtein::Receptor => "tar",
+            // Autolysin of Streptococcus pneumoniae.
+            MembraneProtein::Lytic => "lytA",
+            // Type IV pilin.
+            MembraneProtein::Pilus => "pilA",
+            // The spike of the type VI secretion system.
+            MembraneProtein::Injector => "vgrG",
+        },
+    }
+}
+
 /// The hand-written facts of a membrane protein. No wildcard arm.
 fn protein_facts(protein: MembraneProtein) -> (Facts, String) {
     use Category::*;
@@ -463,6 +530,7 @@ fn gene_entry(kind: BlockKind) -> CodexEntry {
     CodexEntry {
         id: EntryId::Gene(kind),
         name: facts.name,
+        symbol: gene_symbol(EntryId::Gene(kind)),
         category: facts.category,
         stage: facts.stage,
         sources: facts.sources.to_vec(),
@@ -501,6 +569,7 @@ fn protein_entry(protein: MembraneProtein) -> CodexEntry {
     CodexEntry {
         id: EntryId::Protein(protein),
         name: facts.name,
+        symbol: gene_symbol(EntryId::Protein(protein)),
         category: facts.category,
         stage: facts.stage,
         sources: facts.sources.to_vec(),

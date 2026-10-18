@@ -17,6 +17,7 @@ pub mod prepare;
 pub mod run;
 pub mod run_over;
 pub mod stage_complete;
+pub mod zoom;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins((
@@ -28,6 +29,7 @@ pub(crate) fn plugin(app: &mut App) {
         prepare::plugin,
         stage_complete::plugin,
         manage::plugin,
+        zoom::plugin,
     ))
     .add_systems(Startup, spawn_camera)
     .add_systems(Update, (navigation_input, button_colors));
@@ -54,15 +56,19 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-/// Escape goes back to the menu. Tab switches between Run and Manage.
+/// Escape goes back to the menu. Tab zooms between Run and Manage (see
+/// `zoom`).
 fn navigation_input(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
     codex: Res<codex::CodexUi>,
+    genome: Res<codex::GenomeView>,
+    mut zoom: ResMut<zoom::ScreenZoom>,
 ) {
-    // Esc closes the Codex overlay first (see `codex::codex_keys`).
-    if codex.open {
+    // Esc closes the Codex overlay first (see `codex::codex_keys`). While its
+    // camera moves back from the genome, Tab waits.
+    if codex.open || genome.in_view() {
         return;
     }
     let nav = if keys.just_pressed(KeyCode::Escape) {
@@ -72,7 +78,12 @@ fn navigation_input(
     } else {
         return;
     };
-    if let Some(target) = crate::shared::navigate(state.get(), nav) {
+    let Some(target) = crate::shared::navigate(state.get(), nav) else {
+        return;
+    };
+    if nav == crate::shared::Navigation::ToggleManage {
+        zoom.start(state.get(), target);
+    } else {
         next_state.set(target);
     }
 }

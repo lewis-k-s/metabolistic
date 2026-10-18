@@ -59,7 +59,7 @@ const GOLD: Color = Color::srgb(0.95, 0.8, 0.3);
 const CYTOPLASM: Color = Color::srgb(0.05, 0.07, 0.12);
 
 /// The render layer of the map sprites. The run world stays on layer 0.
-pub(super) fn map_layer() -> RenderLayers {
+pub(crate) fn map_layer() -> RenderLayers {
     RenderLayers::layer(1)
 }
 
@@ -177,7 +177,7 @@ pub(super) fn make_valve_clickable(entity: &mut EntityCommands, kind: BlockKind)
 /// The camera of the map. It draws first, on the whole window; the run camera
 /// draws the inset above it (see `inset`). `fit_map` sets its scale and place.
 #[derive(Component)]
-struct MapCamera;
+pub(crate) struct MapCamera;
 
 fn spawn_map_camera(mut commands: Commands) {
     commands.spawn((
@@ -203,7 +203,7 @@ fn spawn_map_camera(mut commands: Commands) {
 /// The layout of the map for the current window. A new value (the window
 /// changed) makes the map systems spawn their sprites again.
 #[derive(Resource, Deref)]
-pub(super) struct MapLayout(pub layout::Layout);
+pub(crate) struct MapLayout(pub layout::Layout);
 
 /// Marks a sprite of the map that is spawned for one layout.
 #[derive(Component)]
@@ -215,9 +215,23 @@ const BOTTOM_MARGIN: f32 = 58.0;
 
 /// Width of the right column (the inset and the side panel), in logical
 /// pixels.
-pub(super) fn right_column_width(window_width: f32) -> f32 {
+pub(crate) fn right_column_width(window_width: f32) -> f32 {
     (window_width * 0.27).clamp(300.0, 440.0)
 }
+
+/// Height of the inset frame at the top of the right column, in logical
+/// pixels. The Codex keeps the same frame, so the inset does not move.
+pub(crate) fn inset_height(window_width: f32) -> f32 {
+    ((right_column_width(window_width) - 16.0) * INSET_ASPECT).round()
+}
+
+/// The inset frame: a UI node that the run inset draws in (see `inset`).
+pub(crate) fn inset_frame(height: f32) -> impl Bundle {
+    inset::frame_bundle(height)
+}
+
+/// Height of the inset frame for each pixel of the column width.
+const INSET_ASPECT: f32 = 0.7;
 
 /// The scale of the map, in physical pixels for each sprite pixel: a whole
 /// number from 2 up (the pixel grid stays even), a quarter step below.

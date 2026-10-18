@@ -97,13 +97,17 @@ fn give_back_run_camera(
     }
 }
 
-/// Puts the run camera's viewport on the frame node.
+/// Puts the run camera's viewport on the visible frame node. The Codex hides
+/// the right column and shows a frame of its own in the same place.
 fn follow_frame(
     window: Query<&Window, With<PrimaryWindow>>,
-    frame: Query<(&ComputedNode, &UiGlobalTransform), With<InsetFrame>>,
+    frames: Query<(&ComputedNode, &UiGlobalTransform, &InheritedVisibility), With<InsetFrame>>,
     mut cameras: Query<&mut Camera, With<RunCamera>>,
 ) {
-    let (Ok(window), Ok((node, transform))) = (window.single(), frame.single()) else {
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Some((node, transform, _)) = frames.iter().find(|(_, _, visible)| visible.get()) else {
         return;
     };
     let border = FRAME_WIDTH * window.scale_factor();

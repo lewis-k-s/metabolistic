@@ -15,6 +15,7 @@ pub mod exchange;
 pub mod gate;
 pub mod interior;
 pub mod genome_damage;
+pub mod genome_map;
 pub mod land;
 pub mod layout;
 pub mod level;

@@ -53,8 +53,6 @@ pub(super) fn plugin(app: &mut App) {
 const PANEL_BG: Color = Color::srgba(0.02, 0.04, 0.09, 0.94);
 const TEXT: Color = Color::srgb(0.9, 0.9, 0.9);
 const BUTTON_BG: BackgroundColor = BackgroundColor(Color::srgb(0.15, 0.15, 0.15));
-/// Height of the inset frame in logical pixels, from the column width.
-const INSET_ASPECT: f32 = 0.7;
 
 // --- Words ---
 
@@ -497,7 +495,7 @@ fn layout_column(
     };
     let width = super::right_column_width(window.width());
     column.width = Val::Px(width);
-    holder.height = Val::Px(((width - 16.0) * INSET_ASPECT).round());
+    holder.height = Val::Px(super::inset_height(window.width()));
 }
 
 #[allow(clippy::too_many_arguments)]

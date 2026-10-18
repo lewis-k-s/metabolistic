@@ -26,8 +26,9 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `run.rs`: death detection and `RunSummary`
 - `world/`: the run world (full only): grid texture, vents, player body (avian2d), camera, HUD
 - `metabolism/`: Core metabolic flow simulation and graph management
-- `codex_catalog.rs`: the catalog of all genes and membrane proteins (`CodexEntry`), pure state and edit rules. A new `BlockKind` or `MembraneProtein` needs one arm in `gene_facts` or `protein_facts`
-- `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`, `run_over`), the Codex overlay (`codex`, key C in Manage), the shared 2D camera, and UI helpers
+- `codex_catalog.rs`: the catalog of all genes and membrane proteins (`CodexEntry`), pure state and edit rules. A new `BlockKind` or `MembraneProtein` needs one arm in `gene_facts` or `protein_facts`, and a real gene symbol in `gene_symbol`
+- `genome_map.rs`: the pure layout of the Codex genome: a circular chromosome folded into rows (`GenomeLayout`), one locus per catalog entry, the wobble and helix formulas, the hit test (`pick`) and the colour of a locus (`Look`). `assets/shaders/genome.wgsl` uses the same geometry
+- `screens/`: One module per screen (`loading`, `menu`, `run`, `manage`, `run_over`), the Codex overlay (`codex`, key C in Manage), the shared 2D camera, the Run <-> Manage zoom (`zoom`), and UI helpers. The Codex is the genome of the cell: `codex/genome_view.rs` draws it below the Manage map and pans the map camera to it (on the menu and Prepare it brings its own camera). While the Codex is open it hides the other screens' root UI nodes
 - `player/`: The player-cell link (`LocalPlayer`, `ControlledCell`) and spawn helpers
 - `shared.rs`: Starter cell and screen navigation (`navigate`, a pure function)
 - `sprites.rs` (`full` only): loads the sheets listed in `assets/sprites/anim/manifest.json` (`Sheets`) and plays them (`Animator`). The art comes from `art/gen_sprites.py`; see `docs/art-direction.md`
@@ -86,7 +87,7 @@ Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `smoke_test`) c
 ### Development Tools (In-Game)
 - **Inspector**: F1 to open runtime debugging and inspection tools
 - **UI Debug**: `` ` `` (backquote) toggles UI node outlines
-- **Screen Navigation**: `Tab` switches Run and Manage; `Esc` returns to the menu
+- **Screen Navigation**: `Tab` zooms between Run and Manage; `Esc` returns to the menu
 
 ## Code Patterns
 

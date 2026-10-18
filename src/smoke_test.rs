@@ -7,6 +7,10 @@
 //! dies, or the player does not move while W is held. Screenshots go to
 //! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
 //!
+//! Zoom: the steps between Run and Manage use the zoom of Tab
+//! (`screens::zoom`), not a direct state change, and save `zoom-*.png` frames
+//! during the first zooms.
+//!
 //! M8 steps: after the second StageComplete the sequence enters land (the smoke
 //! test sets the run state as a won shallow stage would: a carry with
 //! Respiration and its free enzyme). Three Run steps follow: the start with W
@@ -163,12 +167,31 @@ pub fn plugin(app: &mut App) {
         screenshot_requested_at: None,
         run_start: None,
     })
-    .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage))
+    .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage, zoom_shots))
     // After the UI focus system, so that a pressed button stays pressed for the
     // screen's own systems of this frame.
     .add_systems(PreUpdate, (smoke_manage, smoke_codex).after(bevy::ui::UiSystems::Focus))
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
+}
+
+/// Screenshots during the first zooms (every 6 frames), so the move can be
+/// checked by eye.
+fn zoom_shots(
+    zoom: Res<crate::screens::zoom::ScreenZoom>,
+    smoke: Res<SmokeTest>,
+    mut frame: Local<u32>,
+    mut commands: Commands,
+) {
+    if !zoom.busy() {
+        *frame = 0;
+        return;
+    }
+    *frame += 1;
+    if smoke.step <= STEP_RUN_AGAIN && frame.is_multiple_of(6) {
+        let path = smoke.dir.join(format!("zoom-{}-{:02}.png", smoke.step, *frame));
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+    }
 }
 
 #[derive(Resource)]
@@ -194,6 +217,9 @@ fn drive_smoke_test(
         (&Transform, &CurrencyPools, &Membrane, &LocalEnvironment, &GenomeIntegrity),
         With<Cell>,
     >,
+    mut zoom: ResMut<crate::screens::zoom::ScreenZoom>,
+    mut codex: ResMut<crate::screens::codex::CodexUi>,
+    genome: Res<crate::screens::codex::GenomeView>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -220,7 +246,23 @@ fn drive_smoke_test(
         target
     );
     if *state.get() != target {
-        next_state.set(target);
+        // Between Run and Manage the smoke test zooms, as Tab does.
+        let toggle = matches!(
+            (state.get(), &target),
+            (GameState::Run, GameState::Manage) | (GameState::Manage, GameState::Run)
+        );
+        if toggle {
+            // Close the Codex first and let its camera come back, as a player
+            // must.
+            if codex.open {
+                codex.open = false;
+            } else if !zoom.busy() && !genome.in_view() {
+                info!("smoke test: zoom from {:?} to {target:?}", state.get());
+                zoom.start(state.get(), target);
+            }
+        } else {
+            next_state.set(target);
+        }
         return;
     }
     if let Some(target_page) = target_page
@@ -669,7 +711,7 @@ fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
         (STEP_MANAGE_CODEX, 20, GameState::Manage) => {
             let probe = smoke_probe(world);
             assert!(probe.open, "smoke test: C did not open the codex");
-            assert_eq!(probe.cards, all, "smoke test: the codex has a card for every entry");
+            assert_eq!(probe.loci, all, "smoke test: the genome has a locus for every entry");
             if let Some(cell) = world.query_filtered::<&ControlledCell, With<LocalPlayer>>().iter(world).next().map(|c| c.0) {
                 // A full membrane refuses a membrane protein, so queue an enzyme then.
                 let (entry, target) = match first_free_socket(world, cell) {
@@ -715,9 +757,9 @@ fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
         (STEP_MENU_CODEX, 5, GameState::Menu) => smoke_open(world, true),
         (STEP_MENU_CODEX, 20, GameState::Menu) => {
             let probe = smoke_probe(world);
-            assert!(probe.open && probe.cards == all, "smoke test: the menu codex shows {} cards", probe.cards);
+            assert!(probe.open && probe.loci == all, "smoke test: the menu codex shows {} loci", probe.loci);
             smoke_show(world, EntryId::Gene(BlockKind::Fermentation));
-            info!("smoke test: the codex opened from the menu with {} cards", probe.cards);
+            info!("smoke test: the codex opened from the menu with {} loci", probe.loci);
         }
         _ => {}
     }
@@ -790,9 +832,11 @@ fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
         }
         (STEP_MANAGE_PANEL, 20) => {
             // Low, not Off: the limit check below needs the pathway to run.
+            let pressed = smoke_press_level(world, BlockKind::Chemosynthesis, Level::Low);
             assert!(
-                smoke_press_level(world, BlockKind::Chemosynthesis, Level::Low),
-                "smoke test: the panel of a pathway has no level buttons"
+                pressed,
+                "smoke test: the panel of a pathway has no level buttons (panel: {:?})",
+                smoke_probe(world).panel_title
             );
         }
         (STEP_MANAGE_PANEL, 40) => {

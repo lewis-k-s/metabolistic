@@ -486,3 +486,34 @@ has no art. The list below is what is missing now. A pathway icon is
   "?" silhouette. The cards use a flat colour and a black tint now.
 - A still image for each membrane protein. The cards use frame 0 of the `idle`
   clip of its overlay sheet (the east direction).
+
+## The genome view (Codex)
+
+The Codex shows the genome of the cell, not a grid of cards. Every ability
+comes from a gene, so every catalog entry is a locus on one circular
+chromosome. The chromosome is folded into rows, like the loop of a bacterial
+nucleoid, and closes on a spine with `oriC`. `ter` is on a turn on the right.
+
+- **Shader, not sprites.** `assets/shaders/genome.wgsl` draws the strand as a
+  double helix from the segments of `genome_map::GenomeLayout`. Each fragment
+  snaps to a sprite pixel, so the rules above hold at any zoom: hard tone bands,
+  a 1 px outline, light on the crest of the front strand.
+- **Colour means state.** Expressed loci use the player's mint ramp. Enhanced
+  is gold, mutated is crimson (and kinked), silent is cold grey (a flatter,
+  tighter helix with no base pairs). Genes that are only in the codex are a
+  dashed pale-blue ghost. Unknown genes are nearly black. Membrane protein
+  genes are teal. Linker DNA is grey violet.
+- **Glow is dithered.** A locus whose product exists (enzymes or proteins)
+  has a dithered halo that breathes.
+- **Damage shows.** As `GenomeIntegrity` falls, the strand gets single-strand
+  nicks and then breaks of both strands.
+- **It moves a little.** Two slow waves travel along the strand and the helix
+  turns in place. Icons and gene symbols move with the strand.
+- **Icons are 1:1.** Pathway icons are 16 x 16. Membrane proteins use frame 0
+  of the north-pointing row of their overlay sheet, cropped to 24 x 32, so the
+  product grows up out of its gene.
+
+Next step: **nucleosomes.** A later gene (histones) can wrap the linker DNA
+round beads. This is the first step of genome protection against UV: the
+shader can draw the beads on linkers, and `genome_damage` can lower the UV
+damage to the genome.
