@@ -13,6 +13,8 @@
 //! - Light is a condition, like heat. In the vents, all light is UV hazard.
 //! - Minerals are a stock in the cell. Transporters take them from the grid,
 //!   and chemosynthesis uses them up.
+//! - Secreted channels (microcin, slime, siderophore, autoinducer) come only
+//!   from cells. See `secretion`.
 
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -33,16 +35,44 @@ pub enum Channel {
     /// Moisture. Only the land field has any (puddles, the shore, soil pores).
     /// A cell dries out where it is low (see `desiccation`).
     Water,
+    /// Microcin V, a peptide bacteriocin that a cell secretes (see
+    /// `secretion::microcin`).
+    Microcin,
+    /// Slime: extracellular polysaccharide (see `secretion::slime`).
+    Slime,
+    /// Free siderophore (enterobactin), not loaded with iron (see
+    /// `secretion::siderophore`).
+    Siderophore,
+    /// The iron-siderophore complex. A cell with the receptor takes it in as
+    /// Metals.
+    FeSiderophore,
+    /// Autoinducer-2, a quorum signal (see `secretion::autoinducer`).
+    Autoinducer,
 }
 
 impl Channel {
     /// All channels, in a fixed order. `index` is the position in this list.
-    pub const ALL: [Channel; 5] = [
+    pub const ALL: [Channel; 10] = [
         Channel::Heat,
         Channel::Minerals,
         Channel::Light,
         Channel::O2,
         Channel::Water,
+        Channel::Microcin,
+        Channel::Slime,
+        Channel::Siderophore,
+        Channel::FeSiderophore,
+        Channel::Autoinducer,
+    ];
+
+    /// The channels that cells secrete (see `secretion`). No level has a
+    /// source of them: they come only from cells.
+    pub const SECRETED: [Channel; 5] = [
+        Channel::Microcin,
+        Channel::Slime,
+        Channel::Siderophore,
+        Channel::FeSiderophore,
+        Channel::Autoinducer,
     ];
 
     /// Position of the channel in `ALL`. Layers of the grid use it.
@@ -53,7 +83,24 @@ impl Channel {
             Channel::Light => 2,
             Channel::O2 => 3,
             Channel::Water => 4,
+            Channel::Microcin => 5,
+            Channel::Slime => 6,
+            Channel::Siderophore => 7,
+            Channel::FeSiderophore => 8,
+            Channel::Autoinducer => 9,
         }
+    }
+
+    /// Is this a channel that cells secrete?
+    pub const fn is_secreted(self) -> bool {
+        matches!(
+            self,
+            Channel::Microcin
+                | Channel::Slime
+                | Channel::Siderophore
+                | Channel::FeSiderophore
+                | Channel::Autoinducer
+        )
     }
 }
 

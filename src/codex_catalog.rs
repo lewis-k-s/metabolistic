@@ -39,7 +39,7 @@ use crate::stage::Stage;
 use crate::walls::{ADHESIN_CRAWL_SPEED, LYSE_ATP};
 
 /// The pathway icons that exist in `assets/sprites`.
-pub const PATHWAY_ICONS: [(BlockKind, &str); 13] = [
+pub const PATHWAY_ICONS: [(BlockKind, &str); 17] = [
     (BlockKind::Chemosynthesis, "sprites/pathway_icon_chemosynthesis.png"),
     (BlockKind::Fermentation, "sprites/pathway_icon_fermentation.png"),
     (BlockKind::AminoAcidBiosynthesis, "sprites/pathway_icon_amino_acid_biosynthesis.png"),
@@ -53,6 +53,10 @@ pub const PATHWAY_ICONS: [(BlockKind, &str); 13] = [
     (BlockKind::Cuticle, "sprites/pathway_icon_cuticle.png"),
     (BlockKind::NucleotideCofactorSynthesis, "sprites/pathway_icon_nucleotide_cofactor_synthesis.png"),
     (BlockKind::SecondaryMetabolites, "sprites/pathway_icon_secondary_metabolites.png"),
+    (BlockKind::Microcin, "sprites/pathway_icon_microcin.png"),
+    (BlockKind::Slime, "sprites/pathway_icon_slime.png"),
+    (BlockKind::Siderophore, "sprites/pathway_icon_siderophore.png"),
+    (BlockKind::Autoinducer, "sprites/pathway_icon_autoinducer.png"),
 ];
 
 /// The icon file of a gene (a path under `assets/`), if it has art.
@@ -346,6 +350,34 @@ fn gene_facts(kind: BlockKind) -> Facts {
             &[Gate],
             "Volvox cells live in a hollow colony. Dictyostelium cells join into a slug when food is short.",
         ),
+        BlockKind::Microcin => (
+            "Microcin",
+            Interaction,
+            Some(Stage::Vents),
+            &[Engulf],
+            "E. coli pumps out microcin V, a small bacteriocin that breaks the membrane of close relatives. An immunity protein keeps the producer safe.",
+        ),
+        BlockKind::Slime => (
+            "Slime",
+            Defence,
+            Some(Stage::Vents),
+            &[Engulf],
+            "Pseudomonas aeruginosa secretes the Pel polysaccharide. The slime of a biofilm makes the water thick and keeps grazers away.",
+        ),
+        BlockKind::Siderophore => (
+            "Siderophore",
+            Interaction,
+            Some(Stage::ShallowWater),
+            &[Engulf],
+            "E. coli releases enterobactin. It pulls iron off rust and comes back in through the receptor FepA.",
+        ),
+        BlockKind::Autoinducer => (
+            "AI-2 call",
+            Interaction,
+            Some(Stage::ShallowWater),
+            &[Engulf],
+            "LuxS makes autoinducer-2, a quorum signal that many species sense. E. coli swims towards it and forms clumps.",
+        ),
     };
     Facts { name, category, stage, sources, note }
 }
@@ -393,6 +425,14 @@ pub fn gene_symbol(id: EntryId) -> &'static str {
             BlockKind::Cuticle => "cer1",
             // Curli fibres that hold a biofilm together.
             BlockKind::Multicellularity => "csgA",
+            // Microcin V of E. coli.
+            BlockKind::Microcin => "cvaC",
+            // The Pel polysaccharide of Pseudomonas aeruginosa.
+            BlockKind::Slime => "pelA",
+            // Enterobactin synthase.
+            BlockKind::Siderophore => "entF",
+            // The AI-2 synthase.
+            BlockKind::Autoinducer => "luxS",
         },
         EntryId::Protein(protein) => match protein {
             // Phosphate transporter.
@@ -470,7 +510,7 @@ fn protein_facts(protein: MembraneProtein) -> (Facts, String) {
                 "Myxococcus and Bdellovibrio extend a type IV pilus (the ATPase PilB adds subunits). The tip sticks to a surface or to prey. The ATPase PilT then removes subunits, the fibre shrinks, and it pulls with a force of many piconewtons. This is twitching motility.",
             ),
             format!(
-                "Press to shoot along the aim (range {PILUS_RANGE} px). Hold to reel in at {PILUS_RETRACT_SPEED} px per second. A smaller cell comes to you, so you can engulf it. A bigger cell or a wall pulls you to it. Release to let go."
+                "Press to shoot along the aim (range {PILUS_RANGE} px). Hold to keep it attached, and scroll down to reel in (at {PILUS_RETRACT_SPEED} px per second) or up to pay out. A smaller cell comes to you, so you can engulf it. A bigger cell or a wall pulls you to it. Release to let go."
             ),
         ),
         MembraneProtein::Injector => (

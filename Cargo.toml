@@ -8,6 +8,20 @@ default-run = "metabolistic3d"
 [lib]
 name = "metabolistic3d"
 path = "src/lib.rs"
+# No doctests: each one is a separate crate that links all of Bevy, and the
+# examples in the doc comments are `no_run` or not Rust.
+doctest = false
+
+# main.rs has no tests: do not build a test harness for it.
+[[bin]]
+name = "metabolistic3d"
+path = "src/main.rs"
+test = false
+
+# `cargo test` does not build the example.
+[[example]]
+name = "offscreen_spike"
+test = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -38,8 +52,16 @@ avian2d = { version = "0.7", optional = true, default-features = false, features
   "f32",
   "parry-f32",
   "parallel",
+  # The pilus joint (`world::pilus_view`). Without it avian ignores all joints.
+  "xpbd_joints",
 ] }
-bevy-inspector-egui = { version = "0.37", optional = true }
+# No default features: they pull in the 3D renderer (bevy_pbr) and reflect
+# docs for every type. The game is 2D only.
+bevy-inspector-egui = { version = "0.37", optional = true, default-features = false, features = [
+  "2d",
+  "bevy_gizmos",
+  "egui_clipboard",
+] }
 # bevy-inspector-egui 0.37 needs bevy_egui 0.40 and egui 0.34.
 bevy_egui = { version = "0.40", optional = true }
 egui = { version = "0.34", optional = true }
@@ -56,10 +78,32 @@ default = [
   "full",
 ]
 
-# Full build with graphics, audio, UI, and the egui inspector
+# Full build with 2D graphics, UI, and the egui inspector.
+# The Bevy parts are listed one by one instead of `bevy/default`: the game does
+# not use 3D (pbr, gltf), audio, gamepads (gilrs), scenes, UI widgets or
+# sysinfo, and each of them adds compile time and size to the Bevy dylib.
+# Add a part here when the game starts to use it (see Bevy's Cargo.toml for
+# the names).
 full = [
-  "bevy/default",
-  "bevy/bevy_gizmos",
+  "bevy/default_app",
+  "bevy/std",
+  "bevy/multi_threaded",
+  "bevy/bevy_winit",
+  "bevy/bevy_clipboard",
+  "bevy/default_font",
+  "bevy/custom_cursor",
+  # Web and Linux window backends. They compile nothing on macOS.
+  "bevy/webgl2",
+  "bevy/x11",
+  "bevy/wayland",
+  # Sprites, meshes, cameras, gizmos, text, png and the 2D render pipeline.
+  "bevy/2d_bevy_render",
+  "bevy/ui_api",
+  "bevy/ui_bevy_render",
+  # `Pickable` and `Pointer<..>` events (the Manage map).
+  "bevy/bevy_picking",
+  "bevy/sprite_picking",
+  "bevy/ui_picking",
   "bevy/bevy_ui_debug",
   "dep:avian2d",
   "dep:bevy-inspector-egui",
@@ -79,7 +123,8 @@ tui = ["dep:ratatui", "dep:crossterm"]
 dev = [
   # Improve compile times for dev builds by linking Bevy as a dynamic library.
   "bevy/dynamic_linking",
-  "bevy/bevy_dev_tools",
+  # No `bevy/bevy_dev_tools`: the game does not use it, and it pulls in
+  # bevy_pbr. The UI outlines (backquote) come from `bevy/bevy_ui_debug`.
 ]
 dev_native = [
   "dev",
@@ -92,12 +137,16 @@ dev_native = [
 # Enable a small amount of optimization in debug mode
 [profile.dev]
 opt-level = 1
+# File and line numbers for backtraces and panics, but no variable or type
+# info. Faster codegen and links, and less memory when agents build in parallel.
+# Set `debug = true` for a session in a debugger.
+debug = "line-tables-only"
 
 # Enable high optimizations for dependencies (incl. Bevy), but not for our code:
 [profile.dev.package."*"]
 opt-level = 3
 # No debug info for dependencies: smaller target dir and faster links.
-# Our own crate keeps full debug info.
+# Our own crate keeps line tables only (see `[profile.dev]`).
 debug = false
 
 # Remove expensive debug assertions due to <https://github.com/bevyengine/bevy/issues/14291>

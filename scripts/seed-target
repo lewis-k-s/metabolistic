@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Seed the target/debug of a new worktree with an APFS clone of the main
+# checkout's target/debug, so that the first build does not compile all of
+# Bevy again (4-8 min). A clone uses no disk space until a file changes.
+#
+# It does nothing in the main checkout, or when target/debug already exists.
+# `--background` returns at once and clones in a detached process (the
+# SessionStart hook in .claude/settings.json uses it). The clone goes to a
+# temporary directory first and moves into place only if no build has made
+# target/debug in the meantime.
+#
+# Run it by hand in a Codex worktree: scripts/seed-target
+set -euo pipefail
+
+top=$(git rev-parse --show-toplevel)
+main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+src="$main/target/debug"
+dst="$top/target/debug"
+
+[[ $top == "$main" ]] && exit 0
+[[ -e $dst ]] && exit 0
+[[ -d $src ]] || exit 0
+
+seed() {
+  local tmp="$top/target/.seed-$$"
+  local start=$SECONDS
+  mkdir -p "$tmp"
+  [[ -e $top/target/CACHEDIR.TAG ]] || cp -p "$main/target/CACHEDIR.TAG" "$top/target/" 2>/dev/null || true
+  # Only the compiled dependencies. `incremental` holds the cache of our own
+  # crate, which is keyed to the main checkout's path. -p keeps the mtimes, so
+  # that cargo does not see the clones as newer than their dependents.
+  for d in deps build .fingerprint; do
+    [[ -d $src/$d ]] && cp -c -p -R "$src/$d" "$tmp/"
+  done
+  if [[ -e $dst ]]; then
+    rm -rf "$tmp"
+    echo "seed-target: a build made $dst first; clone discarded" >&2
+  else
+    mv "$tmp" "$dst"
+    echo "seed-target: cloned $src to $dst in $((SECONDS - start)) s" >&2
+  fi
+}
+
+if [[ ${1:-} == --background ]]; then
+  mkdir -p "$top/target"
+  nohup bash -c "$(declare -f seed); top='$top' main='$main' src='$src' dst='$dst'; seed" \
+    >"$top/target/seed-target.log" 2>&1 &
+  echo "seed-target: cloning the main target/debug in the background (log: target/seed-target.log)"
+else
+  seed
+fi

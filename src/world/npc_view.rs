@@ -24,7 +24,7 @@ use crate::cell::{Cell, CellSize};
 use crate::engulf::{EngulfEvent, EngulfIntent};
 use crate::gate::GateWon;
 use crate::npc::{Archetype, Npc, NpcDied, spec};
-use crate::particles::{FoodParticle, MetalPickup, Virus};
+use crate::particles::{FoodParticle, MetalPickup, RustPickup, Virus};
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::sprites::{Animator, Sheets, SpriteSystems, clip, direction_row};
 use crate::world::player_body::{BlobSprite, attach_body_for};
@@ -48,6 +48,7 @@ pub struct EngulfFx {
 pub fn plugin(app: &mut App) {
     app.add_observer(food_sprite)
         .add_observer(metal_sprite)
+        .add_observer(rust_sprite)
         .add_observer(virus_sprite)
         .add_observer(droplet_sprite)
         .add_systems(
@@ -71,8 +72,11 @@ pub fn plugin(app: &mut App) {
 // --- Bodies ---
 
 /// Adds the body and the sprite to each new NPC.
+///
+/// An NPC can be despawned in the frame it appears (engulfed, or dead) before
+/// this system's commands run, so the body goes on in a command that checks
+/// that the NPC is still there.
 fn attach_npc_bodies(
-    sheets: Res<Sheets>,
     npcs: Query<(Entity, &Npc, &CellSize, Option<&crate::gate::GateSprite>), Added<Npc>>,
     mut commands: Commands,
 ) {
@@ -80,8 +84,18 @@ fn attach_npc_bodies(
         // The level picks the sprite of its gate cell.
         let sprite = gate_sprite.map_or(spec(npc.archetype).sprite, |g| g.0);
         let gate = npc.archetype == Archetype::Gate;
-        let first = if gate { clip::IDLE } else { clip::SPAWN };
-        attach_body_for(&mut commands, &sheets, entity, size, sprite, first, gate);
+        let size = *size;
+        commands.queue(move |world: &mut World| {
+            if world.get_entity(entity).is_err() {
+                return;
+            }
+            let first = if gate { clip::IDLE } else { clip::SPAWN };
+            world.resource_scope(|world, sheets: Mut<Sheets>| {
+                let mut commands = world.commands();
+                attach_body_for(&mut commands, &sheets, entity, &size, sprite, first, gate);
+            });
+            world.flush();
+        });
     }
 }
 
@@ -129,6 +143,21 @@ fn metal_sprite(
     commands.queue(set_z(added.entity, PARTICLE_Z));
 }
 
+/// Rust: the metal sprite in a rust-brown tint until it has its own art.
+fn rust_sprite(
+    added: On<Add, RustPickup>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    let mut sprite = Sprite::from_image(asset_server.load("sprites/pickup_metal_fes.png"));
+    sprite.color = RUST_TINT;
+    commands.entity(added.entity).insert((sprite, Visibility::default(), DespawnOnExit(InRun)));
+    commands.queue(set_z(added.entity, PARTICLE_Z));
+}
+
+/// The tint of a rust pickup: the shadow tone of the `pigment` ramp, `#d0541a`.
+const RUST_TINT: Color = Color::srgb(0.816, 0.329, 0.102);
+
 fn virus_sprite(added: On<Add, Virus>, sheets: Res<Sheets>, mut commands: Commands) {
     if let Some(sprite) = sheets.bundle("virus_phage", clip::IDLE) {
         commands.entity(added.entity).insert((sprite, Visibility::default(), DespawnOnExit(InRun)));
@@ -163,9 +192,15 @@ fn fade_droplets(mut droplets: Query<(&ToxinDroplet, &mut Sprite)>) {
 fn spawn_death_fx(
     mut died: MessageReader<NpcDied>,
     sheets: Res<Sheets>,
+    shader: Res<crate::world::shader_cells::ShaderCells>,
+    canvas: Res<crate::world::shader_cells::Canvas>,
     mut commands: Commands,
 ) {
     for death in died.read() {
+        // A shader body bursts instead (`shader_cells::spawn_lysis`).
+        if shader.0 && canvas.is_open() {
+            continue;
+        }
         let Some(bundle) = sheets.bundle(spec(death.archetype).sprite, clip::DEATH) else {
             continue;
         };
@@ -278,5 +313,46 @@ fn hide_body_during_engulf(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An NPC that is despawned in the frame it appears must not crash the
+    /// attach step (it did, when engulfed by a predator on its first frame).
+    #[test]
+    fn an_npc_despawned_in_its_first_frame_gets_no_body() {
+        let mut app = App::new();
+        app.init_resource::<Sheets>().add_systems(
+            Update,
+            (
+                attach_npc_bodies,
+                |npcs: Query<Entity, With<Npc>>, mut commands: Commands| {
+                    for entity in &npcs {
+                        commands.entity(entity).despawn();
+                    }
+                },
+            ),
+        );
+        let npc = app
+            .world_mut()
+            .spawn((Npc { archetype: Archetype::Prey }, CellSize::default()))
+            .id();
+        app.update();
+        assert!(app.world().get_entity(npc).is_err());
+    }
+
+    #[test]
+    fn a_living_npc_gets_a_body() {
+        let mut app = App::new();
+        app.init_resource::<Sheets>().add_systems(Update, attach_npc_bodies);
+        let npc = app
+            .world_mut()
+            .spawn((Npc { archetype: Archetype::Prey }, CellSize::default()))
+            .id();
+        app.update();
+        assert!(app.world().entity(npc).contains::<avian2d::prelude::RigidBody>());
     }
 }

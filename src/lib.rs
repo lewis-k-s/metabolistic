@@ -5,6 +5,7 @@ use bevy::state::app::StatesPlugin;
 pub mod actions;
 pub mod blocks;
 pub mod cell;
+pub mod cell_look;
 pub mod codex;
 pub mod codex_catalog;
 pub mod desiccation;
@@ -34,6 +35,7 @@ pub mod prepare;
 pub mod proteins;
 pub mod run;
 pub mod scenario;
+pub mod secretion;
 pub mod shallow;
 pub mod shapes;
 pub mod shelter;
@@ -46,15 +48,23 @@ pub mod tui;
 
 // Graphical modules: only in `full` builds.
 #[cfg(feature = "full")]
+pub mod agent_script;
+#[cfg(feature = "full")]
 pub mod debug;
 #[cfg(feature = "full")]
 pub mod dev_tools;
 #[cfg(feature = "full")]
 pub mod inspector;
 #[cfg(feature = "full")]
+pub mod look_gallery;
+#[cfg(feature = "full")]
+pub mod offscreen;
+#[cfg(feature = "full")]
 pub mod screens;
 #[cfg(feature = "full")]
 pub mod smoke_test;
+#[cfg(feature = "full")]
+pub mod playtest;
 #[cfg(feature = "full")]
 pub mod sprites;
 #[cfg(feature = "full")]
@@ -106,18 +116,29 @@ impl MetabolisticApp {
 
         #[cfg(feature = "full")]
         {
-            app.add_plugins(
-                DefaultPlugins
-                    .set(WindowPlugin {
-                        primary_window: Some(Window {
-                            title: "Metabolistic".into(),
-                            ..default()
-                        }),
-                        ..default()
-                    })
-                    // Pixel art: no smoothing when sprites are scaled.
-                    .set(ImagePlugin::default_nearest()),
-            );
+            // Agents get offscreen mode: no OS window (see `offscreen`).
+            let offscreen = offscreen::requested();
+            let window = if offscreen {
+                offscreen::window("Metabolistic")
+            } else {
+                Window {
+                    title: "Metabolistic".into(),
+                    ..default()
+                }
+            };
+            let plugins = DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // Pixel art: no smoothing when sprites are scaled.
+                .set(ImagePlugin::default_nearest());
+            if offscreen {
+                app.add_plugins(offscreen::configure(plugins))
+                    .add_plugins(offscreen::plugin);
+            } else {
+                app.add_plugins(plugins);
+            }
         }
 
         app // State management
@@ -144,7 +165,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
-            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin, secretion::SecretionPlugin))
             // The game picks mutated genes at random; tests use a fixed seed.
             .insert_resource(genome_damage::GeneRng::from_entropy())
             .insert_resource(npc::NpcRng::from_entropy());
@@ -165,6 +186,15 @@ impl MetabolisticApp {
             }
             if smoke_test::requested() {
                 app.add_plugins(smoke_test::plugin);
+            }
+            if playtest::requested() {
+                app.add_plugins(playtest::plugin);
+            }
+            if agent_script::requested() {
+                app.add_plugins(agent_script::plugin);
+            }
+            if look_gallery::requested() {
+                app.add_plugins(look_gallery::plugin);
             }
         }
 
@@ -203,7 +233,7 @@ impl MetabolisticApp {
             .add_plugins(scenario::ScenarioPlugin)
             .add_plugins(shelter::ShelterPlugin)
             .add_plugins(actions::ActionsPlugin)
-            .add_plugins((pilus::PilusPlugin, stun::StunPlugin))
+            .add_plugins((pilus::PilusPlugin, stun::StunPlugin, secretion::SecretionPlugin))
             // Metabolic ticks run only on `metabolism::run_metabolic_tick`, not
             // from real time.
             .insert_resource(metabolism::FlowmapTimingConfig::manual());

@@ -129,11 +129,21 @@
       "label": "Bacillus",
       "archetype": "Prey"
     },
+    "prey_microcin": {
+      "label": "Bacillus (Microcin)",
+      "archetype": "Prey",
+      "signature": "Microcin"
+    },
     "prey_secondarymetabolites": {
       "label": "Pigmented bacillus",
       "archetype": "Prey",
       "signature": "SecondaryMetabolites",
       "notes": "Carries the pigment gene (UV shield). Waits in the dim edge under shaft A."
+    },
+    "prey_slime": {
+      "label": "Bacillus (Slime)",
+      "archetype": "Prey",
+      "signature": "Slime"
     },
     "symbiont": {
       "label": "Symbiont",
@@ -164,7 +174,7 @@
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_microcin",
       "at": [
         60.0,
         170.0
@@ -178,7 +188,7 @@
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_slime",
       "at": [
         -150.0,
         100.0
@@ -234,14 +244,14 @@
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_microcin",
       "at": [
         470.0,
         440.0
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_slime",
       "at": [
         -40.0,
         330.0

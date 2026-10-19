@@ -1,0 +1,19 @@
+{
+  "stage": "ShallowWater",
+  "seed": 1,
+  "genes": {
+    "LightCapture": "Expressed",
+    "Catalase": "Expressed",
+    "Siderophore": "Expressed",
+    "Autoinducer": "Expressed"
+  },
+  "enzymes": { "LightCapture": 1, "Catalase": 1, "Siderophore": 1, "Autoinducer": 1 },
+  "membrane": { "Flagellum": 2 },
+  "actions": [
+    null,
+    null,
+    null,
+    "InduceMutation"
+  ],
+  "pools": { "ATP": 300, "CarbonSkeletons": 80 }
+}

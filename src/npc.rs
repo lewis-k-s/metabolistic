@@ -25,6 +25,16 @@
 //! Each archetype has a small genome with one signature gene. Engulfing a cell
 //! can give that gene to the engulfer (gene transfer).
 //!
+//! ## Secreted clouds
+//!
+//! NPCs also sense the clouds that the player secretes (`CloudSenses`, see
+//! `secretion`):
+//!
+//! - Prey swim away from a microcin cloud (`secretion::microcin::AVOID`).
+//! - A symbiont in an AI-2 quorum closes in to contact, and its exchange runs
+//!   faster. With no player, it swims up the AI-2 call.
+//! - A predator with no prey in sight swims up the AI-2 call (it eavesdrops).
+//!
 //! An NPC dies when its membrane reaches 0 or its ATP runs out. It drops food.
 
 use bevy::prelude::*;
@@ -32,6 +42,7 @@ use rand::prelude::*;
 
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, CellSize, death_cause};
+use crate::cell_look::{BodyLook, CellLook, look_for};
 use crate::engulf::{EngulfIntent, GateCell, can_engulf};
 use crate::envgrid::{CELL_SIZE, EnvGrid};
 use crate::environment::Channel;
@@ -43,6 +54,7 @@ use crate::particles::spawn_food;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome};
 use crate::shelter::{Shelter, Shelters, point_in_shelter};
+use crate::secretion::autoinducer;
 use crate::stun::Stunned;
 
 // --- Tuning. All of these need **playtest**. ---
@@ -219,6 +231,7 @@ pub fn spawn_npc(
         Transform::from_translation(position.extend(0.0)),
         NpcBrain::new(index),
         EngulfIntent(archetype == Archetype::Predator),
+        BodyLook(look_for(archetype, signature)),
         Name::new(format!("{archetype:?}")),
     ));
     if archetype == Archetype::Gate {
@@ -234,6 +247,15 @@ pub fn spawn_npc(
 pub struct Neighbour {
     pub position: Vec2,
     pub radius: f32,
+}
+
+/// The secreted clouds at an NPC: levels, and gradients (any length).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CloudSenses {
+    pub microcin: f32,
+    pub microcin_gradient: Vec2,
+    pub autoinducer: f32,
+    pub autoinducer_gradient: Vec2,
 }
 
 /// What an NPC senses.
@@ -259,6 +281,8 @@ pub struct Senses<'a> {
     pub wander: Vec2,
     /// The shelters of the level. Hostile cells do not enter them.
     pub shelters: &'a [Shelter],
+    /// The clouds that cells secrete.
+    pub clouds: CloudSenses,
 }
 
 fn within(senses: &Senses, other: &Neighbour) -> bool {
@@ -276,6 +300,12 @@ fn heat_escape(senses: &Senses) -> Option<Vec2> {
     }
     let hazard = senses.heat > HEAT_AVOID || senses.light > LIGHT_AVOID;
     hazard.then(|| away.normalize_or(-senses.wander))
+}
+
+/// Away from a microcin cloud, if the level is above `microcin::AVOID`.
+fn microcin_escape(senses: &Senses) -> Option<Vec2> {
+    (senses.clouds.microcin > crate::secretion::microcin::AVOID)
+        .then(|| (-senses.clouds.microcin_gradient).normalize_or(-senses.wander))
 }
 
 /// The wish of an NPC with nothing else to do: along the mineral gradient, with
@@ -303,7 +333,9 @@ pub fn steer(archetype: Archetype, senses: &Senses) -> Vec2 {
             if away != Vec2::ZERO {
                 return away.normalize();
             }
-            heat_escape(senses).unwrap_or_else(|| forage(senses))
+            heat_escape(senses)
+                .or_else(|| microcin_escape(senses))
+                .unwrap_or_else(|| forage(senses))
         }
         Archetype::Predator => {
             // Turn away from a shelter: hostile cells do not enter.
@@ -329,19 +361,29 @@ pub fn steer(archetype: Archetype, senses: &Senses) -> Vec2 {
             if let Some(prey) = prey {
                 return (prey.position - senses.position).normalize_or_zero();
             }
-            heat_escape(senses).unwrap_or_else(|| forage(senses))
+            heat_escape(senses)
+                .or_else(|| {
+                    autoinducer::eavesdrop(senses.clouds.autoinducer, senses.clouds.autoinducer_gradient)
+                })
+                .unwrap_or_else(|| forage(senses))
         }
         Archetype::Symbiont => {
             if let Some(player) = senses.player {
                 let gap = senses.position.distance(player.position) - senses.radius - player.radius;
-                let strength = ((gap - FOLLOW_GAP) / FOLLOW_EASE).clamp(0.0, 1.0);
+                // In a quorum the symbiont closes in to contact (a clump).
+                let follow_gap = autoinducer::follow_gap(senses.clouds.autoinducer, FOLLOW_GAP);
+                let strength = ((gap - follow_gap) / FOLLOW_EASE).clamp(0.0, 1.0);
                 let toward = (player.position - senses.position).normalize_or_zero();
                 if strength > 0.0 {
                     return toward * strength;
                 }
                 return Vec2::ZERO;
             }
-            heat_escape(senses).unwrap_or_else(|| forage(senses) * 0.5)
+            heat_escape(senses)
+                .or_else(|| {
+                    autoinducer::recruit(senses.clouds.autoinducer, senses.clouds.autoinducer_gradient)
+                })
+                .unwrap_or_else(|| forage(senses) * 0.5)
         }
     }
 }
@@ -415,6 +457,21 @@ pub fn gradient(grid: &EnvGrid, channel: Channel, position: Vec2) -> Vec2 {
         grid.sample(channel, position + Vec2::X * h) - grid.sample(channel, position - Vec2::X * h),
         grid.sample(channel, position + Vec2::Y * h) - grid.sample(channel, position - Vec2::Y * h),
     )
+}
+
+/// The secreted clouds at a position. A dormant channel gives 0 without
+/// sampling.
+pub fn cloud_senses(grid: &EnvGrid, position: Vec2) -> CloudSenses {
+    let mut clouds = CloudSenses::default();
+    if !grid.is_dormant(Channel::Microcin) {
+        clouds.microcin = grid.sample(Channel::Microcin, position);
+        clouds.microcin_gradient = gradient(grid, Channel::Microcin, position);
+    }
+    if !grid.is_dormant(Channel::Autoinducer) {
+        clouds.autoinducer = grid.sample(Channel::Autoinducer, position);
+        clouds.autoinducer_gradient = gradient(grid, Channel::Autoinducer, position);
+    }
+    clouds
 }
 
 /// Decides the move of each NPC a few times a second.
@@ -502,6 +559,7 @@ pub fn npc_steering_system(
             None => (Vec2::ZERO, 0.0, Vec2::ZERO, 0.0, Vec2::ZERO),
         };
         let (light, light_gradient) = if like_light { (0.0, Vec2::ZERO) } else { (light, light_gradient) };
+        let clouds = grid.as_deref().map_or_else(CloudSenses::default, |grid| cloud_senses(grid, position));
         let senses = Senses {
             position,
             radius: world_radius(size),
@@ -515,6 +573,7 @@ pub fn npc_steering_system(
             light_gradient,
             wander: Vec2::new(brain.heading.cos(), brain.heading.sin()),
             shelters: &shelters.0,
+            clouds,
         };
         let wish = steer(npc.archetype, &senses);
         let wanted = wish * speed_fraction(spec.speed, proteome, size);
@@ -527,6 +586,7 @@ pub fn npc_steering_system(
 /// A symbiont in contact with the player gives carbon and gets ATP.
 pub fn symbiont_exchange_system(
     timing: Res<FlowmapTimingConfig>,
+    grid: Option<Res<EnvGrid>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     symbionts: Query<(Entity, &Npc, &Transform, &CellSize)>,
     bodies: Query<(&Transform, &CellSize), With<Cell>>,
@@ -555,16 +615,19 @@ pub fn symbiont_exchange_system(
             else {
                 continue;
             };
+            // A symbiont in an AI-2 quorum trades faster.
+            let call = grid.as_deref().map_or(0.0, |g| g.sample(Channel::Autoinducer, transform.translation.truncate()));
+            let rate = autoinducer::exchange_rate(call);
             let carbon = balance_flow(
                 symbiont_pools.get(Currency::CarbonSkeletons),
                 player_pools.get(Currency::CarbonSkeletons),
-                SYMBIONT_RATE,
+                rate,
                 dt,
             );
             let atp = balance_flow(
                 player_pools.get(Currency::ATP),
                 symbiont_pools.get(Currency::ATP),
-                SYMBIONT_RATE,
+                rate,
                 dt,
             );
             if let Ok(mut s) = pools.get_mut(entity) {
@@ -584,15 +647,18 @@ pub fn symbiont_exchange_system(
 pub struct NpcDied {
     pub archetype: Archetype,
     pub position: Vec2,
+    /// The body, for the lysis of a shader body.
+    pub look: CellLook,
+    pub size: CellSize,
 }
 
 /// An NPC with a broken membrane (or no ATP) dies and drops food.
 pub fn npc_death_system(
-    npcs: Query<(Entity, &Npc, &Transform, &CurrencyPools, &Membrane, &CellTick), With<Cell>>,
+    npcs: Query<(Entity, &Npc, &Transform, &CurrencyPools, &Membrane, &CellTick, &CellSize, Option<&BodyLook>), With<Cell>>,
     mut died: MessageWriter<NpcDied>,
     mut commands: Commands,
 ) {
-    for (entity, npc, transform, pools, membrane, tick) in &npcs {
+    for (entity, npc, transform, pools, membrane, tick, size, look) in &npcs {
         // ATP changes only when the cell ticks: check it then.
         if npc.archetype == Archetype::Gate {
             continue;
@@ -606,6 +672,8 @@ pub fn npc_death_system(
         died.write(NpcDied {
             archetype: npc.archetype,
             position,
+            look: look.map_or_else(|| look_for(npc.archetype, None), |l| l.0),
+            size: *size,
         });
         commands.entity(entity).despawn();
     }
@@ -796,6 +864,7 @@ mod tests {
             light_gradient: Vec2::ZERO,
             wander: Vec2::X,
             shelters: &[],
+            clouds: CloudSenses::default(),
         }
     }
 
@@ -1009,5 +1078,52 @@ mod tests {
     #[test]
     fn contact_distance_matches_the_engulf_contact_gap() {
         assert!(SYMBIONT_CONTACT_GAP > CONTACT_GAP, "exchange starts before engulf range");
+    }
+
+    #[test]
+    fn prey_swim_out_of_a_microcin_cloud() {
+        let mut s = senses(&[]);
+        s.clouds.microcin = crate::secretion::microcin::AVOID * 4.0;
+        s.clouds.microcin_gradient = Vec2::new(2.0, 0.0); // the cloud is to the east
+        let wish = steer(Archetype::Prey, &s);
+        assert!(wish.x < -0.9, "west, away from the cloud: {wish}");
+        // A weak cloud is ignored.
+        s.clouds.microcin = crate::secretion::microcin::AVOID * 0.5;
+        assert!(steer(Archetype::Prey, &s).x >= 0.0);
+        // A predator does not care: it has no receptor.
+        s.clouds.microcin = 100.0;
+        assert!(steer(Archetype::Predator, &s).x >= 0.0);
+    }
+
+    #[test]
+    fn a_predator_with_no_prey_follows_the_ai2_call() {
+        let mut s = senses(&[]);
+        s.radius = 25.0;
+        s.clouds.autoinducer = autoinducer::EAVESDROP * 3.0;
+        s.clouds.autoinducer_gradient = Vec2::new(0.0, -1.0);
+        assert_eq!(steer(Archetype::Predator, &s), Vec2::NEG_Y);
+        // Prey in sight comes first.
+        let prey = [neighbour(50.0, 0.0, 11.25)];
+        let mut s2 = senses(&prey);
+        s2.radius = 25.0;
+        s2.clouds = s.clouds;
+        assert_eq!(steer(Archetype::Predator, &s2), Vec2::X);
+    }
+
+    #[test]
+    fn a_symbiont_in_quorum_closes_in_to_contact() {
+        // The symbiont is 3 px from the player's rim: inside the normal gap.
+        let player = neighbour(9.5 + 20.0 + 3.0, 0.0, 20.0);
+        let mut s = senses(&[]);
+        s.radius = 9.5;
+        s.player = Some(player);
+        assert_eq!(steer(Archetype::Symbiont, &s), Vec2::ZERO, "near enough");
+        s.clouds.autoinducer = autoinducer::QUORUM;
+        let wish = steer(Archetype::Symbiont, &s);
+        assert!(wish.x > 0.0, "in quorum it closes in: {wish}");
+        // With no player it swims up the call.
+        s.player = None;
+        s.clouds.autoinducer_gradient = Vec2::Y;
+        assert_eq!(steer(Archetype::Symbiont, &s), Vec2::Y);
     }
 }

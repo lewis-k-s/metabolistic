@@ -21,6 +21,8 @@ pub fn reference(channel: Channel) -> f32 {
         Channel::Light => 10.0,
         Channel::O2 => 5.0,
         Channel::Water => 1.0,
+        // Secretion clouds: cells make them in a run; a level has none.
+        _ => 1.0,
     }
 }
 

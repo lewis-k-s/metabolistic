@@ -50,28 +50,39 @@ use std::path::PathBuf;
 use avian2d::prelude::{LinearVelocity, Position};
 
 use crate::GameState;
-use crate::engulf::Invulnerable;
-use crate::gate::GateProgress;
-use crate::npc::{Archetype, Npc};
-use crate::run::RunSummary;
 use crate::actions::{Level, PathwayLevels};
 use crate::blocks::genome::BlockKind;
 use crate::cell::{Cell, CellSize, membrane_slots};
+use crate::engulf::Invulnerable;
 use crate::environment::{Channel, LocalEnvironment};
+use crate::gate::GateProgress;
 use crate::genome_damage::GenomeIntegrity;
 use crate::membrane::Membrane;
+use bevy::diagnostic::FrameCount;
 use crate::metabolism::CurrencyPools;
 use crate::molecules::Currency;
+use crate::npc::{Archetype, Npc};
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{MembraneProtein, ProteinTarget, Proteome, QueueProtein, SynthesisQueue};
+use crate::run::RunSummary;
 use crate::screens::menu::MenuPage;
 
-/// Frames to stay in each state before the screenshot. The first frames compile
+/// The test measures time, not frames, so that it behaves the same at 60 fps
+/// and at 144 fps. One tick is 1/60 s of real time (of virtual time in a Run
+/// step, see `drive_smoke_test`); the step lengths and check
+/// points below are in ticks.
+const TICKS_PER_SECOND: f32 = 60.0;
+/// Ticks to stay in each state before the screenshot. The first frames compile
 /// shaders, so the first state gets more.
-const FRAMES_PER_STATE: u32 = 120;
-const FIRST_STATE_EXTRA_FRAMES: u32 = 120;
-/// Frames to wait after a screenshot request, so it is written before we move on.
-const SCREENSHOT_SETTLE_FRAMES: u32 = 10;
+const TICKS_PER_STATE: u32 = 120;
+const FIRST_STATE_EXTRA_TICKS: u32 = 120;
+/// A Run step with W held lasts longer, so that the distance check has margin
+/// against the drag on dry land.
+const RUN_STEP_TICKS: u32 = 300;
+/// Frames between the codex button press and the check of the queue.
+const CODEX_PRESS_FRAMES: u32 = 3;
+/// Ticks to wait after a screenshot request, so it is written before we move on.
+const SCREENSHOT_SETTLE_TICKS: u32 = 10;
 
 /// Frames that `Loading` may take before it counts as stuck.
 const MAX_LOADING_FRAMES: u32 = 600;
@@ -156,22 +167,41 @@ pub fn plugin(app: &mut App) {
         dir.join("save")
     };
     let mut codex = crate::codex::load(&crate::codex::codex_path(&save_dir));
-    codex.bank(&[BlockKind::Fermentation, BlockKind::FatStorage, BlockKind::LightCapture]);
-    app.insert_resource(codex).insert_resource(crate::codex::CodexStore {
-        path: Some(crate::codex::codex_path(&save_dir)),
-    });
+    codex.bank(&[
+        BlockKind::Fermentation,
+        BlockKind::FatStorage,
+        BlockKind::LightCapture,
+    ]);
+    app.insert_resource(codex)
+        .insert_resource(crate::codex::CodexStore {
+            path: Some(crate::codex::codex_path(&save_dir)),
+        });
     app.insert_resource(SmokeTest {
         dir,
         step: 0,
-        frames_in_step: 0,
+        ticks_in_step: 0,
+        step_started: None,
         loading_frames: 0,
         screenshot_requested_at: None,
         run_start: None,
     })
-    .add_systems(Update, (drive_smoke_test, smoke_actions, smoke_shallow, smoke_land, smoke_advance_stage, zoom_shots))
+    .add_systems(
+        Update,
+        (
+            drive_smoke_test,
+            smoke_actions,
+            smoke_shallow,
+            smoke_land,
+            smoke_advance_stage,
+            zoom_shots,
+        ),
+    )
     // After the UI focus system, so that a pressed button stays pressed for the
     // screen's own systems of this frame.
-    .add_systems(PreUpdate, (smoke_manage, smoke_codex).after(bevy::ui::UiSystems::Focus))
+    .add_systems(
+        PreUpdate,
+        (smoke_manage, smoke_codex).after(bevy::ui::UiSystems::Focus),
+    )
     .add_systems(Startup, apply_smoke_seed)
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
@@ -199,8 +229,12 @@ fn zoom_shots(
     }
     *frame += 1;
     if smoke.step <= STEP_RUN_AGAIN && frame.is_multiple_of(6) {
-        let path = smoke.dir.join(format!("zoom-{}-{:02}.png", smoke.step, *frame));
-        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
+        let path = smoke
+            .dir
+            .join(format!("zoom-{}-{:02}.png", smoke.step, *frame));
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
     }
 }
 
@@ -208,7 +242,9 @@ fn zoom_shots(
 struct SmokeTest {
     dir: PathBuf,
     step: usize,
-    frames_in_step: u32,
+    ticks_in_step: u32,
+    /// Real time (seconds) at which the current step began to count.
+    step_started: Option<f32>,
     loading_frames: u32,
     screenshot_requested_at: Option<u32>,
     /// Where the player cell was when the Run screen settled.
@@ -224,7 +260,13 @@ fn drive_smoke_test(
     mut next_page: ResMut<NextState<MenuPage>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     cells: Query<
-        (&Transform, &CurrencyPools, &Membrane, &LocalEnvironment, &GenomeIntegrity),
+        (
+            &Transform,
+            &CurrencyPools,
+            &Membrane,
+            &LocalEnvironment,
+            &GenomeIntegrity,
+        ),
         With<Cell>,
     >,
     mut zoom: ResMut<crate::screens::zoom::ScreenZoom>,
@@ -234,6 +276,8 @@ fn drive_smoke_test(
     darkness: Query<(), With<crate::world::lighting_view::DarknessQuad>>,
     mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
+    time: Res<Time<Real>>,
+    sim_time: Res<Time<Virtual>>,
 ) {
     // Loading must open the menu without help.
     if *state.get() == GameState::Loading {
@@ -287,23 +331,36 @@ fn drive_smoke_test(
         Some(page) => format!("{target:?}-{page:?}"),
         None => format!("{target:?}"),
     };
-    smoke.frames_in_step += 1;
+    // A Run step counts simulated time: a stalled frame (shaders compile when a
+    // new world first draws) makes the virtual clock lag the real one, and the
+    // cell only moves in virtual time. Other steps count real time.
+    let now = if target == GameState::Run {
+        sim_time.elapsed_secs()
+    } else {
+        time.elapsed_secs()
+    };
+    let started = *smoke.step_started.get_or_insert(now);
+    smoke.ticks_in_step = ((now - started) * TICKS_PER_SECOND) as u32;
     // The start of the Run step: the world has just spawned. Skip the first
     // frames, so that physics has the cell in place.
-    if target == GameState::Run && smoke.run_start.is_none() && smoke.frames_in_step >= 5 {
+    if target == GameState::Run && smoke.run_start.is_none() && smoke.ticks_in_step >= 5 {
         smoke.run_start = players
             .iter()
             .find_map(|controlled| cells.get(controlled.0).ok())
             .map(|(transform, ..)| transform.translation.truncate());
     }
 
-    let hold = FRAMES_PER_STATE
-        + if smoke.step == 0 {
-            FIRST_STATE_EXTRA_FRAMES
-        } else {
-            0
-        };
-    if smoke.frames_in_step < hold {
+    let hold = if matches!(smoke.step, STEP_RUN | STEP_SHALLOW | STEP_LAND) {
+        RUN_STEP_TICKS
+    } else {
+        TICKS_PER_STATE
+            + if smoke.step == 0 {
+                FIRST_STATE_EXTRA_TICKS
+            } else {
+                0
+            }
+    };
+    if smoke.ticks_in_step < hold {
         return;
     }
 
@@ -324,7 +381,9 @@ fn drive_smoke_test(
                     genome.0,
                 );
                 if target == GameState::Run {
-                    let start = smoke.run_start.expect("smoke test: no player cell on the Run screen");
+                    let start = smoke
+                        .run_start
+                        .expect("smoke test: no player cell on the Run screen");
                     let moved = start.distance(transform.translation.truncate());
                     info!("smoke test: the player moved {moved:.1} px while W was held");
                     assert!(
@@ -349,11 +408,12 @@ fn drive_smoke_test(
             commands
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(path));
-            smoke.screenshot_requested_at = Some(smoke.frames_in_step);
+            smoke.screenshot_requested_at = Some(smoke.ticks_in_step);
         }
-        Some(at) if smoke.frames_in_step >= at + SCREENSHOT_SETTLE_FRAMES => {
+        Some(at) if smoke.ticks_in_step >= at + SCREENSHOT_SETTLE_TICKS => {
             smoke.step += 1;
-            smoke.frames_in_step = 0;
+            smoke.ticks_in_step = 0;
+            smoke.step_started = None;
             smoke.screenshot_requested_at = None;
             // A new world follows the stage-complete screen: measure the move from
             // its start.
@@ -397,7 +457,15 @@ fn smoke_actions(
     smoke: Res<SmokeTest>,
     state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
-    mut cells: Query<(&mut Proteome, &SynthesisQueue, &PathwayLevels, &CurrencyPools), With<Cell>>,
+    mut cells: Query<
+        (
+            &mut Proteome,
+            &SynthesisQueue,
+            &PathwayLevels,
+            &CurrencyPools,
+        ),
+        With<Cell>,
+    >,
     mut queue: MessageWriter<QueueProtein>,
     npcs: Query<&Npc>,
     gates: Query<&GateProgress>,
@@ -405,7 +473,7 @@ fn smoke_actions(
     level: Option<Res<crate::level::CurrentLevel>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut done: Local<[bool; 6]>,
+    mut done: Local<[bool; 8]>,
 ) {
     let target = SEQUENCE.get(smoke.step).map(|(state, _)| state.clone());
     if target.as_ref() != Some(state.get()) {
@@ -418,7 +486,7 @@ fn smoke_actions(
         return;
     };
     match smoke.step {
-        STEP_RUN if !done[0] && smoke.frames_in_step >= 5 => {
+        STEP_RUN if !done[0] && smoke.ticks_in_step >= 5 => {
             for protein in [
                 MembraneProtein::Flagellum,
                 MembraneProtein::Adhesin,
@@ -428,22 +496,30 @@ fn smoke_actions(
             }
             done[0] = true;
             commands.entity(cell).insert(Invulnerable);
-            info!("smoke test: gave the cell a flagellum, an adhesin and a toxin; it is invulnerable");
+            info!(
+                "smoke test: gave the cell a flagellum, an adhesin and a toxin; it is invulnerable"
+            );
         }
-        STEP_RUN if !done[3] && smoke.frames_in_step >= 10 => {
+        STEP_RUN if !done[3] && smoke.ticks_in_step >= 10 => {
             let mut count = std::collections::BTreeMap::new();
             for npc in &npcs {
                 *count.entry(format!("{:?}", npc.archetype)).or_insert(0) += 1;
             }
             info!("smoke test: NPCs in the world: {count:?}");
             assert!(
-                npcs.iter().filter(|n| n.archetype != Archetype::Gate).count() >= 8,
+                npcs.iter()
+                    .filter(|n| n.archetype != Archetype::Gate)
+                    .count()
+                    >= 8,
                 "smoke test: the world has too few NPCs"
             );
-            assert!(gates.iter().count() == 1, "smoke test: the world has no gate cell");
+            assert!(
+                gates.iter().count() == 1,
+                "smoke test: the world has no gate cell"
+            );
             done[3] = true;
         }
-        STEP_MANAGE if !done[1] && smoke.frames_in_step >= 10 => {
+        STEP_MANAGE if !done[1] && smoke.ticks_in_step >= 10 => {
             queue.write(QueueProtein {
                 cell,
                 target: ProteinTarget::Enzyme(BlockKind::Chemosynthesis),
@@ -451,22 +527,26 @@ fn smoke_actions(
             done[1] = true;
             info!("smoke test: queued one Chemosynthesis enzyme in the editor");
         }
-        STEP_RUN_AGAIN if !done[2] && smoke.frames_in_step >= 20 => {
+        STEP_RUN_AGAIN if !done[2] && smoke.ticks_in_step >= 20 => {
             assert!(
                 !order_queue.is_empty() || proteome.enzymes(BlockKind::Chemosynthesis) > 2,
                 "smoke test: the queued enzyme is neither in the queue nor built"
             );
             done[2] = true;
-            info!("smoke test: back in the run at ATP {:.1}", pools.get(Currency::ATP));
+            info!(
+                "smoke test: back in the run at ATP {:.1}",
+                pools.get(Currency::ATP)
+            );
         }
-        STEP_RUN_AGAIN if done[2] && smoke.frames_in_step == 40 => {
+        STEP_RUN_AGAIN if done[2] && !done[6] && smoke.ticks_in_step >= 40 => {
+            done[6] = true;
             assert_eq!(
                 levels.level(BlockKind::Chemosynthesis),
                 Level::Low,
                 "smoke test: the level set on the map did not stay in the run"
             );
         }
-        STEP_GATE_VIEW if !done[4] && smoke.frames_in_step >= 2 => {
+        STEP_GATE_VIEW if !done[4] && smoke.ticks_in_step >= 2 => {
             // Into the chamber, away from the gate cell, with W released.
             let position = level.as_ref().map_or(Vec2::new(880.0, 15.0), |l| gate_view_position(&l.0));
             commands.entity(cell).insert((
@@ -479,13 +559,16 @@ fn smoke_actions(
         }
         STEP_GATE_VIEW if done[4] => {
             keys.release(KeyCode::KeyW);
-            if smoke.frames_in_step == 100 {
+            if smoke.ticks_in_step >= 100 && !done[5] {
                 let mut count = std::collections::BTreeMap::new();
                 for npc in &npcs {
                     *count.entry(format!("{:?}", npc.archetype)).or_insert(0) += 1;
                 }
                 info!("smoke test: NPCs at the end of the run: {count:?}");
-                assert!(summary.victory.is_none(), "smoke test: the level was won by chance");
+                assert!(
+                    summary.victory.is_none(),
+                    "smoke test: the level was won by chance"
+                );
                 assert!(
                     gates.iter().all(|g| g.held == 0.0),
                     "smoke test: the player touched the gate cell"
@@ -524,11 +607,18 @@ fn smoke_advance_stage(
         genes.extend([BlockKind::Catalase, BlockKind::Respiration]);
     }
     for kind in genes {
-        carry.genome.table.insert(kind, crate::blocks::genome::GeneState::Expressed);
+        carry
+            .genome
+            .table
+            .insert(kind, crate::blocks::genome::GeneState::Expressed);
         crate::run::grant_gate_enzyme(&mut carry, kind);
     }
     let outcome = run.complete_stage(carry, crate::stage::Stage::is_playable);
-    assert_eq!(outcome, crate::run::StageOutcome::NextStage, "smoke test: no next stage");
+    assert_eq!(
+        outcome,
+        crate::run::StageOutcome::NextStage,
+        "smoke test: no next stage"
+    );
     done[index] = true;
     info!("smoke test: the run moved on to {:?}", run.stage());
 }
@@ -545,11 +635,9 @@ fn smoke_shallow(
     run: Res<crate::run::RunState>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut done: Local<[bool; 4]>,
+    mut done: Local<[bool; 6]>,
 ) {
-    if *state.get() != GameState::Run
-        || !(STEP_SHALLOW..=STEP_SHALLOW_GATE).contains(&smoke.step)
-    {
+    if *state.get() != GameState::Run || !(STEP_SHALLOW..=STEP_SHALLOW_GATE).contains(&smoke.step) {
         return;
     }
     let Some(cell) = players.iter().next().map(|c| c.0) else {
@@ -566,10 +654,20 @@ fn smoke_shallow(
         ));
     };
     match smoke.step {
-        STEP_SHALLOW if !done[0] && smoke.frames_in_step >= 5 => {
-            assert_eq!(run.stage(), crate::stage::Stage::ShallowWater, "smoke test: not in shallow water");
-            assert!(blocks.contains(BlockKind::LightCapture), "smoke test: no photosynthesis block");
-            assert!(proteome.enzymes(BlockKind::LightCapture) >= 1, "smoke test: no free enzyme for the gate gene");
+        STEP_SHALLOW if !done[0] && smoke.ticks_in_step >= 5 => {
+            assert_eq!(
+                run.stage(),
+                crate::stage::Stage::ShallowWater,
+                "smoke test: not in shallow water"
+            );
+            assert!(
+                blocks.contains(BlockKind::LightCapture),
+                "smoke test: no photosynthesis block"
+            );
+            assert!(
+                proteome.enzymes(BlockKind::LightCapture) >= 1,
+                "smoke test: no free enzyme for the gate gene"
+            );
             commands.entity(cell).insert(Invulnerable);
             let mut count = std::collections::BTreeMap::new();
             for npc in &npcs {
@@ -577,13 +675,20 @@ fn smoke_shallow(
             }
             info!("smoke test: shallow water, NPCs: {count:?}");
             assert!(
-                npcs.iter().filter(|n| n.archetype != Archetype::Gate).count() >= 8,
+                npcs.iter()
+                    .filter(|n| n.archetype != Archetype::Gate)
+                    .count()
+                    >= 8,
                 "smoke test: the shallow world has too few NPCs"
             );
-            assert!(gates.iter().count() == 1, "smoke test: the shallow world has no gate cell");
+            assert!(
+                gates.iter().count() == 1,
+                "smoke test: the shallow world has no gate cell"
+            );
             done[0] = true;
         }
-        STEP_SHALLOW if done[0] && smoke.frames_in_step == 100 => {
+        STEP_SHALLOW if done[0] && !done[4] && smoke.ticks_in_step >= 100 => {
+            done[4] = true;
             info!(
                 "smoke test: shallow start, O2 {:.1} ROS {:.1} ATP {:.1}",
                 pools.get(Currency::O2),
@@ -591,7 +696,7 @@ fn smoke_shallow(
                 pools.get(Currency::ATP),
             );
         }
-        STEP_SHALLOW_CATALASE if !done[1] && smoke.frames_in_step >= 2 => {
+        STEP_SHALLOW_CATALASE if !done[1] && smoke.ticks_in_step >= 2 => {
             // Next to the catalase prey, with a lot of ROS: the tint shows.
             teleport(&mut commands, Vec2::new(-380.0, 80.0));
             pools.set(Currency::ROS, 18.0);
@@ -600,7 +705,7 @@ fn smoke_shallow(
             info!("smoke test: moved the player next to the catalase prey, ROS 18");
         }
         STEP_SHALLOW_CATALASE if done[1] => keys.release(KeyCode::KeyW),
-        STEP_SHALLOW_GATE if !done[2] && smoke.frames_in_step >= 2 => {
+        STEP_SHALLOW_GATE if !done[2] && smoke.ticks_in_step >= 2 => {
             // Below the chamber on the sea floor, W released.
             teleport(&mut commands, Vec2::new(800.0, -640.0));
             done[2] = true;
@@ -608,8 +713,11 @@ fn smoke_shallow(
         }
         STEP_SHALLOW_GATE if done[2] => {
             keys.release(KeyCode::KeyW);
-            if smoke.frames_in_step == 100 && !done[3] {
-                assert!(gates.iter().all(|g| g.held == 0.0), "smoke test: the player touched the gate cell");
+            if smoke.ticks_in_step >= 100 && !done[3] {
+                assert!(
+                    gates.iter().all(|g| g.held == 0.0),
+                    "smoke test: the player touched the gate cell"
+                );
                 done[3] = true;
             }
         }
@@ -624,7 +732,13 @@ fn smoke_land(
     state: Res<State<GameState>>,
     players: Query<&ControlledCell, With<LocalPlayer>>,
     mut cells: Query<
-        (&Proteome, &mut CurrencyPools, &crate::cell::CellBlocks, &mut crate::desiccation::Hydration, &LocalEnvironment),
+        (
+            &Proteome,
+            &mut CurrencyPools,
+            &crate::cell::CellBlocks,
+            &mut crate::desiccation::Hydration,
+            &LocalEnvironment,
+        ),
         With<Cell>,
     >,
     npcs: Query<&Npc>,
@@ -632,7 +746,7 @@ fn smoke_land(
     run: Res<crate::run::RunState>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut commands: Commands,
-    mut done: Local<[bool; 5]>,
+    mut done: Local<[bool; 6]>,
 ) {
     if *state.get() != GameState::Run || !(STEP_LAND..=STEP_LAND_GATE).contains(&smoke.step) {
         return;
@@ -651,10 +765,20 @@ fn smoke_land(
         ));
     };
     match smoke.step {
-        STEP_LAND if !done[0] && smoke.frames_in_step >= 5 => {
-            assert_eq!(run.stage(), crate::stage::Stage::Land, "smoke test: not on land");
-            assert!(blocks.contains(BlockKind::Respiration), "smoke test: no respiration block");
-            assert!(proteome.enzymes(BlockKind::Respiration) >= 1, "smoke test: no free enzyme for respiration");
+        STEP_LAND if !done[0] && smoke.ticks_in_step >= 5 => {
+            assert_eq!(
+                run.stage(),
+                crate::stage::Stage::Land,
+                "smoke test: not on land"
+            );
+            assert!(
+                blocks.contains(BlockKind::Respiration),
+                "smoke test: no respiration block"
+            );
+            assert!(
+                proteome.enzymes(BlockKind::Respiration) >= 1,
+                "smoke test: no free enzyme for respiration"
+            );
             commands.entity(cell).insert(Invulnerable);
             let mut count = std::collections::BTreeMap::new();
             for npc in &npcs {
@@ -662,13 +786,20 @@ fn smoke_land(
             }
             info!("smoke test: land, NPCs: {count:?}");
             assert!(
-                npcs.iter().filter(|n| n.archetype != Archetype::Gate).count() >= 8,
+                npcs.iter()
+                    .filter(|n| n.archetype != Archetype::Gate)
+                    .count()
+                    >= 8,
                 "smoke test: the land world has too few NPCs"
             );
-            assert!(gates.iter().count() == 1, "smoke test: the land world has no gate cell");
+            assert!(
+                gates.iter().count() == 1,
+                "smoke test: the land world has no gate cell"
+            );
             done[0] = true;
         }
-        STEP_LAND if done[0] && smoke.frames_in_step == 100 => {
+        STEP_LAND if done[0] && !done[4] && smoke.ticks_in_step >= 100 => {
+            done[4] = true;
             info!(
                 "smoke test: land start, O2 {:.1} ROS {:.1} ATP {:.1} hydration {:.2} water {:.1}",
                 pools.get(Currency::O2),
@@ -678,7 +809,7 @@ fn smoke_land(
                 env.get(Channel::Water),
             );
         }
-        STEP_LAND_DRY if !done[1] && smoke.frames_in_step >= 2 => {
+        STEP_LAND_DRY if !done[1] && smoke.ticks_in_step >= 2 => {
             // On the dry plain, with a dry cell: the HUD warns.
             teleport(&mut commands, Vec2::new(-330.0, -190.0));
             hydration.0 = 0.2;
@@ -686,7 +817,7 @@ fn smoke_land(
             info!("smoke test: moved the player to the dry plain, hydration 0.2");
         }
         STEP_LAND_DRY if done[1] => keys.release(KeyCode::KeyW),
-        STEP_LAND_GATE if !done[2] && smoke.frames_in_step >= 2 => {
+        STEP_LAND_GATE if !done[2] && smoke.ticks_in_step >= 2 => {
             // Below the waxy chamber, W released.
             teleport(&mut commands, Vec2::new(800.0, -110.0));
             done[2] = true;
@@ -694,13 +825,29 @@ fn smoke_land(
         }
         STEP_LAND_GATE if done[2] => {
             keys.release(KeyCode::KeyW);
-            if smoke.frames_in_step == 100 && !done[3] {
-                assert!(gates.iter().all(|g| g.held == 0.0), "smoke test: the player touched the gate cell");
+            if smoke.ticks_in_step >= 100 && !done[3] {
+                assert!(
+                    gates.iter().all(|g| g.held == 0.0),
+                    "smoke test: the player touched the gate cell"
+                );
                 done[3] = true;
             }
         }
         _ => {}
     }
+}
+
+/// The ticks of the current step that no call has seen yet. A system with
+/// exact check points (`== N`) runs its checks once for each of these, so a
+/// slow frame cannot skip a check point and a fast frame cannot repeat one.
+/// `seen` holds the step and the last tick that this system handled.
+fn new_ticks(smoke: &SmokeTest, seen: &mut (usize, u32)) -> std::ops::RangeInclusive<u32> {
+    if seen.0 != smoke.step {
+        *seen = (smoke.step, 0);
+    }
+    let from = seen.1 + 1;
+    seen.1 = smoke.ticks_in_step.max(seen.1);
+    from..=seen.1
 }
 
 /// What the Manage steps remember between frames.
@@ -713,83 +860,121 @@ struct ManageSmoke {
     /// What the codex check queues: a toxin, or an enzyme when every socket
     /// is in use.
     codex_target: Option<ProteinTarget>,
+    /// The frame in which the codex check pressed the queue button. The
+    /// button's handler needs a few later frames; after a stalled frame the
+    /// tick counter jumps, so the check cannot rely on the tick alone.
+    pressed_frame: Option<u32>,
+    /// The queue check is due, once the frames after the press have passed.
+    check_queue: bool,
 }
 
 /// The Codex checks. The overlay opens with the key C on the Manage screen,
 /// shows one card for every gene and membrane protein, and a button press
 /// queues a protein (a membrane protein, or an enzyme when every socket is in
 /// use). The last step opens it from the menu.
-fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>) {
+fn smoke_codex(world: &mut World, mut memory: Local<ManageSmoke>, mut seen: Local<(usize, u32)>) {
     use crate::codex_catalog::{Edit, EntryId};
     use crate::screens::codex::{smoke_open, smoke_press_edit, smoke_probe, smoke_show};
-    let (step, frame) = {
+    let (step, ticks) = {
         let smoke = world.resource::<SmokeTest>();
-        (smoke.step, smoke.frames_in_step)
+        (smoke.step, new_ticks(smoke, &mut seen))
     };
     let state = world.resource::<State<GameState>>().get().clone();
-    let all = BlockKind::ALL.len() + MembraneProtein::ALL.len();
-    match (step, frame, state) {
-        (STEP_MANAGE_CODEX, 5, GameState::Manage) => {
-            // Press C, as the player does.
-            world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyC);
-        }
-        (STEP_MANAGE_CODEX, 6, GameState::Manage) => {
-            world.resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::KeyC);
-        }
-        (STEP_MANAGE_CODEX, 20, GameState::Manage) => {
-            let probe = smoke_probe(world);
-            assert!(probe.open, "smoke test: C did not open the codex");
-            assert_eq!(probe.loci, all, "smoke test: the genome has a locus for every entry");
-            if let Some(cell) = world.query_filtered::<&ControlledCell, With<LocalPlayer>>().iter(world).next().map(|c| c.0) {
-                // A full membrane refuses a membrane protein, so queue an enzyme then.
-                let (entry, target) = match first_free_socket(world, cell) {
-                    Some(_) => (
-                        EntryId::Protein(MembraneProtein::Toxin),
-                        ProteinTarget::Membrane(MembraneProtein::Toxin),
-                    ),
-                    None => (
-                        EntryId::Gene(BlockKind::Chemosynthesis),
-                        ProteinTarget::Enzyme(BlockKind::Chemosynthesis),
-                    ),
-                };
-                smoke_show(world, entry);
-                memory.codex_target = Some(target);
-                memory.orders_before = ordered(world, cell, target);
+    for frame in ticks {
+        let all = BlockKind::ALL.len() + MembraneProtein::ALL.len();
+        match (step, frame, state.clone()) {
+            (STEP_MANAGE_CODEX, 5, GameState::Manage) => {
+                // Press C, as the player does.
+                world
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyC);
             }
+            (STEP_MANAGE_CODEX, 6, GameState::Manage) => {
+                world
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .release(KeyCode::KeyC);
+            }
+            (STEP_MANAGE_CODEX, 20, GameState::Manage) => {
+                let probe = smoke_probe(world);
+                assert!(probe.open, "smoke test: C did not open the codex");
+                assert_eq!(
+                    probe.loci, all,
+                    "smoke test: the genome has a locus for every entry"
+                );
+                if let Some(cell) = world
+                    .query_filtered::<&ControlledCell, With<LocalPlayer>>()
+                    .iter(world)
+                    .next()
+                    .map(|c| c.0)
+                {
+                    // A full membrane refuses a membrane protein, so queue an enzyme then.
+                    let (entry, target) = match first_free_socket(world, cell) {
+                        Some(_) => (
+                            EntryId::Protein(MembraneProtein::Toxin),
+                            ProteinTarget::Membrane(MembraneProtein::Toxin),
+                        ),
+                        None => (
+                            EntryId::Gene(BlockKind::Chemosynthesis),
+                            ProteinTarget::Enzyme(BlockKind::Chemosynthesis),
+                        ),
+                    };
+                    smoke_show(world, entry);
+                    memory.codex_target = Some(target);
+                    memory.orders_before = ordered(world, cell, target);
+                }
+            }
+            (STEP_MANAGE_CODEX, 30, GameState::Manage) => {
+                let target = memory.codex_target.expect("smoke test: no codex target");
+                assert!(
+                    smoke_probe(world)
+                        .edit_buttons
+                        .contains(&Edit::Queue(target)),
+                    "smoke test: the codex detail panel has no queue button for {target:?}"
+                );
+                smoke_press_edit(world, Edit::Queue(target));
+                memory.pressed_frame = Some(world.resource::<FrameCount>().0);
+            }
+            (STEP_MANAGE_CODEX, 50, GameState::Manage) => memory.check_queue = true,
+            (STEP_MENU_CODEX, 5, GameState::Menu) => smoke_open(world, true),
+            (STEP_MENU_CODEX, 20, GameState::Menu) => {
+                let probe = smoke_probe(world);
+                assert!(
+                    probe.open && probe.loci == all,
+                    "smoke test: the menu codex shows {} loci",
+                    probe.loci
+                );
+                smoke_show(world, EntryId::Gene(BlockKind::Fermentation));
+                info!(
+                    "smoke test: the codex opened from the menu with {} loci",
+                    probe.loci
+                );
+            }
+            _ => {}
         }
-        (STEP_MANAGE_CODEX, 30, GameState::Manage) => {
-            let target = memory.codex_target.expect("smoke test: no codex target");
-            assert!(
-                smoke_probe(world).edit_buttons.contains(&Edit::Queue(target)),
-                "smoke test: the codex detail panel has no queue button for {target:?}"
-            );
-            smoke_press_edit(world, Edit::Queue(target));
-        }
-        (STEP_MANAGE_CODEX, 50, GameState::Manage) => {
-            let cell = world
-                .query_filtered::<&ControlledCell, With<LocalPlayer>>()
-                .iter(world)
-                .next()
-                .map(|c| c.0)
-                .expect("smoke test: a player cell");
-            // Count the target in the queue and in the proteome: an order can
-            // finish between the two checks, so the queue length alone can go down.
-            let target = memory.codex_target.expect("smoke test: no codex target");
-            assert!(
-                ordered(world, cell, target) > memory.orders_before,
-                "smoke test: the codex button queued no {target:?}"
-            );
-            info!("smoke test: the codex opened with C and queued a protein");
-            smoke_show(world, EntryId::Gene(BlockKind::Respiration));
-        }
-        (STEP_MENU_CODEX, 5, GameState::Menu) => smoke_open(world, true),
-        (STEP_MENU_CODEX, 20, GameState::Menu) => {
-            let probe = smoke_probe(world);
-            assert!(probe.open && probe.loci == all, "smoke test: the menu codex shows {} loci", probe.loci);
-            smoke_show(world, EntryId::Gene(BlockKind::Fermentation));
-            info!("smoke test: the codex opened from the menu with {} loci", probe.loci);
-        }
-        _ => {}
+    }
+    // The queue check waits for frames after the press: a stalled frame can put
+    // tick 30 and tick 50 into one call, before the button's handler has run.
+    let frame = world.resource::<FrameCount>().0;
+    let handled = memory
+        .pressed_frame
+        .is_some_and(|pressed| frame >= pressed + CODEX_PRESS_FRAMES);
+    if memory.check_queue && handled {
+        memory.check_queue = false;
+        let cell = world
+            .query_filtered::<&ControlledCell, With<LocalPlayer>>()
+            .iter(world)
+            .next()
+            .map(|c| c.0)
+            .expect("smoke test: a player cell");
+        // Count the target in the queue and in the proteome: an order can
+        // finish between the two checks, so the queue length alone can go down.
+        let target = memory.codex_target.expect("smoke test: no codex target");
+        assert!(
+            ordered(world, cell, target) > memory.orders_before,
+            "smoke test: the codex button queued no {target:?}"
+        );
+        info!("smoke test: the codex opened with C and queued a protein");
+        crate::screens::codex::smoke_show(world, crate::codex_catalog::EntryId::Gene(BlockKind::Respiration));
     }
 }
 
@@ -798,7 +983,9 @@ fn ordered(world: &World, cell: Entity, target: ProteinTarget) -> usize {
     let queued = world
         .get::<SynthesisQueue>(cell)
         .map_or(0, |q| q.orders.iter().filter(|o| **o == target).count());
-    let made = world.get::<Proteome>(cell).map_or(0, |p| p.count(target) as usize);
+    let made = world
+        .get::<Proteome>(cell)
+        .map_or(0, |p| p.count(target) as usize);
     queued + made
 }
 
@@ -813,25 +1000,30 @@ fn first_free_socket(world: &World, cell: Entity) -> Option<usize> {
             .sum::<usize>()
     });
     let queued = world.get::<SynthesisQueue>(cell).map_or(0, |q| {
-        q.orders.iter().filter(|o| matches!(o, ProteinTarget::Membrane(_))).count()
+        q.orders
+            .iter()
+            .filter(|o| matches!(o, ProteinTarget::Membrane(_)))
+            .count()
     });
-    let slots = world.get::<CellSize>(cell).map_or(0, |s| membrane_slots(s) as usize);
+    let slots = world
+        .get::<CellSize>(cell)
+        .map_or(0, |s| membrane_slots(s) as usize);
     (used + queued < slots).then_some(used + queued)
 }
 
 /// The Manage checks. The picks are what a click and a hover send (the smoke
 /// test has no pointer), and the + press is a real button press, so the
 /// panel, the buttons and the messages are all exercised.
-fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
+fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>, mut seen: Local<(usize, u32)>) {
     use crate::screens::manage::{
-        SmokePick, smoke_hover, smoke_press_level, smoke_probe, smoke_press_plus, smoke_select,
+        SmokePick, smoke_hover, smoke_press_level, smoke_press_plus, smoke_probe, smoke_select,
     };
     if *world.resource::<State<GameState>>().get() != GameState::Manage {
         return;
     }
-    let (step, frame) = {
+    let (step, ticks) = {
         let smoke = world.resource::<SmokeTest>();
-        (smoke.step, smoke.frames_in_step)
+        (smoke.step, new_ticks(smoke, &mut seen))
     };
     if !(STEP_MANAGE_PANEL..=STEP_MANAGE_LIMIT).contains(&step) {
         return;
@@ -844,102 +1036,134 @@ fn smoke_manage(world: &mut World, mut memory: Local<ManageSmoke>) {
     else {
         return;
     };
-    let orders = |world: &World| world.get::<SynthesisQueue>(cell).map_or(0, |q| q.orders.len());
-    match (step, frame) {
-        (STEP_MANAGE_PANEL, 5) => {
-            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
-            memory.orders_before = orders(world);
-        }
-        (STEP_MANAGE_PANEL, 15) => {
-            let target = ProteinTarget::Enzyme(BlockKind::Chemosynthesis);
-            assert!(
-                smoke_probe(world).plus_buttons.contains(&target),
-                "smoke test: the panel of a pathway has no + button"
-            );
-            smoke_press_plus(world, target);
-        }
-        (STEP_MANAGE_PANEL, 20) => {
-            // Low, not Off: the limit check below needs the pathway to run.
-            let pressed = smoke_press_level(world, BlockKind::Chemosynthesis, Level::Low);
-            assert!(
-                pressed,
-                "smoke test: the panel of a pathway has no level buttons (panel: {:?})",
-                smoke_probe(world).panel_title
-            );
-        }
-        (STEP_MANAGE_PANEL, 40) => {
-            let probe = smoke_probe(world);
-            assert_eq!(probe.panel_title.as_deref(), Some("Chemosynthesis"), "smoke test: the panel did not open");
-            assert!(orders(world) > memory.orders_before, "smoke test: + queued no enzyme");
-            assert_eq!(
-                world.get::<PathwayLevels>(cell).map(|l| l.level(BlockKind::Chemosynthesis)),
-                Some(Level::Low),
-                "smoke test: the Low button did not set the level"
-            );
-            info!("smoke test: the panel of a pathway opened, + queued an enzyme, Low set the level");
-        }
-        (STEP_MANAGE_SOCKET, 5) => {
-            // A scenario cell can start with proteins, so pick the first empty
-            // socket, not socket 0.
-            memory.empty_slot = first_free_socket(world, cell);
-            match memory.empty_slot {
-                Some(slot) => smoke_select(world, Some(SmokePick::Slot(slot))),
-                None => info!("smoke test: every socket is in use, the socket check is skipped"),
+    let orders = |world: &World| {
+        world
+            .get::<SynthesisQueue>(cell)
+            .map_or(0, |q| q.orders.len())
+    };
+    for frame in ticks {
+        match (step, frame) {
+            (STEP_MANAGE_PANEL, 5) => {
+                smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+                memory.orders_before = orders(world);
             }
-            memory.orders_before = orders(world);
-        }
-        (STEP_MANAGE_SOCKET, 15 | 40) if memory.empty_slot.is_none() => {}
-        (STEP_MANAGE_SOCKET, 15) => {
-            let target = ProteinTarget::Membrane(MembraneProtein::Toxin);
-            assert!(
-                smoke_probe(world).plus_buttons.contains(&target),
-                "smoke test: the panel of a socket has no + button"
-            );
-            smoke_press_plus(world, target);
-        }
-        (STEP_MANAGE_SOCKET, 40) => {
-            let probe = smoke_probe(world);
-            assert!(
-                probe.panel_title.as_deref().is_some_and(|t| t.starts_with("Membrane socket")),
-                "smoke test: the panel of a socket did not open: {:?}",
-                probe.panel_title
-            );
-            assert!(orders(world) > memory.orders_before, "smoke test: + queued no membrane protein");
-            info!("smoke test: the panel of a socket opened and + queued a protein");
-        }
-        (STEP_MANAGE_TIP, 5) => {
-            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Fermentation)));
-            smoke_hover(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
-        }
-        (STEP_MANAGE_TIP, 40) => {
-            let probe = smoke_probe(world);
-            assert!(probe.tooltip_visible, "smoke test: no tooltip on hover");
-            assert!(
-                probe.tooltip_text.contains("Chemosynthesis") || probe.tooltip_text.contains("Chemo"),
-                "smoke test: the tooltip says {:?}",
-                probe.tooltip_text
-            );
-            info!("smoke test: tooltip: {:?}", probe.tooltip_text);
-        }
-        (STEP_MANAGE_LIMIT, 2) => {
-            smoke_hover(world, None);
-            smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
-        }
-        (STEP_MANAGE_LIMIT, 3..=60) => {
-            // No minerals: Chemosynthesis is starved.
-            if let Some(mut pools) = world.get_mut::<CurrencyPools>(cell) {
-                pools.set(Currency::Minerals, 0.0);
-            }
-            if frame == 60 {
-                let probe = smoke_probe(world);
-                info!("smoke test: badges {:?}, red pipes {}", probe.badges, probe.limiting_pipes);
+            (STEP_MANAGE_PANEL, 15) => {
+                let target = ProteinTarget::Enzyme(BlockKind::Chemosynthesis);
                 assert!(
-                    probe.badges.contains(&BlockKind::Chemosynthesis),
-                    "smoke test: no limit badge on a starved pathway"
+                    smoke_probe(world).plus_buttons.contains(&target),
+                    "smoke test: the panel of a pathway has no + button"
                 );
-                assert!(probe.limiting_pipes >= 1, "smoke test: no red pulse on a starved pathway");
+                smoke_press_plus(world, target);
             }
+            (STEP_MANAGE_PANEL, 20) => {
+                // Low, not Off: the limit check below needs the pathway to run.
+                let pressed = smoke_press_level(world, BlockKind::Chemosynthesis, Level::Low);
+                assert!(
+                    pressed,
+                    "smoke test: the panel of a pathway has no level buttons (panel: {:?})",
+                    smoke_probe(world).panel_title
+                );
+            }
+            (STEP_MANAGE_PANEL, 40) => {
+                let probe = smoke_probe(world);
+                assert_eq!(
+                    probe.panel_title.as_deref(),
+                    Some("Chemosynthesis"),
+                    "smoke test: the panel did not open"
+                );
+                assert!(
+                    orders(world) > memory.orders_before,
+                    "smoke test: + queued no enzyme"
+                );
+                assert_eq!(
+                    world
+                        .get::<PathwayLevels>(cell)
+                        .map(|l| l.level(BlockKind::Chemosynthesis)),
+                    Some(Level::Low),
+                    "smoke test: the Low button did not set the level"
+                );
+                info!(
+                    "smoke test: the panel of a pathway opened, + queued an enzyme, Low set the level"
+                );
+            }
+            (STEP_MANAGE_SOCKET, 5) => {
+                // A scenario cell can start with proteins, so pick the first empty
+                // socket, not socket 0.
+                memory.empty_slot = first_free_socket(world, cell);
+                match memory.empty_slot {
+                    Some(slot) => smoke_select(world, Some(SmokePick::Slot(slot))),
+                    None => {
+                        info!("smoke test: every socket is in use, the socket check is skipped")
+                    }
+                }
+                memory.orders_before = orders(world);
+            }
+            (STEP_MANAGE_SOCKET, 15 | 40) if memory.empty_slot.is_none() => {}
+            (STEP_MANAGE_SOCKET, 15) => {
+                let target = ProteinTarget::Membrane(MembraneProtein::Toxin);
+                assert!(
+                    smoke_probe(world).plus_buttons.contains(&target),
+                    "smoke test: the panel of a socket has no + button"
+                );
+                smoke_press_plus(world, target);
+            }
+            (STEP_MANAGE_SOCKET, 40) => {
+                let probe = smoke_probe(world);
+                assert!(
+                    probe
+                        .panel_title
+                        .as_deref()
+                        .is_some_and(|t| t.starts_with("Membrane socket")),
+                    "smoke test: the panel of a socket did not open: {:?}",
+                    probe.panel_title
+                );
+                assert!(
+                    orders(world) > memory.orders_before,
+                    "smoke test: + queued no membrane protein"
+                );
+                info!("smoke test: the panel of a socket opened and + queued a protein");
+            }
+            (STEP_MANAGE_TIP, 5) => {
+                smoke_select(world, Some(SmokePick::Pathway(BlockKind::Fermentation)));
+                smoke_hover(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+            }
+            (STEP_MANAGE_TIP, 40) => {
+                let probe = smoke_probe(world);
+                assert!(probe.tooltip_visible, "smoke test: no tooltip on hover");
+                assert!(
+                    probe.tooltip_text.contains("Chemosynthesis")
+                        || probe.tooltip_text.contains("Chemo"),
+                    "smoke test: the tooltip says {:?}",
+                    probe.tooltip_text
+                );
+                info!("smoke test: tooltip: {:?}", probe.tooltip_text);
+            }
+            (STEP_MANAGE_LIMIT, 2) => {
+                smoke_hover(world, None);
+                smoke_select(world, Some(SmokePick::Pathway(BlockKind::Chemosynthesis)));
+            }
+            (STEP_MANAGE_LIMIT, 3..=60) => {
+                // No minerals: Chemosynthesis is starved.
+                if let Some(mut pools) = world.get_mut::<CurrencyPools>(cell) {
+                    pools.set(Currency::Minerals, 0.0);
+                }
+                if frame == 60 {
+                    let probe = smoke_probe(world);
+                    info!(
+                        "smoke test: badges {:?}, red pipes {}",
+                        probe.badges, probe.limiting_pipes
+                    );
+                    assert!(
+                        probe.badges.contains(&BlockKind::Chemosynthesis),
+                        "smoke test: no limit badge on a starved pathway"
+                    );
+                    assert!(
+                        probe.limiting_pipes >= 1,
+                        "smoke test: no red pulse on a starved pathway"
+                    );
+                }
+            }
+            _ => {}
         }
-        _ => {}
     }
 }

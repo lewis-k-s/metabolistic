@@ -158,6 +158,9 @@ pub struct Body {
     pub sheltered: bool,
     /// The local player's cell.
     pub player: bool,
+    /// What a clump of symbionts adds to the radius as a target (pixels, see
+    /// `secretion::autoinducer::Clump`).
+    pub clump: f32,
 }
 
 impl Body {
@@ -170,6 +173,7 @@ impl Body {
             edible,
             sheltered: false,
             player: false,
+            clump: 0.0,
         }
     }
 }
@@ -194,7 +198,7 @@ pub fn plan_engulfs(bodies: &[Body]) -> Vec<(Entity, Entity)> {
                     && o.edible
                     && (!o.sheltered || me.player)
                     && !eaten.contains(&o.entity)
-                    && can_engulf(me.radius, o.radius)
+                    && can_engulf(me.radius, o.radius + o.clump)
                     && in_contact(me.position, me.radius, o.position, o.radius)
             })
             .min_by(|a, b| {
@@ -226,6 +230,7 @@ pub fn engulf_system(
             Has<Engulfed>,
             &InShelter,
             Has<crate::stun::Stunned>,
+            Option<&crate::secretion::autoinducer::Clump>,
         ),
         With<Cell>,
     >,
@@ -247,9 +252,10 @@ pub fn engulf_system(
     let player_cells: Vec<Entity> = players.iter().map(|c| c.0).collect();
     let bodies: Vec<Body> = snapshot
         .iter()
-        .map(|(entity, transform, size, intent, gate, invulnerable, engulfed, shelter, stunned)| Body {
+        .map(|(entity, transform, size, intent, gate, invulnerable, engulfed, shelter, stunned, clump)| Body {
             sheltered: shelter.0,
             player: player_cells.contains(&entity),
+            clump: clump.map_or(0.0, |c| c.0),
             ..Body::new(
                 entity,
                 transform.translation.truncate(),
@@ -459,5 +465,14 @@ mod tests {
         let near = Body::new(e(2), Vec2::new(25.0, 0.0), 11.0, false, true);
         let far = Body::new(e(3), Vec2::new(-34.0, 0.0), 11.0, false, true);
         assert_eq!(plan_engulfs(&[a, far, near]), vec![(e(1), e(2))]);
+    }
+
+    #[test]
+    fn a_clump_of_symbionts_saves_the_player_from_a_predator() {
+        let predator = Body::new(e(1), Vec2::ZERO, 25.0, true, true);
+        let mut player = Body::new(e(2), Vec2::new(44.0, 0.0), 20.0, false, true);
+        assert_eq!(plan_engulfs(&[predator, player]).len(), 1);
+        player.clump = crate::secretion::autoinducer::clump_radius(20.0, &[9.5, 9.5]) - 20.0;
+        assert!(plan_engulfs(&[predator, player]).is_empty(), "too big as a clump");
     }
 }

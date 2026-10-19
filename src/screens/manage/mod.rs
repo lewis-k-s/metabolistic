@@ -40,11 +40,12 @@ use crate::GameState;
 use crate::actions::{
     ActionBar, ActionState, Level, PathwayLevels, SLOT_COUNT, SetPathwayLevel, available_actions, next_assignment, slot_line,
 };
-use crate::blocks::genome::{BlockKind, GeneState};
+use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::Cell;
 use crate::molecules::Currency;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::proteins::{Proteome, ProteinTarget, QueueProtein, RecycleProtein};
+use crate::secretion::{self, SecretionBar};
 use crate::shelter::{InShelter, sim_paused};
 
 mod diagram;
@@ -68,7 +69,8 @@ pub(crate) fn map_layer() -> RenderLayers {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Selection>()
+    app.add_message::<CycleSecretionKey>()
+        .init_resource::<Selection>()
         .init_resource::<Hovered>()
         .add_plugins((
             diagram::plugin,
@@ -89,7 +91,14 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (manage_buttons, manage_keys, update_header, update_action_bar)
+            (
+                manage_buttons,
+                manage_keys,
+                cycle_secretion_keys,
+                update_header,
+                update_action_bar,
+                update_secretion_keys,
+            )
                 .chain()
                 .run_if(in_state(GameState::Manage)),
         );
@@ -306,6 +315,8 @@ pub(super) enum ManageAction {
     Queue(ProteinTarget),
     Recycle(ProteinTarget),
     CycleSlot(usize),
+    /// Cycle the secretion on key Q (0) or E (1).
+    CycleSecretion(usize),
     SetLevel(BlockKind, Level),
 }
 
@@ -317,6 +328,7 @@ fn manage_buttons(
     mut queue: MessageWriter<QueueProtein>,
     mut recycle: MessageWriter<RecycleProtein>,
     mut levels: MessageWriter<SetPathwayLevel>,
+    mut cycles: MessageWriter<CycleSecretionKey>,
 ) {
     let Some(cell) = local_cell(&players) else {
         return;
@@ -336,6 +348,9 @@ fn manage_buttons(
                 if let Ok((mut bar, proteome)) = cells.get_mut(cell) {
                     cycle_slot(&mut bar, slot, proteome);
                 }
+            }
+            ManageAction::CycleSecretion(key) => {
+                cycles.write(CycleSecretionKey { cell, key });
             }
             ManageAction::SetLevel(kind, level) => {
                 levels.write(SetPathwayLevel { cell, kind, level });
@@ -365,6 +380,39 @@ fn manage_keys(
     }
 }
 
+/// Asks to cycle a secretion key of a cell (Manage).
+#[derive(Message, Debug, Clone, Copy)]
+struct CycleSecretionKey {
+    cell: Entity,
+    key: usize,
+}
+
+/// Keys Q and E (or a click on the key) give the key the next secretion gene
+/// of the cell. On the Run screen Q and E toggle the secretion.
+fn cycle_secretion_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    mut orders: MessageReader<CycleSecretionKey>,
+    mut cells: Query<(&mut SecretionBar, &Genome), With<Cell>>,
+) {
+    const KEYS: [KeyCode; secretion::KEY_COUNT] = [KeyCode::KeyQ, KeyCode::KeyE];
+    let mut wanted: Vec<(Entity, usize)> = orders.read().map(|o| (o.cell, o.key)).collect();
+    if let Some(cell) = local_cell(&players) {
+        for (key, code) in KEYS.iter().enumerate() {
+            if keys.just_pressed(*code) {
+                wanted.push((cell, key));
+            }
+        }
+    }
+    for (cell, key) in wanted {
+        if let Ok((mut bar, genome)) = cells.get_mut(cell) {
+            let options = secretion::available_secretions(genome);
+            let next = secretion::next_on_key(&bar, key, &options);
+            bar.keys[key] = next;
+        }
+    }
+}
+
 fn cycle_slot(bar: &mut ActionBar, slot: usize, proteome: &Proteome) {
     if let Some(content) = bar.slots.get_mut(slot) {
         *content = next_assignment(*content, &available_actions(proteome));
@@ -388,6 +436,9 @@ struct HeaderText;
 
 #[derive(Component)]
 struct ActionSlotText(usize);
+
+#[derive(Component)]
+struct SecretionKeyText(usize);
 
 fn spawn_header_and_bar(mut commands: Commands) {
     commands.spawn((
@@ -427,6 +478,18 @@ fn spawn_header_and_bar(mut commands: Commands) {
                     children![(ActionSlotText(slot), label("", 16.0))],
                 ));
             }
+            for key in 0..secretion::KEY_COUNT {
+                bar.spawn((
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                    ManageAction::CycleSecretion(key),
+                    children![(SecretionKeyText(key), label("", 16.0))],
+                ));
+            }
         });
 }
 
@@ -452,6 +515,28 @@ fn update_header(
     );
     if text.0 != line {
         text.0 = line;
+    }
+}
+
+/// The label of a secretion key in Manage: "[Q] Microcin" or "[Q] empty".
+pub fn secretion_key_label(key: usize, bar: &SecretionBar) -> String {
+    let name = bar.keys[key].map_or("empty", |s| s.name());
+    format!("[{}] {name}", secretion::KEY_LABELS[key])
+}
+
+fn update_secretion_keys(
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    cells: Query<&SecretionBar, With<Cell>>,
+    mut texts: Query<(&SecretionKeyText, &mut Text)>,
+) {
+    let Some(bar) = local_cell(&players).and_then(|c| cells.get(c).ok()) else {
+        return;
+    };
+    for (key, mut text) in &mut texts {
+        let line = secretion_key_label(key.0, bar);
+        if text.0 != line {
+            text.0 = line;
+        }
     }
 }
 

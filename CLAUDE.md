@@ -6,6 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy engine. It simulates cellular biochemistry through interconnected metabolic blocks that mirror real biological processes, teaching players about metabolism through engaging gameplay.
 
+## Agents: the Game Runs Offscreen (no game windows)
+
+- **When an agent starts the game, it opens no window.** `src/offscreen.rs` turns on offscreen mode when it finds `CLAUDECODE`, `AI_AGENT`, `CODEX_SANDBOX` or `CODEX_THREAD_ID`. This applies to `cargo run`, the smoke test, scenario launches and the playtest. Several sessions can run the game at the same time, and it works with the screen locked (tested 2026-10-18).
+- `METABOLISTIC_OFFSCREEN=1` forces the mode on, and `METABOLISTIC_OFFSCREEN=0` forces a window. **Do not set `METABOLISTIC_OFFSCREEN=0` unless the user asks to see a window.**
+- How it works: winit is off, so the primary `Window` entity has no OS window (fixed 1280x720; size queries work). Each camera that targets the primary window renders to one image (`OffscreenTarget`), and each `Screenshot::primary_window()` captures that image. Game code needs no changes. Use the Read tool to look at the PNGs.
+- Cursor: `offscreen::VirtualCursor` (logical pixels, `None` = no cursor) sets the window cursor and sends `CursorMoved`, so aim, hover and picking work as with a mouse.
+- Time: each frame is exactly 1/60 s (`TimeUpdateStrategy::ManualDuration`, also for `Time<Real>`). With the same seed and script, events, positions and aim repeat; pools can differ a little (the NPC and gene RNGs use entropy).
+- Assets: no hot reload in offscreen mode. Another session's half-edited shader cannot reach a running game (one froze a run).
+- **Agent scripts** (`src/agent_script.rs`): `METABOLISTIC_SCRIPT=pilus_aim cargo run` runs `assets/scripts/pilus_aim.json` on the Run screen and exits. A script names its scenario and has timed steps: `aim` (world offset from the player cell), `aim_screen`, `aim_nearest_cell`, `press` / `release` (`Left`, `Right`, `KeyW`, `ShiftLeft`, ... by Rust name), `wheel`, `shot`, `log`, `expect` (`{"pilus": "attached"}`, `{"aim": [1, 0]}`) and `exit`. A failed `expect` logs `FAIL` and gives exit code 3; a dead cell gives 2. Logs go to stdout, screenshots to `target/script/<name>/`. Format: the doc comment of `src/agent_script.rs`. To test a feature, write a script with `expect` steps: the exit code and the log lines tell the result without images.
+- A launch with no script (no smoke test, no playtest, no agent script) saves one frame every 2 s to `METABOLISTIC_OFFSCREEN_DIR` (default `target/offscreen`) and exits after `METABOLISTIC_OFFSCREEN_SECS` (default 20, game time). Example: `METABOLISTIC_SCENARIO=vent_motile METABOLISTIC_OFFSCREEN_SECS=8 cargo run`.
+- For long unattended runs, put `caffeinate -i` before the command, so that the Mac does not sleep.
+- `cargo run --example offscreen_spike` (`-- --soak 180`) is the minimal pattern; its soak run logs the screen lock state for each frame.
+
 ## Architecture
 
 ### Core Structure
@@ -20,7 +33,8 @@ Metabolistic3D is a 3D cellular metabolism simulation game built with the Bevy e
 - `molecules.rs`: Currency system for the 9 internal pools
 - `envgrid.rs`: `EnvGrid`, the spatial grid (Heat, Minerals): pure diffusion, drift, source and decay steps, sampling
 - `exchange.rs`: grid <-> cell exchange (mineral uptake, heat damage, movement ATP cost) in the metabolic tick
-- `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold to reel, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on the left mouse button, injector on the right). Bindings on the Run screen: WASD moves, Shift is the flagellum burst, the four action slots are the left, right, back and forward mouse buttons (keys 1-4 also work). The flagellum trails the move direction (`ActionState::heading`); aimed proteins point at the cursor (`aim`)
+- `pilus.rs`, `stun.rs`: the type IV pilus (shoot, hold, scroll down reels in and scroll up pays out, release) and the type VI injector (contact stun). Pure rules, headless. `world/pilus_view.rs` adds the avian2d joint (needs avian's `xpbd_joints` feature) and the line sprite. The aim of `ActionState` follows the cursor on the Run screen. Try them with `METABOLISTIC_SCENARIO=vent_predator cargo run` (pilus on the left mouse button, injector on the right). Bindings on the Run screen: WASD moves, Shift is the flagellum burst, the four action slots are the left, right, back and forward mouse buttons (keys 1-4 also work), and Q and E toggle the two secretions (`secretion::SecretionBar`). The flagellum trails the move direction (`ActionState::heading`); aimed proteins sit in a cluster round the cursor (`aim`): the last used one (`AimOrder`) points exactly at it, the others one row to each side
+- `secretion/`: area clouds that a cell secretes, with no aim (plan: `docs/secretion-abilities-plan.md`). Each is a gene with a block whose `FluxProfile` has demands only; its `Drive` is 0 until Q or E switches it on, and its turnover goes into an `EnvGrid` channel (`Channel::SECRETED`). `microcin` (`cvaC`, hurts prey), `slime` (`pelA`, drag on other cells), `siderophore` (`entF`, dissolves `particles::RustPickup` into Metals), `autoinducer` (`luxS`, AI-2: symbionts clump, predators listen). Empty channels go dormant and `EnvGrid::step` skips them. `world/cloud_view.rs` draws the clouds (`assets/shaders/clouds.wgsl`)
 - `lighting.rs`: the pure light field (ambient + heat + shaft light) and the lightmap; `world/lighting_view.rs` draws it as a banded, dithered darkness overlay (`assets/shaders/lighting.wgsl`). Plan: `docs/art-direction.md`, "Light and darkness"
 - `movement.rs`: pure thrust, mass, drag and ATP-cost formulas
 - `level.rs`: the hand-built vent field and `LevelDef`, the value the world spawns from
@@ -55,18 +69,23 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Web-optimized build**: `cargo build --release`
 - **Headless build**: `cargo build --no-default-features --features headless` (no graphics/audio)
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
+- **New worktree**: `scripts/seed-target` clones the main checkout's `target/debug` (APFS clone, about 40 s, no disk space) so that the first build does not compile Bevy again (4-8 min). The `SessionStart` hook in `.claude/settings.json` runs it in the background for Claude worktrees; run it by hand in a Codex worktree before the first build.
+- **sccache** (macsimus only, user-wide in `~/.cargo/config.toml`): one cache of compiled dependencies for the main checkout and all worktrees, in `/Volumes/HUBSSD/tmp/lewis/sccache` (60 GiB). It does not cache our own crate, proc macros, build scripts or the Bevy dylib. `sccache --show-stats` shows hits and misses; if the server cannot be reached, cargo compiles without the cache.
+- **Debug info**: our crate builds with `debug = "line-tables-only"` (backtraces have lines; no variables in a debugger). Set `debug = true` locally to debug.
 
 ### Smoke Test (full game)
-- `METABOLISTIC_SMOKE_TEST=1 cargo run` opens the window for about 15 s, checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
+- `METABOLISTIC_SMOKE_TEST=1 cargo run` runs for about 60 s (offscreen for agents, a window otherwise), checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
 - Use it after engine upgrades or changes to screens, cameras, input or UI. It is the one allowed exception to "do not run `cargo run`" below, because it exits on its own.
 - Expected noise: bevy_egui "Bindless textures are not yet supported on metal", and a winit "Skipped event Destroyed" on exit.
 
 ### Scenario Launch (fast testing)
 - `METABOLISTIC_SCENARIO=vent_motile cargo run` (or `cargo run -- --scenario vent_motile`) opens directly in a Run with a prepared cell. It skips Menu and Prepare. A bare name is `assets/scenarios/<name>.json`; a name with `/` or `.json` is a path. A bad file stops the game with the parse error.
 - A scenario file sets stage, seed, spawn, genes, enzymes, membrane proteins, action slots, pools, codex genes and `invulnerable`. All fields are optional (`{"stage":"Vent","membrane":{"Flagellum":3}}` is valid). Format and rules: the doc comment of `src/scenario.rs`.
-- Presets: `vent_motile` (3 flagella, transporter, burst), `vent_hunter` (flagella, adhesin, toxin, high ATP), `shallow_start` (light capture, catalase), `land_start`. To add one, put a JSON file in `assets/scenarios/`; the test `every_preset_loads_and_builds_a_cell` checks it.
+- Presets: `vent_motile` (3 flagella, transporter, burst), `vent_hunter` (flagella, adhesin, toxin, high ATP), `shallow_start` (light capture, catalase), `land_start`, `vent_chemist` (microcin, slime, injector), `shallow_chemist` (siderophore, AI-2). To add one, put a JSON file in `assets/scenarios/`; the test `every_preset_loads_and_builds_a_cell` checks it.
 - F9 in a run writes the cell's current state as a scenario to `scenario-dump.json` in the save dir. A scenario run never writes the real codex file.
 - The scenario launch does not work together with `METABOLISTIC_SMOKE_TEST`.
+- **Look gallery**: add `METABOLISTIC_LOOK_GALLERY=1` to a scenario launch to spawn one NPC of each body look round the player (`src/look_gallery.rs`); with the offscreen frames it is the review for the shader bodies. A prey dies after 4 s and the lysis shot goes to `target/gallery/lysis.png`.
+- **Scripted playtest**: add `METABOLISTIC_PLAYTEST=1` to a scenario launch (`METABOLISTIC_SCENARIO=vent_chemist METABOLISTIC_PLAYTEST=1 cargo run`). It presses Q, E and W on a fixed script, logs pools, cloud levels and nearby NPCs each second, saves screenshots to `METABOLISTIC_PLAYTEST_DIR` (default `target/playtest`) and exits after 20 s (`src/playtest.rs`). Like the smoke test, it exits on its own. Use an `"invulnerable": true` scenario so the run does not end early.
 
 ### Level Tool (view, check, play levels)
 - `cargo levels list` / `cargo levels check [ids]`: list levels; parse, build and run `layout::validate` (exit 1 on a broken rule).
@@ -81,7 +100,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - The viewer template is `tools/level-viewer/viewer.html`; the bin is `src/bin/levels/`. Format: the doc comment of `src/level_file.rs`.
 
 ### Testing
-- **Run all tests**: `cargo test` (full build, about 10 s after an edit)
+- **Run all tests**: `cargo test` (full build, 20-45 s after an edit). It does not build doctests, the binary's test harness or the example. For one area, `cargo test --test it <module>::` or `cargo test --lib <path>` is faster
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
 - **Integration test layout**: all integration tests are modules of one binary, `tests/it/main.rs` (one link step instead of one per file). Add a new test file to `tests/it/` and a `mod` line to `main.rs`. Only the `tui_*` tests stay separate binaries. Run one file with `cargo test --test it <module>::`. Proptest seeds are in `tests/proptest-regressions/`.
@@ -91,13 +110,13 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
-- `full` (default): Complete build with graphics, audio, UI, and egui inspector
+- `full` (default): 2D graphics, UI, picking, physics and the egui inspector. It lists the Bevy parts one by one (not `bevy/default`): no 3D, audio, gamepads, scenes, UI widgets, sysinfo or `bevy_dev_tools`. If code needs one of these, add its Bevy feature to `full` in `Cargo.toml`
 - `headless`: Simulation only (no graphics, audio, UI, physics). Always use with `--no-default-features`.
 - `tui`: Opt-in terminal monitor for cell state. Not in `full`, because it takes over the terminal. It turns itself off when stdout is not a terminal.
 - `dev`: Development features with dynamic linking and dev tools
 - `dev_native`: Development features plus file watching for hot reload
 
-Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `smoke_test`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
+Graphical modules (`screens`, `dev_tools`, `debug`, `inspector`, `offscreen`, `smoke_test`) compile only with `full`. Simulation modules (`blocks`, `cell`, `metabolism`, `molecules`, `shared`) must not depend on them.
 
 ### Development Tools (In-Game)
 - **Inspector**: F1 to open runtime debugging and inspection tools
@@ -193,7 +212,7 @@ The codebase includes comprehensive testing with multiple categories:
 - **Headless testing**: All tests run without graphics dependencies using MetabolisticApp::new_headless()
 
 ## Development Warnings
-- **Do not run `cargo run`** in development environments - it will launch the full UI
+- **Do not run `cargo run`** for a person's window. For an agent, `cargo run` is offscreen and exits by itself (see "Agents: the Game Runs Offscreen"); the smoke test and `cargo run --example offscreen_spike` also exit by themselves
 - **Use headless mode** for testing: `MetabolisticApp::new_headless()` in tests
 - **GPU/Graphics dependencies**: Full build requires graphics drivers; use `--features headless` for CI/containers
 - **Audio dependencies**: Full build requires ALSA/audio libraries; use setup script for containers (`codex-setup.sh`)

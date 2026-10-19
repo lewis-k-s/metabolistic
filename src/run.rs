@@ -228,6 +228,9 @@ pub fn death_message(cause: Option<DeathCause>, source: Option<DamageSource>) ->
             Some(DamageSource::Desiccation) => {
                 "Your membrane failed. Main damage: desiccation. You dried out away from water.".to_string()
             }
+            Some(DamageSource::Microcin) => {
+                "Your membrane failed. Main damage: a microcin, a bacteriocin of a rival cell.".to_string()
+            }
             None => "Your membrane failed.".to_string(),
         },
         None => "The run ended.".to_string(),

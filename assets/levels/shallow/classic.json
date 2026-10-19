@@ -107,10 +107,6 @@
       "label": "Engulfer",
       "archetype": "Predator"
     },
-    "prey": {
-      "label": "Bacillus",
-      "archetype": "Prey"
-    },
     "prey_catalase": {
       "label": "Catalase bacillus",
       "archetype": "Prey",
@@ -121,9 +117,15 @@
       "archetype": "Prey",
       "signature": "LightCapture"
     },
-    "symbiont": {
+    "prey_siderophore": {
+      "label": "Bacillus (Siderophore)",
+      "archetype": "Prey",
+      "signature": "Siderophore"
+    },
+    "symbiont_autoinducer": {
       "label": "Symbiont",
-      "archetype": "Symbiont"
+      "archetype": "Symbiont",
+      "signature": "Autoinducer"
     }
   },
   "spawns": [
@@ -191,14 +193,14 @@
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_siderophore",
       "at": [
         -300.0,
         -200.0
       ]
     },
     {
-      "mob": "prey",
+      "mob": "prey_siderophore",
       "at": [
         100.0,
         -300.0
@@ -219,21 +221,21 @@
       ]
     },
     {
-      "mob": "symbiont",
+      "mob": "symbiont_autoinducer",
       "at": [
         -600.0,
         -60.0
       ]
     },
     {
-      "mob": "symbiont",
+      "mob": "symbiont_autoinducer",
       "at": [
         100.0,
         -100.0
       ]
     },
     {
-      "mob": "symbiont",
+      "mob": "symbiont_autoinducer",
       "at": [
         340.0,
         -300.0

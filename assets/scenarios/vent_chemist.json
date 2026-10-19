@@ -1,0 +1,14 @@
+{
+  "stage": "Vents",
+  "seed": 1,
+  "genes": { "Microcin": "Expressed", "Slime": "Expressed" },
+  "enzymes": { "Microcin": 1, "Slime": 1 },
+  "membrane": { "Flagellum": 2, "Injector": 1, "Transporter": 1 },
+  "actions": [
+    "Injector",
+    null,
+    null,
+    "InduceMutation"
+  ],
+  "pools": { "ATP": 300, "AminoAcids": 60, "CarbonSkeletons": 60, "Lipids": 60 }
+}

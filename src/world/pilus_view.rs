@@ -6,7 +6,10 @@
 //!   to the target. Its maximum length is the tether length, so a shrinking
 //!   tether pulls both bodies together, each by its mass. A wall tile has no body,
 //!   so a static anchor body sits at the tip. The joint is removed when the
-//!   tether ends or changes target.
+//!   tether ends or changes target. The joint is a little soft
+//!   (`JOINT_COMPLIANCE`): a hard XPBD limit that shrinks each frame turns
+//!   each step into a velocity kick, and the bodies fly together much faster
+//!   than the reel. Avian needs its `xpbd_joints` feature for any joint.
 //! - **Line**: a sprite (`pilus_line.png`, a tiled strand) from the mount point
 //!   on the owner to the anchor. It is the one sprite here that turns and
 //!   stretches, because it is a line and not a baked body.
@@ -23,6 +26,11 @@ use crate::InRun;
 const LINE_Z: f32 = 0.3;
 /// Thickness of the line in pixels.
 const LINE_THICKNESS: f32 = 3.0;
+
+/// Compliance of the pilus joint (inverse stiffness, pixels per newton). With
+/// 0.001 a reeled prey runs at most about 8 px ahead of the fibre and the fibre
+/// stretches about 1 px against a strong pull (see the test). **Playtest.**
+pub const JOINT_COMPLIANCE: f32 = 0.001;
 
 /// A joint made for a tether.
 #[derive(Component, Debug, Clone, Copy)]
@@ -105,7 +113,9 @@ fn sync_pilus_joints(
                 target: tether.target,
                 anchor,
             },
-            DistanceJoint::new(owner, other).with_limits(0.0, tether.length),
+            DistanceJoint::new(owner, other)
+                .with_limits(0.0, tether.length)
+                .with_compliance(JOINT_COMPLIANCE),
             DespawnOnExit(InRun),
         ));
     }
@@ -191,6 +201,8 @@ mod tests {
             anchor: Vec2::ZERO,
             length: 50.0,
             min_length: 30.0,
+            max_length: 160.0,
+            wanted: 50.0,
             pull: Pull::TargetToOwner,
         }
     }
@@ -215,5 +227,68 @@ mod tests {
         assert_eq!(end.x, 60.0);
         // A body at the anchor has no line.
         assert_eq!(line_ends(Vec2::ZERO, 20.0, Vec2::ZERO, None), None);
+    }
+
+    // --- Physics: the joint pulls ---
+
+    use std::time::Duration;
+
+    /// A player body (radius 20) at the origin and a prey body (radius 11) at
+    /// x = 120 that pushes east with `flee`. The joint limit shrinks at the reel
+    /// speed for 3 s. Returns the most that the prey ran ahead of the limit, the
+    /// most that the fibre stretched, and the last distance.
+    fn reel_bodies(flee: f32) -> (f32, f32, f32) {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            TransformPlugin,
+            bevy::diagnostic::DiagnosticsPlugin,
+            PhysicsPlugins::default().with_length_unit(20.0),
+        ))
+        .insert_resource(Gravity(Vec2::ZERO))
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 64.0)));
+        let body = |radius: f32, mass: f32, drag: f32, x: f32, force: f32| {
+            (
+                RigidBody::Dynamic,
+                Collider::circle(radius),
+                Mass(mass),
+                LinearDamping(drag),
+                LockedAxes::ROTATION_LOCKED,
+                ConstantForce(Vec2::new(force, 0.0)),
+                Transform::from_xyz(x, 0.0, 0.0),
+            )
+        };
+        let a = app.world_mut().spawn(body(20.0, 1.0, 3.0, 0.0, 0.0)).id();
+        let b = app.world_mut().spawn(body(11.0, 0.32, 1.7, 120.0, flee)).id();
+        let joint = app
+            .world_mut()
+            .spawn(DistanceJoint::new(a, b).with_limits(0.0, 120.0).with_compliance(JOINT_COMPLIANCE))
+            .id();
+        app.finish();
+        app.cleanup();
+        let (mut ahead, mut stretch, mut distance) = (0.0_f32, 0.0_f32, 0.0);
+        for i in 0..192 {
+            let max = (120.0 - i as f32 * crate::pilus::PILUS_RETRACT_SPEED / 64.0).max(35.0);
+            app.world_mut().get_mut::<DistanceJoint>(joint).unwrap().limits.max = max;
+            app.update();
+            let at = |e| app.world().get::<Transform>(e).unwrap().translation.truncate();
+            distance = at(a).distance(at(b));
+            if max > 40.0 {
+                ahead = ahead.max(max - distance);
+            }
+            stretch = stretch.max(distance - max);
+        }
+        (ahead, stretch, distance)
+    }
+
+    #[test]
+    fn the_joint_reels_the_prey_in_smoothly_and_holds_a_fleeing_prey() {
+        let (ahead, stretch, distance) = reel_bodies(0.0);
+        assert!(distance < 36.0, "the prey came in: {distance}");
+        assert!(ahead < 12.0, "the prey did not fly ahead of the fibre: {ahead}");
+        assert!(stretch < 2.0, "{stretch}");
+        let (ahead, stretch, distance) = reel_bodies(600.0);
+        assert!(distance < 37.0, "a fleeing prey came in too: {distance}");
+        assert!(ahead < 2.0 && stretch < 3.0, "{ahead} {stretch}");
     }
 }

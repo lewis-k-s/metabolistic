@@ -69,6 +69,11 @@ uv run --with numpy art/gen_sprites.py
    cell that a blow or a current carries does not stretch. The frame never
    rotates.
 
+   **Shader bodies** (on by default, see "Cell bodies as shaders" below) keep
+   the rule's intent in a different way: the shader turns the shape to the
+   heading, but it lights each pixel from the upper left after the turn, so
+   the light never turns with the body.
+
 ## Sprite list
 
 | File | Size | Roadmap use |
@@ -81,7 +86,7 @@ uv run --with numpy art/gen_sprites.py
 | `gate_cell_proteobacterium` | 72x72 | M7, gate cell of the shallow-water stage (rose, cristae folds) |
 | `virus_phage` | 44x28 | M5, virus (lies flat, points right) |
 | `food_carbon` | 12x12 | M2, OrganicCarbon particle |
-| `pickup_mineral` | 12x18 | M2, Minerals particle |
+| `pickup_mineral` | 12x18 | M2, shape of the `mol_minerals` icon (not on the floor: the lighting shader draws minerals as specks) |
 | `pickup_metal_fes` | 16x16 | M1/M2, Metals cofactor |
 | `wall_membrane` | 16x26 | M5, world membrane (tiles sideways) |
 | `wall_membrane_pore` | 32x26 | M5, wall with a transporter |
@@ -381,6 +386,28 @@ cell moves. It is a placeholder until the proteome says which overlays to draw.
 `anchor_px` is rounded down to a whole pixel, so a sprite never sits on a half
 pixel (the cell frames are centred on 32.5).
 
+### Cell bodies as shaders
+
+On the Run screen the run camera draws into a low-res canvas, one texel per
+world pixel (`world::shader_cells`), and every cell body (the player and the
+NPCs) is a quad with `assets/shaders/cell.wgsl`: a run-time port of
+`blob_sdf`, `capsule_sdf`, `lit_body`, `disc`, `halo` and `outline` of the
+generator. The body plan of each cell is a `cell_look::CellLook` (shape, ramps,
+organelles, features); its lengths are in units of the world radius, so a body
+grows with `CellSize` and matches its collider. The sprites stay, on a render
+layer that no camera draws, for the engulf clip and the tint (ROS, stun).
+F7 goes back to the sprites; the Manage inset still uses them.
+
+What the shader adds over the sheets: a smooth turn to the heading (no
+8-row snap), an idle loop offset for each cell, a spawn that grows and
+dithers in, a lysis on death (the rim breaks, the inside dithers away, specks
+spill; it replaces the `death` clip), a rim that thins with membrane damage
+and has gaps below 50 %, and a brighter glow on a symbiont in contact.
+
+`METABOLISTIC_LOOK_GALLERY=1` with a scenario launch spawns one of each look
+round the player (`src/look_gallery.rs`). Plan and the cast of primordial cell
+types still to build: `docs/npc-shader-cells-plan.md`.
+
 ## Light and darkness
 
 Status: 2026-10-18. Phase 1 (lightmap, darkness overlay, debug key F6) is in
@@ -391,9 +418,14 @@ from phase 3). The other phases are not.
 Heat and Light bands (the orange glow round the vents and the yellow and
 violet light zones). The lighting shows the vents and the UV shafts on its
 own. The grid still draws O2, water and, on land, minerals. In the vents and in
-shallow water the minerals are fine cyan specks (1 sprite pixel, a BAYER4
-dither of the mineral level, at most 40 % of the pixels), drawn by the
-lighting shader on the additive quad from the alpha channel of the lightmap.
+shallow water the minerals are fine cyan specks (1 sprite pixel, picked by a
+hash of the pixel so the spacing is irregular, at most 12 % of the pixels),
+drawn by the lighting shader on the additive quad from the alpha channel of
+the lightmap. Each speck glints on its own clock (a quick rise, a slow fall to
+a dim base) and at the peak it grows a plus. The light sets the base
+brightness and how hard a glint hits, and a glint takes some of the warm hue
+of the light. The vents also throw a few tiny blue motes (the `mineral` ramp,
+`vfx::mineral_effect`), emissive like the sparkles.
 The grid texel is 4 world pixels, which was too coarse for a dither. The vent level has a
 textured floor sprite (`seafloor`, tiled at z -20, under the grid image), and
 the darkness darkens it like the rest. The burn zone (heat from about 30 to

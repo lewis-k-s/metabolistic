@@ -94,6 +94,10 @@ enum HudSlot {
     Slot(usize),
 }
 
+/// The line of a secretion key (0 is Q, 1 is E). Empty when the key is empty.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+struct HudSecretion(usize);
+
 const LINES: [HudLine; 17] = [
     HudLine::Stage,
     HudLine::Atp,
@@ -116,7 +120,7 @@ const LINES: [HudLine; 17] = [
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(GameState::Run), spawn_hud)
-        .add_systems(Update, update_hud.run_if(in_state(GameState::Run)));
+        .add_systems(Update, (update_hud, update_secretion_hud).run_if(in_state(GameState::Run)));
 }
 
 fn spawn_hud(mut commands: Commands) {
@@ -156,6 +160,9 @@ fn spawn_hud(mut commands: Commands) {
             for slot in 0..SLOT_COUNT {
                 parent.spawn((HudSlot::Slot(slot), label("", 18.0)));
             }
+            for key in 0..crate::secretion::KEY_COUNT {
+                parent.spawn((HudSecretion(key), label("", 18.0)));
+            }
         });
 }
 
@@ -185,6 +192,25 @@ pub fn text_bar(value: f32, max: f32, width: usize) -> String {
 /// One HUD line of text: a name, a bar and the number.
 fn bar_line(name: &str, value: f32, max: f32) -> String {
     format!("{name:<10} {} {value:6.1}", text_bar(value, max, BAR_WIDTH))
+}
+
+fn update_secretion_hud(
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    cells: Query<
+        (&crate::secretion::SecretionBar, &crate::secretion::Secreting, &crate::blocks::genome::Genome),
+        With<Cell>,
+    >,
+    mut lines: Query<(&HudSecretion, &mut Text)>,
+) {
+    let Some((bar, secreting, genome)) = players.iter().find_map(|c| cells.get(c.0).ok()) else {
+        return;
+    };
+    for (key, mut text) in &mut lines {
+        let line = crate::secretion::key_line(key.0, bar, secreting, genome);
+        if text.0 != line {
+            text.0 = line;
+        }
+    }
 }
 
 fn update_hud(

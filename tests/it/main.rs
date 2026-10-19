@@ -22,6 +22,7 @@ mod multi_system_interactions;
 mod npc_benchmark;
 mod precision_tests;
 mod run_structure_test;
+mod secretion_test;
 mod shallow_water_test;
 mod simulation_core_test;
 mod solver_invariants;

@@ -6,8 +6,8 @@
 //! player goes back to the menu. Every world entity has
 //! `DespawnOnExit(InRun)`, and the `EnvGrid` resource is removed on exit.
 //!
-//! - `grid_view`: draws the grid as one texture, plus the vents and the
-//!   mineral particles.
+//! - `grid_view`: draws the grid as one texture, plus the sea floor and the
+//!   vents.
 //! - `player_body`: the physics body, thrust, camera and blob look of the
 //!   player's cell. The cell plays baked sprite sheets.
 //! - `actions_view`: slot hotkeys, toxin droplets, membrane protein overlays,
@@ -19,8 +19,8 @@
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
 //! - `lighting_view`: the lightmap and the darkness overlay (F6 turns it off).
 //! - `vfx`: vent smoke and sparkles (`bevy_enoki`).
-//! - `shader_cells`: spike, off by default: the player's body as an SDF shader
-//!   on a low-res canvas (F7).
+//! - `shader_cells`: every cell body (player and NPCs) as an SDF shader on a
+//!   low-res canvas (on by default; F7 goes back to the sprites).
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -30,7 +30,7 @@ use crate::level::{CurrentLevel, LevelDef};
 use crate::run::RunState;
 use crate::npc::{KeyGeneRule, NpcRng, NpcSlots, RespawnTimers, spawn_npc, spawn_slot};
 use crate::particles::{
-    ParticleTimers, ParticleZones, point_in_circle, spawn_food, spawn_metal, spawn_virus,
+    ParticleTimers, ParticleZones, point_in_circle, spawn_food, spawn_metal_or_rust, spawn_virus,
     VIRUS_SPEED,
 };
 use crate::proteins::Proteome;
@@ -42,6 +42,7 @@ use crate::InRun;
 use rand::prelude::*;
 
 pub mod actions_view;
+pub mod cloud_view;
 pub mod grid_view;
 pub mod hud;
 pub mod interior_view;
@@ -101,6 +102,7 @@ pub fn plugin(app: &mut App) {
             npc_view::plugin,
             shader_cells::plugin,
             lighting_view::plugin,
+            cloud_view::plugin,
             vfx::plugin,
         ))
         .add_systems(OnEnter(InRun), spawn_world)
@@ -141,13 +143,13 @@ fn spawn_world(
         grid_view::spawn_vent(&mut commands, &asset_server, vent);
         vfx::spawn_vent_particles(&mut commands, vent, grid.params(crate::environment::Channel::Heat).drift);
     }
-    grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);
     let walls = def.wall_map();
     walls_view::spawn_walls(&mut commands, &asset_server, &mut meshes, &mut membrane_materials, &walls, &grid, &def);
     shapes_view::spawn_shapes(&mut commands, &mut meshes, &mut rock_materials, &mut mat_materials, &def);
     commands.insert_resource(walls);
     lighting_view::spawn_lighting(&mut commands, &grid, def.field.ambient());
+    cloud_view::spawn_clouds(&mut commands, &grid);
     commands.insert_resource(grid);
     commands.insert_resource(UvFraction(def.uv_fraction));
     for shelter in def.shelters.iter().copied() {
@@ -178,6 +180,7 @@ fn spawn_world(
     commands.entity(gate).insert((
         crate::gate::GateProgress::default(),
         crate::gate::GateSprite(def.gate_sprite),
+        crate::cell_look::BodyLook(crate::cell_look::CellLook::gate(def.gate_sprite)),
     ));
     for (index, position) in def.viruses.iter().enumerate() {
         let angle = index as f32 * 2.1;
@@ -189,11 +192,13 @@ fn spawn_world(
     }
     for _ in 0..def.initial_metals {
         let (centre, radius) = def.metal_zones[rng.0.random_range(0..def.metal_zones.len())];
-        spawn_metal(&mut commands, point_in_circle(centre, radius, &mut rng.0));
+        let position = point_in_circle(centre, radius, &mut rng.0);
+        spawn_metal_or_rust(&mut commands, position, def.field.rust_share(), &mut rng.0);
     }
     commands.insert_resource(ParticleZones {
         food: def.food_zones.clone(),
         metals: def.metal_zones.clone(),
+        rust_share: def.field.rust_share(),
     });
     commands.insert_resource(ParticleTimers::default());
 

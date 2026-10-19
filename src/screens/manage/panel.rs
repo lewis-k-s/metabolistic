@@ -71,6 +71,11 @@ fn channel_name(channel: Channel) -> &'static str {
         Channel::Light => "light",
         Channel::O2 => "oxygen",
         Channel::Water => "water",
+        Channel::Microcin => "microcin",
+        Channel::Slime => "slime",
+        Channel::Siderophore => "siderophore",
+        Channel::FeSiderophore => "iron-siderophore",
+        Channel::Autoinducer => "AI-2",
     }
 }
 

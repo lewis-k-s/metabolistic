@@ -8,7 +8,9 @@
 //! From top to bottom: the outside (heat, minerals and light, drawn in
 //! `outside`), the membrane band, six lanes (intake pools, energy pathways, hub
 //! pools, build pathways, products, users), and the ribosome. The right column
-//! holds the O2, ROS and Waste pools and the Catalase and Export plates. Pipes
+//! holds the O2, ROS and Waste pools and the Catalase and Export plates. The
+//! microcin and slime plates sit in the intake lane, under the membrane:
+//! their product goes out through it. Pipes
 //! run in the corridors between lanes and in the gutters between columns, so
 //! they never cross a node, and a `Router` gives each pipe its own track, so
 //! two pipes never lie on one another.
@@ -162,10 +164,18 @@ impl Layout {
             FatStorage => (1, 5),
             Cuticle => (2, 5),
             VesicleExport => (4, 5),
+            // Secretions: what they make leaves the cell.
+            Microcin => (2, 0),
+            Slime => (3, 0),
+            Siderophore => (4, 3),
+            Autoinducer => (3, 5),
             _ => return None,
         };
+        // A plate in the intake lane sits 2 px off the plate grid, like a
+        // pool, so its pipes and those of the plate below never share a line.
+        let shift = if lane == 0 { 2.0 } else { 0.0 };
         Some(Place {
-            pos: Vec2::new(self.columns[column], self.lanes[lane]),
+            pos: Vec2::new(self.columns[column] + shift, self.lanes[lane]),
             size: PLATE_SIZE,
         })
     }
@@ -217,9 +227,10 @@ impl Layout {
         ((upper + lower) / 2.0, upper - lower)
     }
 
-    /// Half the height of the nodes of a lane (plates on the even lanes).
+    /// Half the height of the tallest nodes of a lane: plates on the odd lanes
+    /// and in the intake lane (the secretion plates), pools on the others.
     fn lane_half(&self, lane: usize) -> f32 {
-        if lane % 2 == 0 { POOL_SIZE.y / 2.0 } else { PLATE_SIZE.y / 2.0 }
+        if lane % 2 == 0 && lane != 0 { POOL_SIZE.y / 2.0 } else { PLATE_SIZE.y / 2.0 }
     }
 
     /// A pipe from the membrane band straight down to a node (outside energy,

@@ -136,6 +136,10 @@ pub fn plate_label(kind: BlockKind) -> &'static str {
         BlockKind::FatStorage => "Fat storage",
         BlockKind::Cuticle => "Cuticle",
         BlockKind::VesicleExport => "Vesicle\nexport",
+        BlockKind::Microcin => "Microcin",
+        BlockKind::Slime => "Slime",
+        BlockKind::Siderophore => "Siderophore",
+        BlockKind::Autoinducer => "AI-2 call",
         _ => "?",
     }
 }
@@ -185,6 +189,10 @@ fn channel_color(channel: Channel) -> Color {
         Channel::Minerals => currency_color(Currency::Minerals),
         Channel::O2 => currency_color(Currency::O2),
         Channel::Water => Color::srgb(0.4, 0.6, 1.0),
+        Channel::Microcin => Color::srgb(0.47, 0.75, 0.16),
+        Channel::Slime => Color::srgb(0.86, 0.86, 0.8),
+        Channel::Siderophore | Channel::FeSiderophore => currency_color(Currency::Metals),
+        Channel::Autoinducer => Color::srgb(0.47, 0.83, 0.6),
     }
 }
 
@@ -277,6 +285,10 @@ pub(super) fn accent(kind: BlockKind) -> Color {
         BlockKind::FatStorage => Color::srgb(0.95, 0.85, 0.5),
         BlockKind::Cuticle => Color::srgb(0.75, 0.7, 0.55),
         BlockKind::VesicleExport => Color::srgb(0.7, 0.6, 0.45),
+        BlockKind::Microcin => Color::srgb(0.47, 0.75, 0.16),
+        BlockKind::Slime => Color::srgb(0.86, 0.86, 0.8),
+        BlockKind::Siderophore => Color::srgb(0.83, 0.69, 0.19),
+        BlockKind::Autoinducer => Color::srgb(0.47, 0.83, 0.6),
         _ => Color::WHITE,
     }
 }
