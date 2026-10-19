@@ -90,7 +90,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Test categories**: Integration tests, unit tests, metabolic flow tests, genome tests, property tests
 
 ### Feature Flags
-- `full` (default): Complete build with graphics, audio, UI, and egui inspector
+- `full` (default): 2D graphics, UI, picking, physics and the egui inspector. It lists the Bevy parts one by one (not `bevy/default`): no 3D, audio, gamepads, scenes, UI widgets, sysinfo or `bevy_dev_tools`. If code needs one of these, add its Bevy feature to `full` in `Cargo.toml`
 - `headless`: Simulation only (no graphics, audio, UI, physics). Always use with `--no-default-features`.
 - `tui`: Opt-in terminal monitor for cell state. Not in `full`, because it takes over the terminal. It turns itself off when stdout is not a terminal.
 - `dev`: Development features with dynamic linking and dev tools

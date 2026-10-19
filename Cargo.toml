@@ -51,7 +51,13 @@ avian2d = { version = "0.7", optional = true, default-features = false, features
   # The pilus joint (`world::pilus_view`). Without it avian ignores all joints.
   "xpbd_joints",
 ] }
-bevy-inspector-egui = { version = "0.37", optional = true }
+# No default features: they pull in the 3D renderer (bevy_pbr) and reflect
+# docs for every type. The game is 2D only.
+bevy-inspector-egui = { version = "0.37", optional = true, default-features = false, features = [
+  "2d",
+  "bevy_gizmos",
+  "egui_clipboard",
+] }
 # bevy-inspector-egui 0.37 needs bevy_egui 0.40 and egui 0.34.
 bevy_egui = { version = "0.40", optional = true }
 egui = { version = "0.34", optional = true }
@@ -68,10 +74,32 @@ default = [
   "full",
 ]
 
-# Full build with graphics, audio, UI, and the egui inspector
+# Full build with 2D graphics, UI, and the egui inspector.
+# The Bevy parts are listed one by one instead of `bevy/default`: the game does
+# not use 3D (pbr, gltf), audio, gamepads (gilrs), scenes, UI widgets or
+# sysinfo, and each of them adds compile time and size to the Bevy dylib.
+# Add a part here when the game starts to use it (see Bevy's Cargo.toml for
+# the names).
 full = [
-  "bevy/default",
-  "bevy/bevy_gizmos",
+  "bevy/default_app",
+  "bevy/std",
+  "bevy/multi_threaded",
+  "bevy/bevy_winit",
+  "bevy/bevy_clipboard",
+  "bevy/default_font",
+  "bevy/custom_cursor",
+  # Web and Linux window backends. They compile nothing on macOS.
+  "bevy/webgl2",
+  "bevy/x11",
+  "bevy/wayland",
+  # Sprites, meshes, cameras, gizmos, text, png and the 2D render pipeline.
+  "bevy/2d_bevy_render",
+  "bevy/ui_api",
+  "bevy/ui_bevy_render",
+  # `Pickable` and `Pointer<..>` events (the Manage map).
+  "bevy/bevy_picking",
+  "bevy/sprite_picking",
+  "bevy/ui_picking",
   "bevy/bevy_ui_debug",
   "dep:avian2d",
   "dep:bevy-inspector-egui",
@@ -91,7 +119,8 @@ tui = ["dep:ratatui", "dep:crossterm"]
 dev = [
   # Improve compile times for dev builds by linking Bevy as a dynamic library.
   "bevy/dynamic_linking",
-  "bevy/bevy_dev_tools",
+  # No `bevy/bevy_dev_tools`: the game does not use it, and it pulls in
+  # bevy_pbr. The UI outlines (backquote) come from `bevy/bevy_ui_debug`.
 ]
 dev_native = [
   "dev",
