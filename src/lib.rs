@@ -5,6 +5,7 @@ use bevy::state::app::StatesPlugin;
 pub mod actions;
 pub mod blocks;
 pub mod cell;
+pub mod cell_look;
 pub mod codex;
 pub mod codex_catalog;
 pub mod desiccation;
@@ -52,6 +53,8 @@ pub mod debug;
 pub mod dev_tools;
 #[cfg(feature = "full")]
 pub mod inspector;
+#[cfg(feature = "full")]
+pub mod look_gallery;
 #[cfg(feature = "full")]
 pub mod offscreen;
 #[cfg(feature = "full")]
@@ -187,6 +190,9 @@ impl MetabolisticApp {
             }
             if agent_script::requested() {
                 app.add_plugins(agent_script::plugin);
+            }
+            if look_gallery::requested() {
+                app.add_plugins(look_gallery::plugin);
             }
         }
 

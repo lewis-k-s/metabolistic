@@ -192,9 +192,15 @@ fn fade_droplets(mut droplets: Query<(&ToxinDroplet, &mut Sprite)>) {
 fn spawn_death_fx(
     mut died: MessageReader<NpcDied>,
     sheets: Res<Sheets>,
+    shader: Res<crate::world::shader_cells::ShaderCells>,
+    canvas: Res<crate::world::shader_cells::Canvas>,
     mut commands: Commands,
 ) {
     for death in died.read() {
+        // A shader body bursts instead (`shader_cells::spawn_lysis`).
+        if shader.0 && canvas.is_open() {
+            continue;
+        }
         let Some(bundle) = sheets.bundle(spec(death.archetype).sprite, clip::DEATH) else {
             continue;
         };

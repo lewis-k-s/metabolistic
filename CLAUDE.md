@@ -82,6 +82,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - Presets: `vent_motile` (3 flagella, transporter, burst), `vent_hunter` (flagella, adhesin, toxin, high ATP), `shallow_start` (light capture, catalase), `land_start`, `vent_chemist` (microcin, slime, injector), `shallow_chemist` (siderophore, AI-2). To add one, put a JSON file in `assets/scenarios/`; the test `every_preset_loads_and_builds_a_cell` checks it.
 - F9 in a run writes the cell's current state as a scenario to `scenario-dump.json` in the save dir. A scenario run never writes the real codex file.
 - The scenario launch does not work together with `METABOLISTIC_SMOKE_TEST`.
+- **Look gallery**: add `METABOLISTIC_LOOK_GALLERY=1` to a scenario launch to spawn one NPC of each body look round the player (`src/look_gallery.rs`); with the offscreen frames it is the review for the shader bodies. A prey dies after 4 s and the lysis shot goes to `target/gallery/lysis.png`.
 - **Scripted playtest**: add `METABOLISTIC_PLAYTEST=1` to a scenario launch (`METABOLISTIC_SCENARIO=vent_chemist METABOLISTIC_PLAYTEST=1 cargo run`). It presses Q, E and W on a fixed script, logs pools, cloud levels and nearby NPCs each second, saves screenshots to `METABOLISTIC_PLAYTEST_DIR` (default `target/playtest`) and exits after 20 s (`src/playtest.rs`). Like the smoke test, it exits on its own. Use an `"invulnerable": true` scenario so the run does not end early.
 
 ### Testing

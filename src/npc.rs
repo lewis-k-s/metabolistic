@@ -42,6 +42,7 @@ use rand::prelude::*;
 
 use crate::blocks::genome::{BlockKind, GeneState, Genome};
 use crate::cell::{Cell, CellSize, death_cause};
+use crate::cell_look::{BodyLook, CellLook, look_for};
 use crate::engulf::{EngulfIntent, GateCell, can_engulf};
 use crate::envgrid::{CELL_SIZE, EnvGrid};
 use crate::environment::Channel;
@@ -230,6 +231,7 @@ pub fn spawn_npc(
         Transform::from_translation(position.extend(0.0)),
         NpcBrain::new(index),
         EngulfIntent(archetype == Archetype::Predator),
+        BodyLook(look_for(archetype, signature)),
         Name::new(format!("{archetype:?}")),
     ));
     if archetype == Archetype::Gate {
@@ -645,15 +647,18 @@ pub fn symbiont_exchange_system(
 pub struct NpcDied {
     pub archetype: Archetype,
     pub position: Vec2,
+    /// The body, for the lysis of a shader body.
+    pub look: CellLook,
+    pub size: CellSize,
 }
 
 /// An NPC with a broken membrane (or no ATP) dies and drops food.
 pub fn npc_death_system(
-    npcs: Query<(Entity, &Npc, &Transform, &CurrencyPools, &Membrane, &CellTick), With<Cell>>,
+    npcs: Query<(Entity, &Npc, &Transform, &CurrencyPools, &Membrane, &CellTick, &CellSize, Option<&BodyLook>), With<Cell>>,
     mut died: MessageWriter<NpcDied>,
     mut commands: Commands,
 ) {
-    for (entity, npc, transform, pools, membrane, tick) in &npcs {
+    for (entity, npc, transform, pools, membrane, tick, size, look) in &npcs {
         // ATP changes only when the cell ticks: check it then.
         if npc.archetype == Archetype::Gate {
             continue;
@@ -667,6 +672,8 @@ pub fn npc_death_system(
         died.write(NpcDied {
             archetype: npc.archetype,
             position,
+            look: look.map_or_else(|| look_for(npc.archetype, None), |l| l.0),
+            size: *size,
         });
         commands.entity(entity).despawn();
     }

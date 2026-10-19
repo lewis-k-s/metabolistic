@@ -19,8 +19,8 @@
 //! - `hud`: ATP, membrane, genome, UV and pool bars, gate progress.
 //! - `lighting_view`: the lightmap and the darkness overlay (F6 turns it off).
 //! - `vfx`: vent smoke and sparkles (`bevy_enoki`).
-//! - `shader_cells`: spike, off by default: the player's body as an SDF shader
-//!   on a low-res canvas (F7).
+//! - `shader_cells`: every cell body (player and NPCs) as an SDF shader on a
+//!   low-res canvas (on by default; F7 goes back to the sprites).
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -172,6 +172,7 @@ fn spawn_world(
     commands.entity(gate).insert((
         crate::gate::GateProgress::default(),
         crate::gate::GateSprite(def.gate_sprite),
+        crate::cell_look::BodyLook(crate::cell_look::CellLook::gate(def.gate_sprite)),
     ));
     for (index, position) in def.viruses.iter().enumerate() {
         let angle = index as f32 * 2.1;

@@ -69,6 +69,11 @@ uv run --with numpy art/gen_sprites.py
    cell that a blow or a current carries does not stretch. The frame never
    rotates.
 
+   **Shader bodies** (on by default, see "Cell bodies as shaders" below) keep
+   the rule's intent in a different way: the shader turns the shape to the
+   heading, but it lights each pixel from the upper left after the turn, so
+   the light never turns with the body.
+
 ## Sprite list
 
 | File | Size | Roadmap use |
@@ -380,6 +385,28 @@ at 0.95 x the radius, points away from the heading, and plays `use` while the
 cell moves. It is a placeholder until the proteome says which overlays to draw.
 `anchor_px` is rounded down to a whole pixel, so a sprite never sits on a half
 pixel (the cell frames are centred on 32.5).
+
+### Cell bodies as shaders
+
+On the Run screen the run camera draws into a low-res canvas, one texel per
+world pixel (`world::shader_cells`), and every cell body (the player and the
+NPCs) is a quad with `assets/shaders/cell.wgsl`: a run-time port of
+`blob_sdf`, `capsule_sdf`, `lit_body`, `disc`, `halo` and `outline` of the
+generator. The body plan of each cell is a `cell_look::CellLook` (shape, ramps,
+organelles, features); its lengths are in units of the world radius, so a body
+grows with `CellSize` and matches its collider. The sprites stay, on a render
+layer that no camera draws, for the engulf clip and the tint (ROS, stun).
+F7 goes back to the sprites; the Manage inset still uses them.
+
+What the shader adds over the sheets: a smooth turn to the heading (no
+8-row snap), an idle loop offset for each cell, a spawn that grows and
+dithers in, a lysis on death (the rim breaks, the inside dithers away, specks
+spill; it replaces the `death` clip), a rim that thins with membrane damage
+and has gaps below 50 %, and a brighter glow on a symbiont in contact.
+
+`METABOLISTIC_LOOK_GALLERY=1` with a scenario launch spawns one of each look
+round the player (`src/look_gallery.rs`). Plan and the cast of primordial cell
+types still to build: `docs/npc-shader-cells-plan.md`.
 
 ## Light and darkness
 
