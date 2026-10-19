@@ -391,9 +391,14 @@ from phase 3). The other phases are not.
 Heat and Light bands (the orange glow round the vents and the yellow and
 violet light zones). The lighting shows the vents and the UV shafts on its
 own. The grid still draws O2, water and, on land, minerals. In the vents and in
-shallow water the minerals are fine cyan specks (1 sprite pixel, a BAYER4
-dither of the mineral level, at most 40 % of the pixels), drawn by the
-lighting shader on the additive quad from the alpha channel of the lightmap.
+shallow water the minerals are fine cyan specks (1 sprite pixel, picked by a
+hash of the pixel so the spacing is irregular, at most 12 % of the pixels),
+drawn by the lighting shader on the additive quad from the alpha channel of
+the lightmap. Each speck glints on its own clock (a quick rise, a slow fall to
+a dim base) and at the peak it grows a plus. The light sets the base
+brightness and how hard a glint hits, and a glint takes some of the warm hue
+of the light. The vents also throw a few tiny blue motes (the `mineral` ramp,
+`vfx::mineral_effect`), emissive like the sparkles.
 The grid texel is 4 world pixels, which was too coarse for a dither. The vent level has a
 textured floor sprite (`seafloor`, tiled at z -20, under the grid image), and
 the darkness darkens it like the rest. The burn zone (heat from about 30 to

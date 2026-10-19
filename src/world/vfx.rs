@@ -10,6 +10,9 @@
 //! - **Sparkles**: small light-orange and yellow plus-shaped specks (the `vent`
 //!   ramp) that rise and twinkle out. They are emissive: drawn above the
 //!   darkness.
+//! - **Mineral motes**: a few tiny blue specks (the `mineral` ramp) thrown out
+//!   of the crater. They are the minerals that the vent puts into the water,
+//!   the same blue as the glinting specks of the lighting shader. Emissive too.
 //!
 //! The look rules hold: each particle is a square on the sprite pixel grid,
 //! each pixel is one palette tone, and a particle fades out with a dither
@@ -44,6 +47,9 @@ const SPARK_Z: f32 = 30.0;
 const SMOKE_RAMP: [&str; 5] = ["#1a1612", "#403a30", "#6a6252", "#948a74", "#c0b8a0"];
 /// The `vent` ramp of the generator, for the sparkles.
 const VENT_RAMP: [&str; 5] = ["#5a1408", "#b02c0c", "#ee6a14", "#ffb030", "#fff0a0"];
+
+/// The `mineral` ramp of the generator, for the mineral motes.
+const MINERAL_RAMP: [&str; 5] = ["#0c3550", "#1d7aa8", "#3ec0e0", "#92ecff", "#eaffff"];
 
 #[derive(ShaderType, Debug, Clone, Copy)]
 pub struct PixelParams {
@@ -161,7 +167,33 @@ pub fn spark_effect(drift: Vec2) -> Particle2dEffect {
     }
 }
 
-/// Spawns the smoke and the sparkles of one vent. `drift` is the heat drift of
+/// The mineral motes of one vent: a few, thrown out in a wide fan. They slow
+/// down in the water, flash at the lightest tone and fade out through the ramp.
+pub fn mineral_effect(drift: Vec2) -> Particle2dEffect {
+    let drift_dir = drift.normalize_or_zero();
+    Particle2dEffect {
+        spawn_rate: 0.5,
+        spawn_amount: 1,
+        emission_shape: EmissionShape::Circle(8.0),
+        lifetime: Rval::new(2.6, 0.35),
+        linear_speed: Some(Rval::new(70.0, 0.5)),
+        direction: Some(Rval::new(Vec2::Y, 0.6)),
+        scale: Some(Rval::new(2.0, 0.0)),
+        linear_damp: Some(Rval::new(1.1, 0.0)),
+        gravity_direction: Some(Rval::new(drift_dir, 0.0)),
+        gravity_speed: Some(Rval::new(drift.length() * CELL_SIZE, 0.0)),
+        color_curve: Some(
+            MultiCurve::new()
+                .with_point(tone_color(4.0, 1.0), 0.0, None)
+                .with_point(tone_color(3.0, 1.0), 0.25, None)
+                .with_point(tone_color(2.0, 0.9), 0.6, None)
+                .with_point(tone_color(1.0, 0.0), 1.0, None),
+        ),
+        ..default()
+    }
+}
+
+/// Spawns the smoke, the sparkles and the mineral motes of one vent. `drift` is the heat drift of
 /// the grid, in grid cells per second.
 pub fn spawn_vent_particles(commands: &mut Commands, vent: Vent, drift: Vec2) {
     commands.queue(move |world: &mut World| {
@@ -201,6 +233,13 @@ pub fn spawn_vent_particles(commands: &mut Commands, vent: Vent, drift: Vec2) {
             params(VENT_RAMP, 1.0),
             SPARK_Z,
         );
+        spawn(
+            world,
+            "Vent Mineral Motes",
+            mineral_effect(drift),
+            params(MINERAL_RAMP, 0.0),
+            SPARK_Z + 0.1,
+        );
     });
 }
 
@@ -221,6 +260,17 @@ mod tests {
         let effect = smoke_effect([8.0, 16.0, 24.0, 32.0], 8.0, 30.0, Vec2::ZERO, 0.1, 1);
         let curve = effect.scale_curve.unwrap();
         assert!(curve.lerp(0.0) < curve.lerp(0.5) && curve.lerp(0.5) < curve.lerp(1.5));
+    }
+
+    #[test]
+    fn mineral_motes_are_few_and_small() {
+        let effect = mineral_effect(Vec2::ZERO);
+        // At most one mote every half second, a couple of pixels wide.
+        assert!(effect.spawn_amount as f32 / effect.spawn_rate <= 2.5);
+        assert!(effect.scale.unwrap().0 <= 3.0);
+        let curve = effect.color_curve.unwrap();
+        assert_eq!(curve.lerp(0.0).red, 1.0);
+        assert_eq!(curve.lerp(2.6).alpha, 0.0);
     }
 
     #[test]
