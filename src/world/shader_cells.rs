@@ -1,23 +1,26 @@
-//! # Spike: shader cells on a low-res canvas
+//! # Shader cells on a low-res canvas
 //!
-//! An experiment, off by default. It tests whether cell bodies can be drawn by
-//! a signed-distance-field shader instead of baked sprite sheets, so a cell can
-//! grow, stretch and turn without new art.
+//! Cell bodies are drawn by a signed-distance-field shader instead of baked
+//! sprite sheets, so a cell can grow, stretch and turn without new art. Plan:
+//! `docs/npc-shader-cells-plan.md`.
 //!
 //! - **Low-res canvas.** When shader cells are on (Run screen only), the run
 //!   camera draws into an image at one texel per world pixel. A second camera
 //!   draws that image `PIXEL_SCALE` x larger with nearest filtering, and the UI
 //!   on top. Every world object is then on the same pixel grid.
-//! - **Shader body.** The player's cell gets a quad with `CellMaterial`
-//!   (`assets/shaders/cell.wgsl`, a port of `lit_body` in `art/gen_sprites.py`).
-//!   Its sprite is hidden. The radius comes from `CellSize`, the stretch and
-//!   the angle from `BodyDeform`.
+//! - **Shader body.** Every cell with a body (the player and the NPCs) gets a
+//!   quad with `CellMaterial` (`assets/shaders/cell.wgsl`, a port of the sprite
+//!   generator). The body plan is the cell's `BodyLook` (`cell_look`). Its
+//!   sprite stays, hidden, for the clips and the tint. The radius comes from
+//!   `CellSize`, the stretch and the angle from `BodyDeform`, the facing from
+//!   the velocity (smoothed, so a body turns without the 8-row snap).
 //!
-//! Keys (Run screen): **F7** turns shader cells on and off. **F8** cycles the
-//! player's radius through 1.0, 1.25 and 1.5 (a visual test: the collider does
-//! not change).
+//! Keys (Run screen): **F7** turns shader cells on and off (back to the
+//! sprites). **F8** cycles the player's radius through 1.0, 1.25 and 1.5 (a
+//! visual test: the collider does not change).
 //!
-//! `METABOLISTIC_SHADER_CELLS=1` starts with shader cells on.
+//! Shader cells are on by default. `METABOLISTIC_SHADER_CELLS=0` starts with
+//! them off.
 //! `METABOLISTIC_SPIKE_CAPTURE=<dir>` runs a short capture on the first Run
 //! screen: screenshots of the sprite and the shader at each radius and while
 //! turning, the mean frame time of each mode, then it exits. Use it with a
@@ -31,18 +34,25 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat, TextureUsages,
 };
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
+use bevy::render::view::prepare_view_uniforms;
+use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 use bevy::ui::IsDefaultUiCamera;
 use bevy::window::PrimaryWindow;
 use std::path::PathBuf;
 
+use avian2d::prelude::LinearVelocity;
+
 use crate::cell::{Cell, CellSize};
+use crate::cell_look::{BodyLook, CellLook, Ramp, quad_half_extent};
+use crate::membrane::Membrane;
+use crate::npc::{Archetype, Npc, NpcDied, SYMBIONT_CONTACT_GAP};
 use crate::movement::world_radius;
 use crate::player::{ControlledCell, LocalPlayer};
 use crate::screens::RunCamera;
 use crate::sprites::PIXEL_SCALE;
-use crate::world::player_body::{BlobSprite, BodyDeform, snap_offset};
+use crate::world::player_body::{BlobSprite, BodyDeform, MOVE_SPEED_THRESHOLD, snap_offset};
 use crate::{GameState, InRun};
 
 const SHADER_PATH: &str = "shaders/cell.wgsl";
@@ -50,20 +60,27 @@ const SHADER_PATH: &str = "shaders/cell.wgsl";
 const CANVAS_LAYER: usize = 7;
 /// Seconds of one idle loop of the sprite (8 frames at 6 fps).
 const IDLE_LOOP_SECONDS: f32 = 8.0 / 6.0;
-/// The player's ramp (`RAMPS["player"]` of the generator).
-const PLAYER_RAMP: [&str; 5] = ["#17352f", "#3c8a6e", "#78d49a", "#b4f0b8", "#f0ffe0"];
 /// The radii that F8 cycles through, in size units.
 const TEST_RADII: [f32; 3] = [1.0, 1.25, 1.5];
 
 pub fn plugin(app: &mut App) {
+    // The canvas adds two cameras, so the view uniform buffer grows when it
+    // opens. `bevy_enoki` binds that buffer in `PrepareResources`, in no order
+    // with `prepare_view_uniforms`, and can bind the old, smaller buffer (a
+    // wgpu validation error that quits the game). An early run of
+    // `prepare_view_uniforms` sizes the buffer first; the second run reuses it.
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app.add_systems(Render, prepare_view_uniforms.in_set(RenderSystems::PrepareViews));
+    }
     app.add_plugins(Material2dPlugin::<CellMaterial>::default())
-        .insert_resource(ShaderCells(std::env::var("METABOLISTIC_SHADER_CELLS").is_ok_and(|v| v == "1")))
+        .insert_resource(ShaderCells(std::env::var("METABOLISTIC_SHADER_CELLS").map_or(true, |v| v != "0")))
         .init_resource::<Canvas>()
         .add_systems(
             Update,
             (
                 (toggle_keys, sync_canvas, fit_canvas).chain().run_if(in_state(GameState::Run)),
                 (attach_shader_body, update_shader_body).chain(),
+                (spawn_lysis, advance_lysis).chain(),
             )
                 .run_if(in_state(InRun)),
         )
@@ -105,23 +122,75 @@ struct CanvasCamera;
 #[derive(Component)]
 struct CanvasSprite;
 
-/// The shader quad of a cell body.
+/// The shader quad of a cell body. `facing` is the smoothed direction the
+/// cell faces (world radians), `offset` shifts its idle loop.
 #[derive(Component)]
 struct ShaderBody {
     cell: Entity,
+    facing: f32,
+    offset: f32,
+    /// Seconds since the quad appeared (the spawn growth).
+    age: f32,
 }
+
+/// The lysis of a dead NPC: its body bursts where it died, then goes.
+#[derive(Component)]
+struct LysisBody {
+    look: CellLook,
+    radius: f32,
+    offset: f32,
+    age: f32,
+}
+
+/// Seconds that a new body takes to grow.
+const SPAWN_SECONDS: f32 = 0.35;
+/// Seconds of the lysis of a dead NPC.
+const LYSIS_SECONDS: f32 = 0.8;
+
+/// Marks a cell that has its shader quad.
+#[derive(Component)]
+struct HasShaderBody;
 
 #[derive(ShaderType, Debug, Clone, Copy)]
 pub struct CellParams {
     pub tones: [Vec4; 5],
+    pub rim: [Vec4; 5],
+    pub inner: [Vec4; 5],
+    pub extra: [Vec4; 5],
+    pub glow: [Vec4; 5],
+    pub organelles: [Vec4; 4],
+    pub tint: Vec4,
+    pub shape: u32,
+    pub features: u32,
+    pub spikes: u32,
+    pub moving: u32,
     pub radius: f32,
     pub stretch: f32,
     pub angle: f32,
+    pub facing: f32,
     pub phase: f32,
     pub band: f32,
     pub depth_width: f32,
     pub half_extent: f32,
     pub wobble: f32,
+    pub breath: f32,
+    pub h2_amp: f32,
+    pub h2_phase: f32,
+    pub h3_amp: f32,
+    pub h3_phase: f32,
+    pub spike_amp: f32,
+    pub rod_half: f32,
+    pub rod_radius: f32,
+    pub sparks: f32,
+    pub glow_in: f32,
+    pub glow_out: f32,
+    pub glow_strength: f32,
+    pub drift: f32,
+    pub unit: f32,
+    pub life: f32,
+    pub lysis: f32,
+    pub integrity: f32,
+    pub glow_boost: f32,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -141,33 +210,109 @@ impl Material2d for CellMaterial {
 }
 
 /// The ramp as linear colours, for the uniform.
-fn ramp(codes: [&str; 5]) -> [Vec4; 5] {
+fn ramp(codes: Ramp) -> [Vec4; 5] {
     codes.map(|code| {
         let srgb = Srgba::hex(code).unwrap_or(Srgba::WHITE);
         Vec4::from_array(LinearRgba::from(srgb).to_f32_array())
     })
 }
 
-/// The shader inputs of a body of `radius` pixels. The rim and the shading
-/// depth scale with the radius as in `player_cell` (2.6 and 15 at 20 px).
-pub fn cell_params(radius: f32, deform: BodyDeform, phase: f32) -> CellParams {
-    CellParams {
-        tones: ramp(PLAYER_RAMP),
-        radius,
-        stretch: deform.stretch,
-        angle: deform.angle,
-        phase,
-        band: 2.6,
-        depth_width: 0.75 * radius,
-        half_extent: quad_half_extent(radius),
-        wobble: 1.0,
+/// What changes from frame to frame on a body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BodyState {
+    pub deform: BodyDeform,
+    pub facing: f32,
+    pub phase: f32,
+    pub moving: bool,
+    /// The colour multiplier (the sprite tint).
+    pub tint: Color,
+    /// Spawn (0 to 1), lysis (0 to 1), membrane integrity (0 to 1) and extra
+    /// glow, as in the shader.
+    pub life: f32,
+    pub lysis: f32,
+    pub integrity: f32,
+    pub glow_boost: f32,
+}
+
+impl Default for BodyState {
+    fn default() -> Self {
+        BodyState {
+            deform: BodyDeform::default(),
+            facing: 0.0,
+            phase: 0.0,
+            moving: false,
+            tint: Color::WHITE,
+            life: 1.0,
+            lysis: 0.0,
+            integrity: 1.0,
+            glow_boost: 0.0,
+        }
     }
 }
 
-/// Half the side of the quad: the radius with the largest wobble and stretch,
-/// plus the outline.
-pub fn quad_half_extent(radius: f32) -> f32 {
-    (radius * 1.12 * 1.2 + 3.0).ceil()
+/// The shader inputs of a body of world radius `radius` pixels.
+pub fn cell_params(look: &CellLook, radius: f32, state: BodyState) -> CellParams {
+    let r = radius;
+    let mut organelles = [Vec4::ZERO; 4];
+    for (slot, organelle) in organelles.iter_mut().zip(look.organelles) {
+        if let Some(o) = organelle {
+            *slot = Vec4::new(o.at[0] * r, o.at[1] * r, o.radius * r, o.kind as u32 as f32);
+        }
+    }
+    CellParams {
+        tones: ramp(look.tones),
+        rim: ramp(look.rim),
+        inner: ramp(look.inner),
+        extra: ramp(look.extra),
+        glow: ramp(look.glow),
+        organelles,
+        tint: Vec4::from_array(LinearRgba::from(state.tint).to_f32_array()),
+        shape: look.shape as u32,
+        features: look.features,
+        spikes: look.spikes,
+        moving: u32::from(state.moving),
+        radius: look.body * r,
+        stretch: state.deform.stretch,
+        angle: state.deform.angle,
+        facing: state.facing,
+        phase: state.phase,
+        band: look.band * r,
+        depth_width: look.depth * r,
+        half_extent: quad_half_extent(look, r),
+        wobble: 1.0,
+        breath: look.breath,
+        h2_amp: look.harmonics[0].0,
+        h2_phase: look.harmonics[0].1,
+        h3_amp: look.harmonics[1].0,
+        h3_phase: look.harmonics[1].1,
+        spike_amp: look.spike_amp,
+        rod_half: look.rod_half * r,
+        rod_radius: look.rod_radius * r,
+        sparks: look.sparks,
+        glow_in: look.glow_in * r,
+        glow_out: look.glow_out * r,
+        glow_strength: look.glow_strength,
+        drift: look.drift * r,
+        unit: look.pixel * r,
+        life: state.life,
+        lysis: state.lysis,
+        integrity: state.integrity,
+        glow_boost: state.glow_boost,
+    }
+}
+
+/// One step of `facing` towards `target` (radians), by at most `max_step`,
+/// the short way round.
+pub fn turn_towards(facing: f32, target: f32, max_step: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let gap = (target - facing + PI).rem_euclid(TAU) - PI;
+    facing + gap.clamp(-max_step, max_step)
+}
+
+/// The offset of a cell's idle loop: spread by the golden ratio, so that
+/// cells do not breathe in step.
+fn loop_offset(cell: Entity) -> f32 {
+    (cell.index_u32() as f32 * 0.618_034).fract()
 }
 
 /// The size of the canvas, in texels, for a window of `logical` size: one
@@ -336,58 +481,103 @@ fn canvas_image(size: UVec2) -> Image {
     image
 }
 
-/// Adds a shader quad to the player's cell, next to its sprite pivot.
-#[allow(clippy::too_many_arguments)] // A Bevy system: each argument is a param.
+/// Adds a shader quad to each cell with a body (the `BodyDeform` pivot): the
+/// player and the NPCs. The look comes from `BodyLook`; a cell with none is
+/// drawn as the player.
+#[allow(clippy::type_complexity)]
 fn attach_shader_body(
-    players: Query<&ControlledCell, With<LocalPlayer>>,
-    bodies: Query<&ShaderBody>,
-    cells: Query<&CellSize, With<Cell>>,
-    pivots: Query<&ChildOf, With<BodyDeform>>,
+    cells: Query<(Entity, &CellSize, Option<&BodyLook>, &Children), (With<Cell>, Without<HasShaderBody>)>,
+    pivots: Query<(), With<BodyDeform>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<CellMaterial>>,
     mut quad: Local<Option<Handle<Mesh>>>,
     mut commands: Commands,
 ) {
-    for controlled in &players {
-        let cell = controlled.0;
-        // Wait for the body (the sprite pivot), and add one quad only.
-        if bodies.iter().any(|b| b.cell == cell) || !pivots.iter().any(|p| p.parent() == cell) {
+    for (cell, size, look, children) in &cells {
+        // Wait for the body (the sprite pivot).
+        if !children.iter().any(|c| pivots.contains(c)) {
             continue;
         }
-        let Ok(size) = cells.get(cell) else {
-            continue;
-        };
+        let look = look.map_or_else(CellLook::player, |l| l.0);
+        let facing = look.rest_facing;
         let mesh = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
-        let material = materials.add(CellMaterial {
-            params: cell_params(world_radius(size), BodyDeform::default(), 0.0),
-        });
-        commands.entity(cell).with_child((
+        let state = BodyState { facing, life: 0.0, ..default() };
+        let material = materials.add(CellMaterial { params: cell_params(&look, world_radius(size), state) });
+        let body = (
             Name::new("Shader Body"),
-            ShaderBody { cell },
+            ShaderBody { cell, facing, offset: loop_offset(cell), age: 0.0 },
             Mesh2d(mesh),
             MeshMaterial2d(material),
             Transform::default(),
             Visibility::Hidden,
-        ));
+            ChildOf(cell),
+        );
+        // The cell can go in this frame (engulfed, dead) before the commands run.
+        commands.queue(move |world: &mut World| {
+            if let Ok(mut entity) = world.get_entity_mut(cell) {
+                entity.insert(HasShaderBody);
+                world.spawn(body);
+            }
+        });
     }
 }
+
+/// Rate at which a body turns to its heading, radians per second.
+const TURN_RATE: f32 = 10.0;
 
 /// Sets the shader inputs and the quad size from the cell each frame.
 #[allow(clippy::type_complexity)]
 fn update_shader_body(
     time: Res<Time>,
-    cells: Query<(&Transform, &CellSize, &Children), (With<Cell>, Without<ShaderBody>)>,
-    pivots: Query<&BodyDeform>,
-    mut bodies: Query<(&ShaderBody, &MeshMaterial2d<CellMaterial>, &mut Transform)>,
+    cells: Query<
+        (&Transform, &CellSize, Option<&BodyLook>, Option<&LinearVelocity>, &Children, Option<&Membrane>, Option<&Npc>),
+        (With<Cell>, Without<ShaderBody>),
+    >,
+    players: Query<&ControlledCell, With<LocalPlayer>>,
+    pivots: Query<(&BodyDeform, &Children)>,
+    sprites: Query<&Sprite, With<BlobSprite>>,
+    mut bodies: Query<(&mut ShaderBody, &MeshMaterial2d<CellMaterial>, &mut Transform)>,
     mut materials: ResMut<Assets<CellMaterial>>,
 ) {
-    let phase = (time.elapsed_secs() / IDLE_LOOP_SECONDS).fract();
-    for (body, material, mut transform) in &mut bodies {
-        let Ok((cell_transform, size, children)) = cells.get(body.cell) else {
+    let dt = time.delta_secs();
+    let player = players
+        .iter()
+        .find_map(|c| cells.get(c.0).ok())
+        .map(|(t, size, ..)| (t.translation.truncate(), world_radius(size)));
+    for (mut body, material, mut transform) in &mut bodies {
+        let Ok((cell_transform, size, look, velocity, children, membrane, npc)) = cells.get(body.cell) else {
             continue;
         };
-        let deform = children.iter().find_map(|c| pivots.get(c).ok()).copied().unwrap_or_default();
-        let params = cell_params(world_radius(size), deform, phase);
+        body.age += dt;
+        let look = look.map_or_else(CellLook::player, |l| l.0);
+        let velocity = velocity.map_or(Vec2::ZERO, |v| v.0);
+        let moving = velocity.length() > MOVE_SPEED_THRESHOLD;
+        if moving {
+            body.facing = turn_towards(body.facing, velocity.to_angle(), TURN_RATE * dt);
+        }
+        let (deform, tint) = children
+            .iter()
+            .find_map(|c| pivots.get(c).ok())
+            .map_or((BodyDeform::default(), Color::WHITE), |(deform, kids)| {
+                let tint = kids.iter().find_map(|k| sprites.get(k).ok()).map_or(Color::WHITE, |s| s.color);
+                (*deform, tint)
+            });
+        let phase = (time.elapsed_secs() / IDLE_LOOP_SECONDS + body.offset).fract();
+        let position = cell_transform.translation.truncate();
+        let in_contact = npc.is_some_and(|n| n.archetype == Archetype::Symbiont)
+            && player.is_some_and(|(at, r)| at.distance(position) - r - world_radius(size) <= SYMBIONT_CONTACT_GAP);
+        let state = BodyState {
+            deform,
+            facing: body.facing,
+            phase,
+            moving,
+            tint,
+            life: (body.age / SPAWN_SECONDS).min(1.0),
+            lysis: 0.0,
+            integrity: membrane.map_or(1.0, |m| integrity_fraction(m.integrity, m.max)),
+            glow_boost: if in_contact { 1.0 } else { 0.0 },
+        };
+        let params = cell_params(&look, world_radius(size), state);
         // On a whole pixel, like the sprite pivot, so the pieces and the
         // overlays stay where they are on the body.
         let side = 2.0 * params.half_extent;
@@ -399,26 +589,97 @@ fn update_shader_body(
     }
 }
 
-/// In shader mode, the quad takes the visibility that the sprite had this
-/// frame (the engulf clip hides it), and the sprite is hidden.
+/// The membrane integrity as a fraction of its maximum, 0 to 1.
+pub fn integrity_fraction(integrity: f32, max: f32) -> f32 {
+    if max <= 0.0 { 1.0 } else { (integrity / max).clamp(0.0, 1.0) }
+}
+
+/// A dead NPC bursts where it died (in shader mode; else `npc_view` plays the
+/// sprite's death clip).
+fn spawn_lysis(
+    mut died: MessageReader<NpcDied>,
+    shader: Res<ShaderCells>,
+    canvas: Res<Canvas>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CellMaterial>>,
+    mut quad: Local<Option<Handle<Mesh>>>,
+    mut commands: Commands,
+) {
+    for death in died.read() {
+        if !(shader.0 && canvas.is_open()) {
+            continue;
+        }
+        let radius = world_radius(&death.size);
+        let offset = (death.position.x * 0.137 + death.position.y * 0.071).fract().abs();
+        let state = BodyState { facing: death.look.rest_facing, ..default() };
+        let params = cell_params(&death.look, radius, state);
+        let side = 2.0 * params.half_extent;
+        let mesh = quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+        commands.spawn((
+            Name::new("Lysis"),
+            LysisBody { look: death.look, radius, offset, age: 0.0 },
+            Mesh2d(mesh),
+            MeshMaterial2d(materials.add(CellMaterial { params })),
+            Transform::from_translation(death.position.round().extend(LYSIS_Z))
+                .with_scale(Vec3::new(side, side, 1.0)),
+            DespawnOnExit(InRun),
+        ));
+    }
+}
+
+/// Z of a lysis: above the creatures, like the death clip.
+const LYSIS_Z: f32 = 1.0;
+
+/// Runs each lysis, and removes it at the end.
+fn advance_lysis(
+    time: Res<Time>,
+    mut lyses: Query<(Entity, &mut LysisBody, &MeshMaterial2d<CellMaterial>)>,
+    mut materials: ResMut<Assets<CellMaterial>>,
+    mut commands: Commands,
+) {
+    for (entity, mut lysis, material) in &mut lyses {
+        lysis.age += time.delta_secs();
+        let amount = lysis.age / LYSIS_SECONDS;
+        if amount >= 1.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let phase = (time.elapsed_secs() / IDLE_LOOP_SECONDS + lysis.offset).fract();
+        let state = BodyState { facing: lysis.look.rest_facing, phase, lysis: amount, ..default() };
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.params = cell_params(&lysis.look, lysis.radius, state);
+        }
+    }
+}
+
+/// A render layer that no camera draws: the sprites go there in shader mode.
+const HIDDEN_LAYER: usize = 6;
+
+/// In shader mode, each quad takes the visibility of its sprite (the engulf
+/// clip hides the player's), and the sprite moves to `HIDDEN_LAYER`. Its own
+/// `Visibility` is left alone, so the systems that set it keep working.
+#[allow(clippy::type_complexity)]
 fn shader_body_visibility(
     shader: Res<ShaderCells>,
     canvas: Res<Canvas>,
-    mut sprites: Query<(&BlobSprite, &mut Visibility), Without<ShaderBody>>,
+    sprites: Query<(Entity, &BlobSprite, &Visibility, Has<RenderLayers>), Without<ShaderBody>>,
     mut bodies: Query<(&ShaderBody, &mut Visibility), Without<BlobSprite>>,
+    mut commands: Commands,
 ) {
     let on = shader.0 && canvas.is_open();
-    for (body, mut visibility) in &mut bodies {
-        let mut wanted = Visibility::Hidden;
+    let mut wanted = std::collections::HashMap::new();
+    for (entity, blob, visibility, layered) in &sprites {
         if on {
-            for (blob, mut sprite_visibility) in &mut sprites {
-                if blob.cell == body.cell {
-                    wanted = *sprite_visibility;
-                    sprite_visibility.set_if_neq(Visibility::Hidden);
-                }
+            wanted.insert(blob.cell, *visibility);
+            if !layered {
+                commands.entity(entity).insert(RenderLayers::layer(HIDDEN_LAYER));
             }
+        } else if layered {
+            commands.entity(entity).remove::<RenderLayers>();
         }
-        visibility.set_if_neq(wanted);
+    }
+    for (body, mut visibility) in &mut bodies {
+        visibility.set_if_neq(wanted.get(&body.cell).copied().unwrap_or(Visibility::Hidden));
     }
 }
 
@@ -537,10 +798,30 @@ mod tests {
     }
 
     #[test]
-    fn the_quad_holds_the_largest_body() {
-        for radius in [20.0, 25.0, 30.0] {
-            assert!(quad_half_extent(radius) >= radius * 1.12 * 1.15 + 1.0);
-        }
+    fn integrity_is_a_clamped_fraction() {
+        assert_eq!(integrity_fraction(50.0, 100.0), 0.5);
+        assert_eq!(integrity_fraction(-5.0, 100.0), 0.0);
+        assert_eq!(integrity_fraction(150.0, 100.0), 1.0);
+        assert_eq!(integrity_fraction(0.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn a_body_turns_the_short_way_round() {
+        use std::f32::consts::PI;
+        assert!((turn_towards(0.0, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((turn_towards(0.0, 2.0, 0.25) - 0.25).abs() < 1e-6);
+        // From just below +pi to just above -pi: a small step up, not a full turn.
+        let next = turn_towards(PI - 0.1, -PI + 0.1, 0.05);
+        assert!((next - (PI - 0.05)).abs() < 1e-5, "{next}");
+    }
+
+    #[test]
+    fn the_player_params_keep_the_spike_values() {
+        let params = cell_params(&CellLook::player(), 20.0, BodyState::default());
+        assert_eq!(params.radius, 20.0);
+        assert!((params.band - 2.6).abs() < 1e-5);
+        assert!((params.depth_width - 15.0).abs() < 1e-5);
+        assert_eq!(params.half_extent, 30.0);
     }
 
     #[test]

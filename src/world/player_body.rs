@@ -40,7 +40,7 @@ use crate::{GameState, InRun};
 const CAMERA_FOLLOW_RATE: f32 = 6.0;
 /// Speed above which the cell plays `move` and takes the row of its heading,
 /// in pixels per second.
-const MOVE_SPEED_THRESHOLD: f32 = 8.0;
+pub const MOVE_SPEED_THRESHOLD: f32 = 8.0;
 
 /// Most stretch of a body sprite along its motion, at full speed with a full
 /// push in that direction. The long axis is `1 + MAX_MOVE_STRETCH`. **Playtest.**
