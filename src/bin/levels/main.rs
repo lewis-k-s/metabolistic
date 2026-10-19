@@ -10,6 +10,9 @@
 //! | `bake [ids] [--out dir] [--scale n]` | Writes `viewer.html` (every level, open it in a browser), one PNG and one bake JSON per level. Default folder: `target/levels`. |
 //! | `ascii <id> [map\|heat\|minerals\|light\|o2\|water]` | Prints the map, or one channel, as text. |
 //! | `probe <id> <x> <y>` | Prints the channels, the tile and the nearest things at a world point. |
+//! | `serve [--port n]` | Serves the viewer on 127.0.0.1 (default port 7878). The edit mode there saves a level to its file and re-bakes it. |
+//! | `new <stage>/<name> [--from id]` | Copies a level to a new file, as a starting point. |
+//! | `fmt [ids]` | Rewrites level files in the canonical JSON format. |
 //! | `export-bases` | Writes the base level of each stage to `assets/levels/<stage>/classic.json`. |
 //!
 //! An id is `vents/classic`; a stage folder (`vents`) selects all its levels.
@@ -17,6 +20,7 @@
 
 mod bake;
 mod render;
+mod serve;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -160,13 +164,9 @@ fn run(args: &[String]) -> Result<bool, String> {
                 println!("baked {:28} {}  ({status})", level.id, png.display());
                 bakes.push(bake);
             }
-            // The fragment is the page body for an artifact host that adds its
-            // own document; viewer.html wraps it for a plain browser.
             let fragment = bake::viewer_html(&bakes, &assets);
             let html = out.join("viewer.html");
-            let page = format!(
-                "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\"></head>\n<body>\n{fragment}\n</body>\n</html>\n"
-            );
+            let page = bake::document(&fragment);
             std::fs::write(&html, page).map_err(|e| e.to_string())?;
             std::fs::write(out.join("viewer.fragment.html"), &fragment).map_err(|e| e.to_string())?;
             println!("viewer: {}", html.display());
@@ -188,6 +188,27 @@ fn run(args: &[String]) -> Result<bool, String> {
             let point = Vec2::new(x.parse().map_err(|_| "bad x")?, y.parse().map_err(|_| "bad y")?);
             let level = load_all(&assets, std::slice::from_ref(id))?.remove(0);
             print!("{}", render::probe(&level, point));
+            Ok(true)
+        }
+        "serve" => {
+            let port = flag(&flags, "port").map(|p| p.parse().map_err(|_| format!("bad port {p:?}"))).transpose()?.unwrap_or(serve::DEFAULT_PORT);
+            serve::run(&assets, port)?;
+            Ok(true)
+        }
+        "new" => {
+            let [id] = free.as_slice() else { return Err("usage: new <stage>/<name> [--from <id>]".into()) };
+            let path = new_level(&assets, id, flag(&flags, "from"))?;
+            println!("wrote {}", path.display());
+            println!("next: cargo levels check {id}   (or cargo levels serve, then edit it in the browser)");
+            Ok(true)
+        }
+        "fmt" => {
+            // Rewrites each file in the canonical `LevelFile::to_json` format.
+            for (id, path) in select(&assets, &free)? {
+                let file = level_file::load(&path)?;
+                std::fs::write(&path, file.to_json().map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+                println!("formatted {id}");
+            }
             Ok(true)
         }
         "export-bases" => {
@@ -215,7 +236,42 @@ const HELP: &str = "cargo levels <command>
   bake [ids] [--out dir] [--scale n]  viewer.html + PNG + bake JSON (target/levels)
   ascii <id> [map|heat|minerals|light|o2|water]
   probe <id> <x> <y>                  channels and nearby things at a world point
+  serve [--port n]                    viewer with editing on 127.0.0.1 (default 7878); saves and re-bakes
+  new <stage>/<name> [--from <id>]    copy a level as a starting point (default: <stage>/classic)
+  fmt [ids]                           rewrite files in the canonical format
   export-bases                        write each stage's base level to classic.json";
+
+/// Stage folder names, for `new` and `serve`.
+fn stage_of_folder(folder: &str) -> Option<Stage> {
+    STAGES.into_iter().find(|s| stage_folder(*s) == folder)
+}
+
+/// Checks a level id of the form `<stage>/<name>`. The name is letters,
+/// digits, `_` and `-`. This keeps a request from writing outside the level folder.
+pub fn valid_new_id(id: &str) -> Result<Stage, String> {
+    let (folder, name) = id.split_once('/').ok_or_else(|| format!("level id {id:?} must look like <stage>/<name>"))?;
+    let stage = stage_of_folder(folder).ok_or_else(|| format!("unknown stage folder {folder:?} (use vents, shallow or land)"))?;
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err(format!("level name {name:?} must use only letters, digits, _ and -"));
+    }
+    Ok(stage)
+}
+
+/// Copies a level to `id`. Without `from`, copies the classic level of the stage.
+fn new_level(assets: &Path, id: &str, from: Option<&str>) -> Result<PathBuf, String> {
+    let stage = valid_new_id(id)?;
+    let dest = level_file::resolve_path(id, assets);
+    if dest.exists() {
+        return Err(format!("{} already exists", dest.display()));
+    }
+    let from = from.map(str::to_string).unwrap_or_else(|| format!("{}/classic", stage_folder(stage)));
+    let mut file = level_file::load(&level_file::resolve_path(&from, assets))?;
+    let name = id.split_once('/').map_or(id, |(_, n)| n);
+    file.name = name.replace(['_', '-'], " ");
+    std::fs::create_dir_all(dest.parent().ok_or("bad path")?).map_err(|e| e.to_string())?;
+    std::fs::write(&dest, file.to_json().map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+    Ok(dest)
+}
 
 pub fn parse_channel(name: &str) -> Result<Channel, String> {
     Ok(match name.to_lowercase().as_str() {

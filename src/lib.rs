@@ -35,6 +35,7 @@ pub mod proteins;
 pub mod run;
 pub mod scenario;
 pub mod shallow;
+pub mod shapes;
 pub mod shelter;
 pub mod shared;
 pub mod stage;

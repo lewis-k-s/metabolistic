@@ -355,6 +355,9 @@ pub struct LevelDef {
     /// Free tiles besides the chamber and the lines: rock, mats, chimneys. A
     /// level file paints them as text (see `level_file`).
     pub tiles: Vec<((usize, usize), WallKind)>,
+    /// Free-form environment shapes (see `shapes`). Their tiles go in the
+    /// wall map and the grid mask; rock also has an exact collider.
+    pub shapes: Vec<crate::shapes::Shape>,
     pub npcs: Vec<NpcSpawn>,
     pub viruses: Vec<Vec2>,
     pub food_zones: Vec<(Vec2, f32)>,
@@ -510,6 +513,7 @@ impl LevelDef {
                 },
             ],
             tiles: Vec::new(),
+            shapes: Vec::new(),
             npcs: NPC_SPAWNS.to_vec(),
             viruses: VIRUS_SPAWNS.to_vec(),
             food_zones: FOOD_ZONES.to_vec(),
@@ -533,6 +537,11 @@ impl LevelDef {
     /// All wall tiles of the level, as grid cells.
     pub fn wall_tiles(&self) -> Vec<((usize, usize), WallKind)> {
         let mut tiles = Vec::new();
+        // Shapes first: a later tile of the same cell wins, so the chamber,
+        // the lines and the tile map keep their cells.
+        for shape in &self.shapes {
+            tiles.extend(shape.tiles(self.width, self.height));
+        }
         let (cx, cy) = (&self.chamber.x, &self.chamber.y);
         // The chamber ring.
         for x in (cx.start() - 1)..=(cx.end() + 1) {
@@ -559,6 +568,21 @@ impl LevelDef {
         }
         tiles.extend(self.tiles.iter().copied());
         tiles
+    }
+
+    /// The tiles that the shapes cover (rock, mat and membrane).
+    pub fn shape_tiles(&self) -> std::collections::HashSet<(usize, usize)> {
+        self.shapes.iter().flat_map(|s| s.tiles(self.width, self.height)).map(|(t, _)| t).collect()
+    }
+
+    /// The wall tiles that tools draw as squares: all, except the rock and the
+    /// mat of shapes, which they draw as polygons.
+    pub fn square_wall_tiles(&self) -> Vec<((usize, usize), WallKind)> {
+        let shape_tiles = self.shape_tiles();
+        self.wall_tiles()
+            .into_iter()
+            .filter(|(tile, kind)| !(*kind == WallKind::Rock || (*kind == WallKind::Mat && shape_tiles.contains(tile))))
+            .collect()
     }
 
     /// How a channel moves in this level: the override if there is one, else

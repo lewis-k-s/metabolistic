@@ -75,3 +75,42 @@ fn a_scenario_can_name_a_level() {
     assert!(missing.level_file(&assets_dir()).is_err());
     assert_eq!(Scenario::default().level_file(&assets_dir()), Ok(None));
 }
+
+#[test]
+fn the_built_in_vent_levels_equal_the_files() {
+    for (id, text) in level_file::VENT_LEVELS {
+        let disk = std::fs::read_to_string(level_file::resolve_path(id, &assets_dir())).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert_eq!(text, disk, "{id}: the built-in copy is old; rebuild after editing a level file");
+        assert_eq!(LevelFile::from_json(text).unwrap().stage, Stage::Vents, "{id}");
+    }
+}
+
+#[test]
+fn the_first_stage_picks_a_built_in_level_from_the_seed() {
+    let mut seen = std::collections::HashSet::new();
+    for seed in 0..64u64 {
+        let def = Stage::Vents.level_def(seed).unwrap();
+        assert_eq!(validate(&def), Ok(()), "seed {seed}");
+        assert_eq!(def, Stage::Vents.level_def(seed).unwrap(), "same seed, same level");
+        seen.insert(def.name.clone());
+    }
+    assert_eq!(seen.len(), level_file::VENT_LEVELS.len(), "every built-in level is reachable");
+}
+
+#[test]
+fn the_vent_levels_use_shapes_and_their_rock_is_in_the_grid_mask() {
+    use metabolistic3d::walls::WallKind;
+    for (id, text) in level_file::VENT_LEVELS {
+        let file = LevelFile::from_json(text).unwrap();
+        assert!(!file.shapes.is_empty(), "{id}: no shapes");
+        let def = file.to_def().unwrap();
+        let rock = def.wall_tiles().into_iter().filter(|(_, k)| *k == WallKind::Rock).count();
+        assert!(rock > 0 || id == "vents/mat_terraces", "{id}: no rock tiles");
+        let grid = def.grid();
+        for ((x, y), kind) in def.wall_tiles() {
+            if kind == WallKind::Rock {
+                assert!(grid.is_wall(x, y), "{id}: rock tile ({x}, {y}) is not blocked in the grid");
+            }
+        }
+    }
+}

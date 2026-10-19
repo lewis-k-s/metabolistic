@@ -32,6 +32,7 @@ pub fn wall_colour(kind: WallKind) -> [f32; 3] {
         WallKind::Pore => [0.95, 0.78, 0.45],
         WallKind::Mat => [0.25, 0.48, 0.24],
         WallKind::Waxy => [0.78, 0.74, 0.42],
+        WallKind::Rock => [0.34, 0.31, 0.36],
     }
 }
 
@@ -119,6 +120,48 @@ impl Canvas {
     }
 }
 
+/// Rock and mat shapes as filled polygons, with a darker edge. A membrane
+/// shape is tiles, drawn with the other walls. `to_px` maps a world point to
+/// a pixel; `to_world` maps the centre of a pixel back.
+fn draw_shapes(
+    canvas: &mut Canvas,
+    def: &metabolistic3d::level::LevelDef,
+    to_px: impl Fn(Vec2) -> (f32, f32),
+    to_world: impl Fn(i64, i64) -> Vec2,
+) {
+    use metabolistic3d::shapes::{ShapeKind, inside_convex};
+    for shape in &def.shapes {
+        let (colour, alpha) = match shape.kind {
+            ShapeKind::Rock => (wall_colour(WallKind::Rock), 1.0),
+            ShapeKind::Mat => (wall_colour(WallKind::Mat), 0.7),
+            ShapeKind::Membrane => continue,
+        };
+        let parts = shape.parts();
+        let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for p in parts.iter().flatten() {
+            let (x, y) = to_px(*p);
+            lo = (lo.0.min(x), lo.1.min(y));
+            hi = (hi.0.max(x), hi.1.max(y));
+        }
+        if lo.0 > hi.0 {
+            continue;
+        }
+        let inside = |x: i64, y: i64| {
+            let p = to_world(x, y);
+            parts.iter().any(|part| inside_convex(part, p))
+        };
+        for y in lo.1.floor() as i64 - 1..=hi.1.ceil() as i64 + 1 {
+            for x in lo.0.floor() as i64 - 1..=hi.0.ceil() as i64 + 1 {
+                if !inside(x, y) {
+                    continue;
+                }
+                let edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+                canvas.blend(x, y, colour.map(|c| if edge { c * 0.6 } else { c }), alpha);
+            }
+        }
+    }
+}
+
 /// Writes a PNG of the level: channels, walls, vents, shelters, creatures,
 /// start and gate. `scale` is pixels per grid cell.
 pub fn write_png(level: &Loaded, path: &Path, scale: usize) -> Result<(), String> {
@@ -172,7 +215,7 @@ pub fn write_png(level: &Loaded, path: &Path, scale: usize) -> Result<(), String
             }
         }
     }
-    for ((x, y), kind) in def.wall_tiles() {
+    for ((x, y), kind) in def.square_wall_tiles() {
         let alpha = if kind == WallKind::Mat { 0.6 } else { 1.0 };
         for dy in 0..scale {
             for dx in 0..scale {
@@ -182,6 +225,8 @@ pub fn write_png(level: &Loaded, path: &Path, scale: usize) -> Result<(), String
             }
         }
     }
+    let to_world = |x: i64, y: i64| Vec2::new(origin.x + (x as f32 + 0.5) / s * CELL_SIZE, origin.y + (h as f32 - (y as f32 + 0.5)) / s * CELL_SIZE);
+    draw_shapes(&mut canvas, def, to_px, to_world);
     let per_px = s / CELL_SIZE;
     for (centre, radius) in &def.food_zones {
         canvas.ring(to_px(*centre), radius * per_px, [0.9, 0.7, 0.4], 0.5, true);
@@ -298,7 +343,7 @@ pub fn ascii(level: &Loaded, channel: Option<Channel>) -> String {
     }
     let mut out = String::new();
     let label = channel.map(|c| format!("{c:?} (0-9, 9 = {} or more)", reference(c))).unwrap_or_else(|| {
-        "map: ^ heat damage, | light, : minerals, # rock, W wall, o pore, ~ mat, V vent, S shelter, @ start, G gate, p prey, k key prey, P predator, s symbiont, v virus".into()
+        "map: ^ heat damage, | light, : minerals, # tough rock, R shape rock, W wall, o pore, ~ mat, V vent, S shelter, @ start, G gate, p prey, k key prey, P predator, s symbiont, v virus".into()
     });
     let _ = writeln!(out, "{} ({}), {} x {} cells, origin {:?}", level.id, level.def.name, def.width, def.height, grid.origin());
     let _ = writeln!(out, "{label}");

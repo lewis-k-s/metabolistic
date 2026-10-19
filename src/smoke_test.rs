@@ -5,7 +5,8 @@
 //! step, logs the player cell's position and pools, then exits. A panic or a
 //! missing resource fails the run. So do these, on the Run screen: the player
 //! dies, or the player does not move while W is held. Screenshots go to
-//! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`).
+//! `METABOLISTIC_SMOKE_DIR` (default `target/smoke`). `METABOLISTIC_SMOKE_SEED=n`
+//! sets the run seed (default 0), which picks the first-stage vent map.
 //!
 //! Zoom: the steps between Run and Manage use the zoom of Tab
 //! (`screens::zoom`), not a direct state change, and save `zoom-*.png` frames
@@ -171,8 +172,17 @@ pub fn plugin(app: &mut App) {
     // After the UI focus system, so that a pressed button stays pressed for the
     // screen's own systems of this frame.
     .add_systems(PreUpdate, (smoke_manage, smoke_codex).after(bevy::ui::UiSystems::Focus))
+    .add_systems(Startup, apply_smoke_seed)
     .add_systems(OnEnter(GameState::Run), hold_forward)
     .add_systems(OnExit(GameState::Run), release_forward);
+}
+
+/// `METABOLISTIC_SMOKE_SEED=n` sets the run seed of the test (default 0), which
+/// picks the first-stage level. Use it to look at each vent map.
+fn apply_smoke_seed(mut run: ResMut<crate::run::RunState>) {
+    if let Some(seed) = std::env::var("METABOLISTIC_SMOKE_SEED").ok().and_then(|s| s.parse().ok()) {
+        run.seed = seed;
+    }
 }
 
 /// Screenshots during the first zooms (every 6 frames), so the move can be
@@ -359,6 +369,18 @@ fn drive_smoke_test(
     }
 }
 
+/// Inside the gate chamber of a level, in the corner that is far from the gate cell.
+fn gate_view_position(def: &crate::level::LevelDef) -> Vec2 {
+    let origin = -Vec2::new(def.width as f32, def.height as f32) * crate::envgrid::CELL_SIZE * 0.5;
+    let at = |x: usize, y: usize| origin + (Vec2::new(x as f32, y as f32) + 0.5) * crate::envgrid::CELL_SIZE;
+    let (x0, x1) = (*def.chamber.x.start(), *def.chamber.x.end());
+    let (y0, y1) = (*def.chamber.y.start(), *def.chamber.y.end());
+    [at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)]
+        .into_iter()
+        .max_by(|a, b| a.distance(def.gate_position).total_cmp(&b.distance(def.gate_position)))
+        .unwrap_or(def.gate_position)
+}
+
 /// Hold W so the run player moves; this exercises input and movement.
 fn hold_forward(mut keys: ResMut<ButtonInput<KeyCode>>) {
     keys.press(KeyCode::KeyW);
@@ -380,6 +402,7 @@ fn smoke_actions(
     npcs: Query<&Npc>,
     gates: Query<&GateProgress>,
     summary: Res<RunSummary>,
+    level: Option<Res<crate::level::CurrentLevel>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut done: Local<[bool; 6]>,
@@ -445,7 +468,7 @@ fn smoke_actions(
         }
         STEP_GATE_VIEW if !done[4] && smoke.frames_in_step >= 2 => {
             // Into the chamber, away from the gate cell, with W released.
-            let position = Vec2::new(880.0, 15.0);
+            let position = level.as_ref().map_or(Vec2::new(880.0, 15.0), |l| gate_view_position(&l.0));
             commands.entity(cell).insert((
                 Transform::from_translation(position.extend(0.0)),
                 Position(position),

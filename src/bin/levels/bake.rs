@@ -40,6 +40,16 @@ fn role(archetype: Archetype) -> &'static str {
     }
 }
 
+/// A shape for the viewer: the convex parts in local units, and the local
+/// polyline of a ridge or a segment.
+fn shape_json(shape: &metabolistic3d::shapes::Shape) -> Value {
+    let parts: Vec<Vec<Value>> = shape.geometry.local_parts().iter().map(|p| p.iter().map(|q| pt(*q)).collect()).collect();
+    json!({
+        "parts": parts,
+        "line": shape.geometry.local_line().map(|l| l.into_iter().map(pt).collect::<Vec<_>>()),
+    })
+}
+
 /// The bake of one level.
 pub fn bake(level: &Loaded) -> Value {
     let (def, grid, file) = (&level.def, &level.grid, &level.file);
@@ -105,7 +115,9 @@ pub fn bake(level: &Loaded) -> Value {
         "summary": file.summary,
         "pillars": file.pillars,
         "proposals": file.proposals,
-        "file": file,
+        // The file text keeps the key order of `LevelFile::to_json`; a JSON
+        // object value would sort its keys. The viewer parses it into `level.file`.
+        "file_text": file.to_json().unwrap_or_default(),
         "size": [def.width, def.height],
         "cell": CELL_SIZE,
         "origin": pt(origin),
@@ -116,7 +128,11 @@ pub fn bake(level: &Loaded) -> Value {
         "channels": channels,
         "refs": refs,
         "currents": currents,
-        "walls": def.wall_tiles().iter().map(|((x, y), k)| json!([x, y, k])).collect::<Vec<_>>(),
+        "walls": def.square_wall_tiles().iter().map(|((x, y), k)| json!([x, y, k])).collect::<Vec<_>>(),
+        // Shapes: the local convex parts (the viewer applies the transform), and the
+        // tiles that the shapes give to the grid.
+        "shapes": def.shapes.iter().map(|s| shape_json(s)).collect::<Vec<_>>(),
+        "shape_tiles": def.shapes.iter().flat_map(|s| s.tiles(def.width, def.height)).map(|((x, y), k)| json!([x, y, k])).collect::<Vec<_>>(),
         "vents": def.vents.iter().map(|v| json!({ "at": pt(v.position), "radius": v.radius, "heat": v.heat, "minerals": v.minerals })).collect::<Vec<_>>(),
         "shafts": def.shafts.iter().map(|s| json!({ "min": pt(s.min), "max": pt(s.max) })).collect::<Vec<_>>(),
         "shelters": def.shelters.iter().map(|s| json!({ "at": pt(s.position), "radius": s.radius })).collect::<Vec<_>>(),
@@ -137,6 +153,15 @@ pub fn bake(level: &Loaded) -> Value {
             "key": def.key_gene.map(|k| probe(k.centre)),
         },
     })
+}
+
+/// A plain browser page around the viewer fragment.
+pub fn document(fragment: &str) -> String {
+    // The fragment is the page body for an artifact host that adds its own
+    // document; this wrapper is for a plain browser.
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\"></head>\n<body>\n{fragment}\n</body>\n</html>\n"
+    )
 }
 
 /// The viewer page with every bake and the sprites they name.

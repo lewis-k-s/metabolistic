@@ -36,7 +36,7 @@ impl Stage {
     /// built.
     pub fn level_def(self, run_seed: u64) -> Option<LevelDef> {
         match self {
-            Stage::Vents => Some(crate::layout::generate_vents(stage_seed(run_seed, 0))),
+            Stage::Vents => Some(crate::level_file::vent_level(stage_seed(run_seed, 0))),
             Stage::ShallowWater => Some(crate::layout::generate_shallow(stage_seed(run_seed, 1))),
             Stage::Land => Some(crate::layout::generate_land(stage_seed(run_seed, 2))),
         }

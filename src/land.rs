@@ -242,6 +242,7 @@ impl LevelDef {
                 },
             ],
             tiles: Vec::new(),
+            shapes: Vec::new(),
             npcs: npc_spawns(),
             viruses: vec![
                 Vec2::new(-300.0, -270.0),

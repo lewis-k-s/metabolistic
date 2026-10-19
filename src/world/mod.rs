@@ -51,6 +51,7 @@ pub mod pilus_view;
 pub mod player_body;
 pub mod shader_cells;
 pub mod vfx;
+pub mod shapes_view;
 pub mod walls_view;
 
 /// Collision layers of the world. Cells collide with the field walls and vents
@@ -96,6 +97,7 @@ pub fn plugin(app: &mut App) {
             actions_view::plugin,
             interior_view::plugin,
             walls_view::plugin,
+            shapes_view::plugin,
             npc_view::plugin,
             shader_cells::plugin,
             lighting_view::plugin,
@@ -113,6 +115,10 @@ fn spawn_world(
     mut images: ResMut<Assets<Image>>,
     mut rng: ResMut<NpcRng>,
     run: Res<RunState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut rock_materials: ResMut<Assets<shapes_view::RockMaterial>>,
+    mut mat_materials: ResMut<Assets<shapes_view::MatMaterial>>,
+    mut membrane_materials: ResMut<Assets<shapes_view::MembraneMaterial>>,
 ) {
     // The stage decides the level. A stage without a level is never entered
     // (the run completes instead); the base vents are the safe fallback.
@@ -120,6 +126,7 @@ fn spawn_world(
         warn!("the stage {:?} has no level; using the base vents", run.stage());
         LevelDef::vents_base()
     });
+    info!("run world: level {:?}, {}x{} cells, seed {}", def.name, def.width, def.height, run.seed);
     let grid = def.grid();
     let [r, g, b] = def.field.background();
     commands.insert_resource(ClearColor(Color::srgb(r, g, b)));
@@ -137,7 +144,8 @@ fn spawn_world(
     grid_view::spawn_mineral_particles(&mut commands, &asset_server, &grid);
     spawn_field_walls(&mut commands, origin, world_size);
     let walls = def.wall_map();
-    walls_view::spawn_walls(&mut commands, &asset_server, &walls, &grid);
+    walls_view::spawn_walls(&mut commands, &asset_server, &mut meshes, &mut membrane_materials, &walls, &grid, &def);
+    shapes_view::spawn_shapes(&mut commands, &mut meshes, &mut rock_materials, &mut mat_materials, &def);
     commands.insert_resource(walls);
     lighting_view::spawn_lighting(&mut commands, &grid, def.field.ambient());
     commands.insert_resource(grid);

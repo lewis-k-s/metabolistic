@@ -718,3 +718,19 @@ tone bands, a 1 px dark outline, and dithered glow.
   backwards. A cofactor is a dotted pin. A still pipe is dark, not see-through.
 - **Membrane band.** The bilayer tiles ripple one pixel in a slow wave.
 
+
+## Environment shapes
+
+Walls, rock and mats are no longer square tiles turned in 90 degree steps. A level file can list **shapes** (`shapes` in the level file; `src/shapes.rs`). A shape has a kind, a position, a rotation in degrees, a scale and a geometry. The look stays pixel art: each shape is a mesh, and its shader snaps every fragment to the sprite pixel grid (one world unit) by itself. The shaders do not need the low-res canvas (F7).
+
+Kinds:
+
+- **Rock** (most structures near vents). A faceted low-poly rock, `assets/shaders/rock.wgsl`. Each convex part is cut into triangles that meet at a raised centre, so each triangle has its own face normal. Light comes from the upper left. The light is sorted into the bands of the `rock` ramp (outline, shadow, base, light, highlight; the top tone is a little lighter than `RAMPS["rock"]` so that the facets stand out from the water). A 1 px dark outline follows the outer edge only: edges inside the union of the parts have none. A fine grain moves some pixels one tone up or down. Sulfide (amber) and mineral (cyan) specks are single pixels. Near a vent the edge gets a warm rim: pixels of the `vent` ramp, dithered with the 4x4 Bayer matrix, strongest at the edge. The vent positions are uniforms (up to 16).
+- **Membrane** (door-like places: pores, the gate chamber, tissue lines). `assets/shaders/membrane.wgsl`, one quad for each wall tile. Two wavy lines of lipid heads (the `head` ramp) with the two tails of each head (the `tail` ramp) between them. The heads drift along the line, the two layers breathe, and the waves use world coordinates, so the tiles of a run join into one membrane at any angle. A pore tile has a gap with two channel proteins (amber) that pulse. The gap opens wider when a cell with a transporter is within `PORE_REACH` (a uniform that the game updates each frame).
+- **Mat** (microbial mat). `assets/shaders/mat.wgsl`. A soft green patch: mottled pixels, short filaments that sway, and an edge that fades out in dots (Bayer dither over the outer 9 px). It has no outline and no body.
+
+Geometry: `polygon` (any simple polygon, cut into convex parts by ear clipping), `boulder` (an irregular convex rock from a seed), `chimney` (a U-shaped tube, the mouth towards +y before the rotation), `ridge` (a polyline with a thickness) and `segment` (a membrane polyline with `pores`). Use rotation, scale and irregular points so that nothing reads as a 90 degree grid.
+
+Rules the engine applies: the tiles whose centre is inside a shape go into the wall map and the grid mask (kind `Rock`, `Mat`, `Wall` or `Pore`), so the fields, `layout::validate` and the creature rules keep working on the coarse grid. The physics body of a rock is its exact convex parts (a compound collider), not the tiles. Rock cannot be lysed. A wall of rock should be at least 32 px thick, so that the grid mask has no gap.
+
+Not done yet: the membrane of a shape is still tiles (so that lysis works); a thin diagonal membrane has the 32 px squares of its colliders. The ramp of the rock is dark on purpose, as the water is; the lighting darkens it more, so a rock far from light is nearly black (the rim glow and the specks keep it readable).

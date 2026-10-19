@@ -156,6 +156,24 @@ table.facts th { color: var(--ink-dim); font-weight: 400; }
 .empty code { font-family: var(--mono); color: var(--sulfur); }
 .back { background: none; border: 0; color: var(--ink-dim); cursor: pointer; padding: 0; font-family: var(--mono); font-size: var(--step--1); }
 .back:hover { color: var(--ink); }
+/* Edit mode */
+.edit-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 8px 0; padding: 8px; border: 1px solid var(--seam); border-radius: 4px; background: var(--hull); }
+.edit-bar .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.btn { border: 1px solid var(--seam); background: var(--hull-2); border-radius: 3px; padding: 3px 9px; cursor: pointer; font-family: var(--mono); font-size: var(--step--1); color: var(--ink-dim); }
+.btn:hover { color: var(--ink); border-color: var(--ink-dim); }
+.btn[aria-pressed="true"] { color: var(--abyss); background: var(--sulfur); border-color: var(--sulfur); }
+.btn.primary { color: var(--ink); border-color: var(--sulfur); }
+.swatch { width: 28px; padding: 3px 0; text-align: center; font-weight: 600; }
+.edit-status { font-family: var(--mono); font-size: var(--step--1); color: var(--ink-dim); }
+.edit-status.bad { color: var(--bad); }
+.edit-status.ok { color: var(--ok); }
+#map.editing { cursor: grab; }
+#map.editing.paint, #map.editing.spawn { cursor: copy; }
+#map.editing.erase { cursor: not-allowed; }
+.note-edit { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid var(--seam); }
+.note-edit textarea, .json-out { width: 100%; background: var(--hull-2); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; font: inherit; font-size: var(--step--1); padding: 4px 6px; resize: vertical; }
+.json-out { font-family: var(--mono); height: 140px; }
+.edit-bar select { background: var(--hull-2); color: var(--ink); border: 1px solid var(--seam); border-radius: 3px; font: inherit; font-size: var(--step--1); padding: 2px 4px; }
 @media (prefers-reduced-motion: no-preference) { .card { transition: border-color 120ms; } }
 </style>
 
@@ -180,7 +198,7 @@ const MOB_RADIUS = { prey: 11, ally: 11, hostile: 22, gate: 34 };
 const LAYERS = [
   ["Heat", "--heat"], ["Minerals", "--mineral"], ["Light", "--uv"], ["O2", "--ally"], ["Water", "--ally"],
   ["Damage", "--hostile"], ["Walls", "--ink-dim"], ["Zones", "--sulfur"], ["Creatures", "--prey"],
-  ["Notes", "--sulfur"], ["Currents", "--mineral"], ["Grid", "--seam"],
+  ["Notes", "--sulfur"], ["Currents", "--mineral"], ["Grid", "--seam"], ["Raster", "--seam"],
 ];
 
 const store = {
@@ -324,6 +342,13 @@ function drawMap(canvas, level, layers, detail) {
     }
     ctx.globalAlpha = 1;
   }
+  if (layers.Walls && level.shapeDraw) drawShapes(ctx, v, level.shapeDraw);
+  if (layers.Raster && level.shape_tiles) {
+    ctx.fillStyle = "rgba(255,255,255,0.10)"; ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1;
+    for (const [x, y] of level.shape_tiles) {
+      ctx.fillRect(x * v.s, (h - 1 - y) * v.s, v.s, v.s); ctx.strokeRect(x * v.s + 0.5, (h - 1 - y) * v.s + 0.5, v.s - 1, v.s - 1);
+    }
+  }
   if (layers.Currents) {
     const drift = level.currents.Minerals.drift, mag = Math.hypot(drift[0], drift[1]);
     if (mag > 0.01) {
@@ -378,6 +403,45 @@ function drawMap(canvas, level, layers, detail) {
   return v;
 }
 
+/** Draws the shapes as polygons: rock and mat filled, membrane as a beaded line. */
+function drawShapes(ctx, v, shapes) {
+  const path = (s, part) => {
+    ctx.beginPath();
+    part.forEach((p, i) => { const c = v.toCanvas(...shapeToWorld(s, p)); if (i) ctx.lineTo(...c); else ctx.moveTo(...c); });
+    ctx.closePath();
+  };
+  for (const s of shapes) {
+    const [fill, edge] = SHAPE_COLOUR[s.kind] || SHAPE_COLOUR.Rock;
+    if (s.kind === "Membrane") {
+      const pts = s.geometry.points || [];
+      ctx.strokeStyle = fill; ctx.lineWidth = Math.max(3, v.len((s.geometry.thickness || 16) * 0.5)); ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath(); pts.forEach((p, i) => { const c = v.toCanvas(...shapeToWorld(s, p)); if (i) ctx.lineTo(...c); else ctx.moveTo(...c); }); ctx.stroke();
+      ctx.lineCap = "butt";
+      // The pores: distances along the line.
+      let walked = 0; const pores = s.geometry.pores || [];
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const len = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+        for (const d of pores) if (d >= walked && d <= walked + len) {
+          const t = len ? (d - walked) / len : 0;
+          const c = v.toCanvas(...shapeToWorld(s, [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]));
+          ctx.fillStyle = "#f2c773"; ctx.beginPath(); ctx.arc(...c, Math.max(3, v.len(10)), 0, 7); ctx.fill();
+        }
+        walked += len;
+      }
+      continue;
+    }
+    const parts = shapeParts(s);
+    if (!parts) { // not baked yet: a placeholder disc
+      ctx.fillStyle = fill; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(...v.toCanvas(...s.at), v.len(40), 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      continue;
+    }
+    ctx.lineJoin = "round";
+    if (s.kind === "Rock") { ctx.strokeStyle = edge; ctx.lineWidth = 3; for (const part of parts) { path(s, part); ctx.stroke(); } }
+    ctx.fillStyle = fill; ctx.strokeStyle = fill; ctx.lineWidth = 1.2;
+    for (const part of parts) { path(s, part); ctx.fill(); if (s.kind === "Rock") ctx.stroke(); }
+  }
+}
+
 function ring(ctx, v, at, radius) { ctx.beginPath(); ctx.arc(...v.toCanvas(...at), v.len(radius), 0, 7); ctx.stroke(); }
 
 function drawSprite(ctx, v, name, at, radius, colour, detail) {
@@ -422,6 +486,142 @@ function drawNotes(ctx, v, level) {
       ctx.fillStyle = colour; ctx.fillText(text, x, y);
     }
   }
+}
+
+// --- Editing: the page keeps a draft copy of each level's `file` object. The
+// draft is drawn over the bake; "Save & re-bake" sends it to `cargo levels
+// serve`, which writes the file and answers with a new bake.
+
+/** The level file as an object with the key order of LevelFile::to_json. */
+function hydrate(level) {
+  level.file = JSON.parse(level.file_text);
+  level.file.shapes = level.file.shapes || [];
+  // The shapes with their baked convex parts, ready to draw.
+  level.shapeDraw = level.file.shapes.map((s, i) => ({ ...s, parts: level.shapes[i]?.parts, line: level.shapes[i]?.line }));
+  return level;
+}
+
+// --- Shapes: the transform is the one of src/shapes.rs.
+function shapeToWorld(s, p) {
+  const r = (s.rotation || 0) * Math.PI / 180, sc = s.scale || [1, 1];
+  const x = p[0] * sc[0], y = p[1] * sc[1];
+  return [s.at[0] + x * Math.cos(r) - y * Math.sin(r), s.at[1] + x * Math.sin(r) + y * Math.cos(r)];
+}
+function worldToShape(s, w) {
+  const r = (s.rotation || 0) * Math.PI / 180, sc = s.scale || [1, 1];
+  const dx = w[0] - s.at[0], dy = w[1] - s.at[1];
+  const x = dx * Math.cos(r) + dy * Math.sin(r), y = -dx * Math.sin(r) + dy * Math.cos(r);
+  return [x / (sc[0] || 1), y / (sc[1] || 1)];
+}
+/** The local convex parts (or the polygon) of a shape; null if not baked yet. */
+function shapeParts(s) {
+  if (s.geometry.type === "polygon") return [s.geometry.points];
+  return s.parts || null;
+}
+function pointInPoly(poly, p) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < (xj - xi) * (p[1] - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function distToSegment(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+/** True if a world point is on a shape. */
+function shapeHit(s, w) {
+  const local = worldToShape(s, w), parts = shapeParts(s);
+  if (parts && parts.some((part) => pointInPoly(part, local))) return true;
+  const pts = s.geometry.points;
+  if (pts && pts.length > 1 && s.geometry.type !== "polygon") {
+    const tol = Math.max((s.geometry.thickness || 0) * 0.5, 10);
+    for (let i = 0; i + 1 < pts.length; i++) if (distToSegment(local, pts[i], pts[i + 1]) <= tol) return true;
+  }
+  return false;
+}
+/** A level file with `shapes` in the key position of LevelFile::to_json, without it if empty. */
+function orderedFile(file) {
+  const out = {};
+  for (const [k, val] of Object.entries(file)) {
+    if (k === "shapes") continue;
+    out[k] = val;
+    if (k === "tiles" && file.shapes && file.shapes.length) out.shapes = file.shapes;
+  }
+  if (file.shapes && file.shapes.length && !("shapes" in out)) out.shapes = file.shapes;
+  return out;
+}
+const SHAPE_COLOUR = { Rock: ["#3f4a68", "#171d2e"], Mat: ["rgba(63,122,61,0.65)", "rgba(20,44,18,0.0)"], Membrane: ["#d0708a", "#3a1626"] };
+if (DATA && DATA.levels) DATA.levels.forEach(hydrate);
+
+const LIVE = location.protocol === "http:" || location.protocol === "https:";
+const TILE_KIND = { "#": "Tough", W: "Wall", o: "Pore", "~": "Mat", x: "Waxy" };
+const TILES = [[".", "open"], ["#", "tough rock"], ["W", "wall"], ["o", "pore"], ["~", "mat"], ["x", "waxy wall"]];
+const edit = { on: false, sel: null, tool: "move", tile: "#", mob: null, status: "", statusClass: "", busy: false, pending: false, dragging: false, renderLater: false };
+const drafts = {};
+
+function getDraft(level) {
+  if (!(level.id in drafts)) {
+    const saved = store.get("draft." + level.id, null);
+    drafts[level.id] = saved && saved.base === level.file_text ? saved.draft : null;
+  }
+  return drafts[level.id];
+}
+const isDirty = (level) => { const d = getDraft(level); return !!d && JSON.stringify(d) !== JSON.stringify(level.file); };
+function persistDraft(level) {
+  const d = drafts[level.id];
+  store.set("draft." + level.id, d && isDirty(level) ? { base: level.file_text, draft: d } : null);
+}
+function startDraft(level) {
+  if (!getDraft(level)) drafts[level.id] = structuredClone(level.file);
+  drafts[level.id].shapes = drafts[level.id].shapes || [];
+  return drafts[level.id];
+}
+
+/** The level with the draft drawn in: what `drawMap` shows while a draft exists. */
+function overlay(level, draft) {
+  if (!draft) return level;
+  const [w, h] = level.size;
+  let walls = level.walls;
+  if (draft.tiles.join("\n") !== level.file.tiles.join("\n")) {
+    const map = new Map(level.walls.map((t) => [t[0] + "," + t[1], t]));
+    for (let r = 0; r < h; r++) {
+      if (draft.tiles[r] === level.file.tiles[r]) continue;
+      for (let x = 0; x < w; x++) {
+        const c = draft.tiles[r][x];
+        if (c === level.file.tiles[r][x]) continue;
+        const y = h - 1 - r;
+        if (TILE_KIND[c]) map.set(x + "," + y, [x, y, TILE_KIND[c]]); else map.delete(x + "," + y);
+      }
+    }
+    walls = [...map.values()];
+  }
+  const shapeDraw = draft.shapes.map((s, i) => {
+    const base = level.file.shapes[i];
+    const same = base && JSON.stringify(base.geometry) === JSON.stringify(s.geometry);
+    return { ...s, parts: same ? level.shapes[i]?.parts : null, line: same ? level.shapes[i]?.line : null };
+  });
+  return { ...level, walls, shapeDraw, vents: draft.vents, shelters: draft.shelters, spawns: draft.spawns, start: draft.start,
+    gate: { ...level.gate, at: draft.gate.at }, notes: draft.notes, viruses: draft.viruses };
+}
+
+/** Replaces a level's data with a new bake, in place. */
+function adopt(level, bake) {
+  for (const k of Object.keys(level)) delete level[k];
+  Object.assign(level, bake);
+  hydrate(level);
+}
+
+/** Sends the draft to the server. Returns the new bake. */
+async function postLevel(level) {
+  const res = await fetch("/api/level?id=" + level.id, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(orderedFile(drafts[level.id])),
+  });
+  const data = await res.json().catch(() => ({ error: "bad answer from the server" }));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
 }
 
 // --- Views
@@ -501,24 +701,181 @@ function renderInspect(level) {
       el("i"), name === "Light" && level.uv_fraction > 0.5 ? "UV light" : name);
     layerBar.append(b);
   }
+  const editHost = el("div", {});
   const mapwrap = el("div", { class: "mapwrap" },
     el("button", { class: "back", onclick: () => { state.level = null; route(); }, text: `← ${STAGE_NAMES[level.stage]} maps` }),
-    el("div", { style: "height:8px" }), layerBar, canvas, readout,
+    el("div", { style: "height:8px" }), layerBar, editHost, canvas, readout,
     el("div", { class: "mapfoot" },
       el("span", { text: `${level.size[0]}×${level.size[1]} cells · ${level.size[0] * level.cell}×${level.size[1] * level.cell} px` }),
       el("span", { text: `heat burns ≥ ${level.heat_damage}` }),
       el("span", { text: `cargo levels probe ${level.id} x y` }), toast));
 
-  let v = null;
-  const redraw = () => { v = drawMap(canvas, level, state.layers, true); };
+  let v = null, ov = level;
+  const redraw = () => {
+    ov = overlay(level, getDraft(level));
+    canvas.className = edit.on ? `editing ${edit.tool}` : "";
+    v = drawMap(canvas, ov, state.layers, true);
+    if (edit.on && edit.tool === "select") drawHandles();
+  };
+  // --- Shape handles (select tool)
+  const selShape = () => (edit.sel != null && getDraft(level) ? getDraft(level).shapes[edit.sel] : null);
+  const unit = (a, b) => { const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [(b[0] - a[0]) / d, (b[1] - a[1]) / d]; };
+  /** The handles of the selected shape, in canvas pixels. */
+  function handlesOf(s) {
+    const draw = ov.shapeDraw && ov.shapeDraw[edit.sel];
+    const parts = draw && shapeParts(draw);
+    let ex = 20, ey = 20;
+    if (parts) { ex = Math.max(...parts.flat().map((p) => Math.abs(p[0])), 8); ey = Math.max(...parts.flat().map((p) => Math.abs(p[1])), 8); }
+    const cv = (p) => v.toCanvas(...shapeToWorld(s, p));
+    const c = v.toCanvas(...s.at), out = [];
+    const away = (p, px) => { const u = unit(c, p); return [p[0] + u[0] * px, p[1] + u[1] * px]; };
+    const hx = cv([ex, 0]), hy = cv([0, ey]), hu = cv([ex, ey]);
+    out.push({ kind: "sx", c: away(hx, 10) }, { kind: "sy", c: away(hy, 10) }, { kind: "su", c: away(hu, 8) });
+    const uy = unit(c, hy);
+    out.push({ kind: "rot", c: [hy[0] + uy[0] * 34, hy[1] + uy[1] * 34], from: hy });
+    const pts = s.geometry.points;
+    if (pts) {
+      const closed = s.geometry.type === "polygon";
+      pts.forEach((p, i) => out.push({ kind: "vtx", i, c: cv(p) }));
+      for (let i = 0; i < pts.length - (closed ? 0 : 1); i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        out.push({ kind: "mid", i, c: cv([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) });
+      }
+    }
+    return out;
+  }
+  function drawHandles() {
+    const s = selShape();
+    if (!s) return;
+    const ctx = canvas.getContext("2d");
+    const draw = ov.shapeDraw && ov.shapeDraw[edit.sel], parts = draw && shapeParts(draw);
+    if (parts) {
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; dashed(ctx, true);
+      for (const part of parts) {
+        ctx.beginPath(); part.forEach((p, i) => { const c = v.toCanvas(...shapeToWorld(s, p)); if (i) ctx.lineTo(...c); else ctx.moveTo(...c); }); ctx.closePath(); ctx.stroke();
+      }
+      dashed(ctx, false);
+    }
+    const hs = handlesOf(s), c = v.toCanvas(...s.at);
+    const rot = hs.find((h) => h.kind === "rot");
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(...rot.from); ctx.lineTo(...rot.c); ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(...c, 3, 0, 7); ctx.fill();
+    for (const h of hs) {
+      ctx.lineWidth = 1.5;
+      if (h.kind === "rot") { ctx.fillStyle = "#e9c74a"; ctx.beginPath(); ctx.arc(...h.c, 6, 0, 7); ctx.fill(); }
+      else if (h.kind === "vtx") { ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#000"; ctx.beginPath(); ctx.arc(...h.c, 5, 0, 7); ctx.fill(); ctx.stroke(); }
+      else if (h.kind === "mid") { ctx.strokeStyle = "#ffffff"; ctx.beginPath(); ctx.arc(...h.c, 3.5, 0, 7); ctx.stroke(); }
+      else { ctx.fillStyle = "#66b2ff"; ctx.fillRect(h.c[0] - 5, h.c[1] - 5, 10, 10); }
+    }
+  }
+  /** Begins a drag on a handle or a shape. Returns the drag, or null. */
+  function selectDown(e) {
+    const draft = getDraft(level), r = canvas.getBoundingClientRect(), px = [e.clientX - r.left, e.clientY - r.top];
+    const w = v.toWorld(...px).map((n) => Math.round(n * 10) / 10);
+    const s = selShape();
+    if (s) {
+      for (const h of handlesOf(s)) {
+        const reach = h.kind === "vtx" || h.kind === "mid" ? 8 : 10;
+        if (Math.hypot(h.c[0] - px[0], h.c[1] - px[1]) > reach) continue;
+        if (h.kind === "vtx") {
+          const min = s.geometry.type === "polygon" ? 3 : 2;
+          if (e.shiftKey) { if (s.geometry.points.length > min) { s.geometry.points.splice(h.i, 1); redraw(); commit(); } return null; }
+          return { shape: s, handle: "vtx", i: h.i };
+        }
+        if (h.kind === "mid") {
+          const a = s.geometry.points[h.i], b = s.geometry.points[(h.i + 1) % s.geometry.points.length];
+          s.geometry.points.splice(h.i + 1, 0, [Math.round((a[0] + b[0]) * 5) / 10, Math.round((a[1] + b[1]) * 5) / 10]);
+          return { shape: s, handle: "vtx", i: h.i + 1 };
+        }
+        const rot = (s.rotation || 0) * Math.PI / 180, sc = s.scale || [1, 1];
+        const axis = h.kind === "sy" ? [-Math.sin(rot), Math.cos(rot)] : [Math.cos(rot), Math.sin(rot)];
+        const along = (q) => (q[0] - s.at[0]) * axis[0] + (q[1] - s.at[1]) * axis[1];
+        return { shape: s, handle: h.kind, scale0: [...sc], axis, d0: Math.max(1, h.kind === "su" ? Math.hypot(w[0] - s.at[0], w[1] - s.at[1]) : Math.abs(along(w))), along };
+      }
+    }
+    // A shape under the pointer: the last one is on top.
+    for (let i = draft.shapes.length - 1; i >= 0; i--) {
+      if (shapeHit((ov.shapeDraw && ov.shapeDraw[i]) || draft.shapes[i], w)) {
+        edit.sel = i;
+        renderEditBar(); renderShapePanel(); redraw();
+        return { shape: draft.shapes[i], handle: "move", grab: [w[0] - draft.shapes[i].at[0], w[1] - draft.shapes[i].at[1]] };
+      }
+    }
+    if (edit.sel != null) { edit.sel = null; renderEditBar(); renderShapePanel(); redraw(); }
+    return null;
+  }
+  function selectMove(e) {
+    const d = drag, s = d.shape, r = canvas.getBoundingClientRect();
+    const w = v.toWorld(e.clientX - r.left, e.clientY - r.top);
+    const round1 = (n) => Math.round(n * 10) / 10;
+    if (d.handle === "move") s.at = [round1(w[0] - d.grab[0]), round1(w[1] - d.grab[1])];
+    else if (d.handle === "vtx") s.geometry.points[d.i] = worldToShape(s, w).map(round1);
+    else if (d.handle === "rot") {
+      let deg = Math.atan2(w[1] - s.at[1], w[0] - s.at[0]) * 180 / Math.PI - 90;
+      deg = e.shiftKey ? Math.round(deg / 15) * 15 : Math.round(deg * 2) / 2;
+      s.rotation = ((deg % 360) + 540) % 360 - 180;
+    } else {
+      const f = d.handle === "su" ? Math.hypot(w[0] - s.at[0], w[1] - s.at[1]) / d.d0 : Math.abs(d.along(w)) / d.d0;
+      const clamp = (n) => Math.max(0.2, Math.min(8, Math.round(n * 100) / 100));
+      if (d.handle === "sx") s.scale = [clamp(d.scale0[0] * f), d.scale0[1]];
+      else if (d.handle === "sy") s.scale = [d.scale0[0], clamp(d.scale0[1] * f)];
+      else s.scale = [clamp(d.scale0[0] * f), clamp(d.scale0[1] * f)];
+    }
+    redraw();
+  }
+  const addShape = (kind, geometry, scale) => {
+    const draft = startDraft(level), c = v.toWorld(canvas.clientWidth / 2, canvas.clientHeight / 2).map((n) => Math.round(n));
+    draft.shapes.push({ kind, at: c, ...(scale ? { scale } : {}), geometry });
+    edit.sel = draft.shapes.length - 1; edit.tool = "select";
+    commit(); renderShapePanel();
+  };
+  const blob = (r) => Array.from({ length: 7 }, (_, k) => [Math.round(Math.cos(k / 7 * 6.2832) * r * (0.8 + 0.25 * ((k * 5) % 3) / 2)), Math.round(Math.sin(k / 7 * 6.2832) * r * (0.8 + 0.25 * ((k * 3) % 3) / 2))]);
+  const PRESETS = [
+    ["Boulder", () => addShape("Rock", { type: "boulder", radius: 60, sides: 8, seed: Math.floor(Math.random() * 999) + 1 })],
+    ["Chimney", () => addShape("Rock", { type: "chimney", width: 160, height: 224, wall: 40 })],
+    ["Ridge", () => addShape("Rock", { type: "ridge", points: [[-120, 0], [0, 30], [120, 0]], thickness: 48 })],
+    ["Polygon", () => addShape("Rock", { type: "polygon", points: blob(80) })],
+    ["Membrane", () => addShape("Membrane", { type: "segment", points: [[-96, 0], [96, 0]], thickness: 16, pores: [96] })],
+    ["Mat", () => addShape("Mat", { type: "polygon", points: blob(90) }, [1.3, 0.8])],
+  ];
+  const GEOMETRY_FIELDS = { boulder: ["radius", "sides", "seed"], chimney: ["width", "height", "wall"], ridge: ["thickness"], segment: ["thickness"] };
+  /** The fields of the selected shape, under the map. */
+  const shapeHost = el("div", {});
+  function renderShapePanel() {
+    const s = selShape();
+    if (!edit.on || !s) { shapeHost.replaceChildren(); return; }
+    const num = (label, get, set, step = 1) => {
+      const input = el("input", { type: "number", step: String(step), "aria-label": label, style: "width:72px", onchange: (ev) => { const n = parseFloat(ev.target.value); if (Number.isFinite(n)) { set(n); commit(); } } });
+      input.value = get();
+      return el("label", { class: "hint" }, label + " ", input);
+    };
+    const kind = el("select", { "aria-label": "Shape kind", onchange: (ev) => { s.kind = ev.target.value; commit(); } }, ["Rock", "Mat", "Membrane"].map((k) => el("option", { value: k, text: k })));
+    kind.value = s.kind;
+    const fields = (GEOMETRY_FIELDS[s.geometry.type] || []).map((f) => num(f, () => s.geometry[f], (n) => { s.geometry[f] = n; }));
+    shapeHost.replaceChildren(el("div", { class: "edit-bar" },
+      el("span", { class: "hint", text: `shape ${edit.sel + 1} · ${s.geometry.type}` }), kind,
+      num("rotation", () => s.rotation || 0, (n) => { s.rotation = n; }),
+      num("scale x", () => (s.scale || [1, 1])[0], (n) => { s.scale = [n, (s.scale || [1, 1])[1]]; }, 0.05),
+      num("scale y", () => (s.scale || [1, 1])[1], (n) => { s.scale = [(s.scale || [1, 1])[0], n]; }, 0.05),
+      ...fields,
+      el("button", { class: "btn", onclick: () => { getDraft(level).shapes.splice(edit.sel, 1); edit.sel = null; commit(); renderShapePanel(); redraw(); }, text: "Delete shape" })));
+  }
+  const keyHandler = (ev) => {
+    if (!edit.on || edit.sel == null || ev.target.closest("input, textarea, select")) return;
+    if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); getDraft(level).shapes.splice(edit.sel, 1); edit.sel = null; commit(); renderShapePanel(); redraw(); }
+    else if (ev.key === "Escape") { edit.sel = null; renderEditBar(); renderShapePanel(); redraw(); }
+  };
+  if (window.__shapeKeys) document.removeEventListener("keydown", window.__shapeKeys);
+  window.__shapeKeys = keyHandler;
+  document.addEventListener("keydown", keyHandler);
   const nearest = (x, y) => {
     let best = null;
     const consider = (d, what) => { if (d < 40 && (!best || d < best[0])) best = [d, what]; };
-    for (const s of level.spawns) consider(Math.hypot(s.at[0] - x, s.at[1] - y), level.mobs[s.mob].label + (level.mobs[s.mob].proposed ? " (proposed)" : ""));
-    for (const vent of level.vents) consider(Math.hypot(vent.at[0] - x, vent.at[1] - y) - vent.radius, `vent: heat ${vent.heat}, minerals ${vent.minerals}`);
-    for (const s of level.shelters) consider(Math.hypot(s.at[0] - x, s.at[1] - y) - s.radius, "shelter");
-    consider(Math.hypot(level.gate.at[0] - x, level.gate.at[1] - y) - 20, `gate cell (${level.gate.gene})`);
-    consider(Math.hypot(level.start[0] - x, level.start[1] - y), "player start");
+    for (const s of ov.spawns) consider(Math.hypot(s.at[0] - x, s.at[1] - y), level.mobs[s.mob].label + (level.mobs[s.mob].proposed ? " (proposed)" : ""));
+    for (const vent of ov.vents) consider(Math.hypot(vent.at[0] - x, vent.at[1] - y) - vent.radius, `vent: heat ${vent.heat}, minerals ${vent.minerals}`);
+    for (const s of ov.shelters) consider(Math.hypot(s.at[0] - x, s.at[1] - y) - s.radius, "shelter");
+    consider(Math.hypot(ov.gate.at[0] - x, ov.gate.at[1] - y) - 20, `gate cell (${level.gate.gene})`);
+    consider(Math.hypot(ov.start[0] - x, ov.start[1] - y), "player start");
     return best && best[1];
   };
   canvas.addEventListener("mousemove", (e) => {
@@ -527,7 +884,7 @@ function renderInspect(level) {
     const px = e.clientX - r.left, py = e.clientY - r.top;
     const [x, y] = v.toWorld(px, py);
     const gx = Math.floor((x - level.origin[0]) / level.cell), gy = Math.floor((y - level.origin[1]) / level.cell);
-    const wall = level.walls.find((t) => t[0] === gx && t[1] === gy);
+    const wall = ov.walls.find((t) => t[0] === gx && t[1] === gy);
     const lines = [`[${Math.round(x)}, ${Math.round(y)}]  tile [${gx}, ${gy}]`];
     for (const c of Object.keys(level.channels)) {
       const val = sample(level, c, x, y);
@@ -548,12 +905,143 @@ function renderInspect(level) {
   });
   canvas.addEventListener("mouseleave", () => { readout.hidden = true; });
   canvas.addEventListener("click", (e) => {
+    if (edit.on) return;
     const r = canvas.getBoundingClientRect();
     const [x, y] = v.toWorld(e.clientX - r.left, e.clientY - r.top);
     const text = `[${Math.round(x)}, ${Math.round(y)}]`;
     const done = (msg) => { toast.textContent = msg; setTimeout(() => { toast.textContent = ""; }, 1800); };
     navigator.clipboard.writeText(text).then(() => done(`copied ${text}`), () => done(`point ${text}`));
   });
+
+  // --- Edit mode
+  const setStatus = (text, cls = "") => { edit.status = text; edit.statusClass = cls; const n = editHost.querySelector(".edit-status"); if (n) { n.textContent = text; n.className = "edit-status " + cls; } };
+  const worldAt = (e) => { const r = canvas.getBoundingClientRect(); return v.toWorld(e.clientX - r.left, e.clientY - r.top).map(Math.round); };
+  const tileAt = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const [x, y] = v.toWorld(e.clientX - r.left, e.clientY - r.top);
+    return [Math.floor((x - level.origin[0]) / level.cell), Math.floor((y - level.origin[1]) / level.cell)];
+  };
+  /** The thing under a canvas point: { list, key } so that list[key].at (or list.start) can move. */
+  const pick = (e) => {
+    const draft = getDraft(level), r = canvas.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    const near = (at, radius) => { const [x, y] = v.toCanvas(...at); return Math.hypot(x - px, y - py) <= radius; };
+    if (near(draft.start, Math.max(10, v.len(22)))) return { obj: draft, key: "start", label: "start" };
+    if (near(draft.gate.at, Math.max(10, v.len(MOB_RADIUS.gate)))) return { obj: draft.gate, key: "at", label: "gate" };
+    for (const s of [...draft.spawns].reverse()) if (near(s.at, Math.max(9, v.len(MOB_RADIUS[level.mobs[s.mob].role] || 11)))) return { obj: s, key: "at", label: "spawn", spawn: s };
+    for (const vent of draft.vents) if (near(vent.at, Math.max(8, v.len(vent.radius)))) return { obj: vent, key: "at", label: "vent" };
+    for (const sh of draft.shelters) if (near(sh.at, Math.max(8, v.len(sh.radius)))) return { obj: sh, key: "at", label: "shelter" };
+    return null;
+  };
+  const paint = (e) => {
+    const draft = getDraft(level), [gx, gy] = tileAt(e), [w, h] = level.size;
+    if (gx < 0 || gy < 0 || gx >= w || gy >= h) return;
+    const row = h - 1 - gy, line = draft.tiles[row];
+    if (line[gx] === edit.tile) return;
+    draft.tiles[row] = line.slice(0, gx) + edit.tile + line.slice(gx + 1);
+    redraw();
+  };
+  const commit = () => {
+    persistDraft(level);
+    renderEditBar();
+    if (LIVE && isDirty(level)) rebake(); else if (!LIVE) setStatus("static page: the draft stays in this browser. Copy the JSON, or run `cargo levels serve` to re-bake.");
+  };
+  async function rebake() {
+    if (edit.busy) { edit.pending = true; return; }
+    edit.busy = true; setStatus("baking…");
+    try {
+      const bake = await postLevel(level);
+      adopt(level, bake);
+      persistDraft(level); // the saved file now equals the draft, so the stored draft is cleared
+      setStatus(`saved to assets/levels/${level.id}.json`, "ok");
+    } catch (err) {
+      setStatus(String(err.message || err), "bad");
+      edit.busy = false; edit.pending = false; renderEditBar();
+      return;
+    }
+    edit.busy = false;
+    if (edit.pending) { edit.pending = false; if (isDirty(level)) return rebake(); }
+    if (edit.dragging) edit.renderLater = true; else route(true);
+  }
+  let drag = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!edit.on || e.button !== 0) return;
+    startDraft(level);
+    const draft = getDraft(level);
+    if (edit.tool === "select") {
+      const d = selectDown(e);
+      if (d) { drag = d; edit.dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* the drag still works */ } }
+      return;
+    }
+    if (edit.tool === "move") {
+      const hit = pick(e);
+      if (!hit) return;
+      drag = hit; edit.dragging = true;
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* the drag still works without capture */ }
+    } else if (edit.tool === "paint") {
+      drag = { paint: true }; edit.dragging = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* the drag still works without capture */ } paint(e);
+    } else if (edit.tool === "spawn" && edit.mob) {
+      draft.spawns.push({ mob: edit.mob, at: worldAt(e) });
+      redraw(); commit();
+    } else if (edit.tool === "erase") {
+      const hit = pick(e);
+      if (hit && hit.spawn) { draft.spawns.splice(draft.spawns.indexOf(hit.spawn), 1); redraw(); commit(); }
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (drag.paint) paint(e);
+    else if (drag.shape) selectMove(e);
+    else { drag.obj[drag.key] = worldAt(e); redraw(); }
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    drag = null; edit.dragging = false;
+    commit();
+    if (edit.renderLater) { edit.renderLater = false; route(true); }
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+
+  const toolBtn = (tool, label) => el("button", { class: "btn", "aria-pressed": String(edit.tool === tool), onclick: () => { edit.tool = tool; renderEditBar(); redraw(); } , text: label });
+  function renderEditBar() {
+    const toggle = el("button", { class: "btn", "aria-pressed": String(edit.on), onclick: () => {
+      edit.on = !edit.on;
+      if (edit.on) { startDraft(level); if (!edit.status) setStatus(LIVE ? "connected: changes save and re-bake" : "static page: no re-bake. Run `cargo levels serve`."); }
+      route(true);
+    }, text: edit.on ? "Editing" : "Edit" });
+    const bar = [el("div", { class: "group" }, toggle)];
+    if (isDirty(level)) bar.push(el("span", { class: "status bad", title: "The draft differs from the saved file.", text: "unsaved draft" }));
+    if (edit.on) {
+      const draft = getDraft(level);
+      const mobSel = el("select", { "aria-label": "Creature to add", onchange: (ev) => { edit.mob = ev.target.value; } },
+        Object.entries(draft.mobs).map(([id, m]) => el("option", { value: id, text: m.label + (m.proposed ? " (proposed)" : "") })));
+      if (!edit.mob || !draft.mobs[edit.mob]) edit.mob = Object.keys(draft.mobs)[0] || null;
+      mobSel.value = edit.mob;
+      bar.push(
+        el("div", { class: "group", role: "group", "aria-label": "Tool" }, toolBtn("select", "Shapes"), toolBtn("move", "Move"), toolBtn("paint", "Paint tiles"), toolBtn("spawn", "Add creature"), toolBtn("erase", "Remove creature")),
+        edit.tool === "paint" ? el("div", { class: "group", role: "group", "aria-label": "Tile" },
+          TILES.map(([c, name]) => el("button", { class: "btn swatch", title: name, "aria-pressed": String(edit.tile === c), onclick: () => { edit.tile = c; renderEditBar(); }, text: c }))) : null,
+        edit.tool === "spawn" ? el("div", { class: "group" }, mobSel) : null,
+        edit.tool === "select" ? el("div", { class: "group", role: "group", "aria-label": "Add a shape" }, PRESETS.map(([label, add]) => el("button", { class: "btn", title: `Add a ${label.toLowerCase()} at the centre of the view`, onclick: add, text: "+ " + label }))) : null,
+        el("div", { class: "group" },
+          el("button", { class: "btn primary", title: "Copy the edited level file as JSON", onclick: copyJson, text: "Copy level JSON" }),
+          LIVE ? el("button", { class: "btn", onclick: () => { if (isDirty(level)) rebake(); else setStatus("nothing to save"); }, text: "Save & re-bake" }) : null,
+          el("button", { class: "btn", title: "Throw away the draft", onclick: () => { delete drafts[level.id]; persistDraft(level); startDraft(level); setStatus("draft reverted"); route(true); }, text: "Revert" })),
+        el("span", { class: "edit-status " + edit.statusClass, role: "status", text: edit.status }));
+    }
+    editHost.replaceChildren(el("div", { class: "edit-bar" }, bar), shapeHost);
+    renderShapePanel();
+  }
+  function copyJson() {
+    const text = JSON.stringify(orderedFile(getDraft(level)), null, 2) + "\n";
+    const show = () => {
+      const box = el("textarea", { class: "json-out", readonly: "", "aria-label": "Level JSON" }); box.value = text;
+      editHost.append(box); box.select();
+    };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => setStatus("level JSON copied"), () => { setStatus("clipboard blocked: copy from the box"); show(); });
+    else { setStatus("copy from the box"); show(); }
+  }
+  renderEditBar();
 
   const sheet = el("aside", { class: "sheet" });
   sheet.append(el("div", {}, el("div", { class: "row", style: "margin-bottom:6px" }, el("span", { class: "id hint", text: level.id }), statusChip(level)), el("h1", { text: level.name })));
@@ -601,7 +1089,20 @@ function renderInspect(level) {
   sheet.append(el("section", {}, el("h3", { text: "Layout rules" }), level.errors.length
     ? el("ul", { class: "errors" }, level.errors.map((e) => el("li", { text: e })))
     : el("p", { class: "hint", text: "Passes layout::validate (start, shelter, key prey, chamber, overlaps)." })));
-  if (level.notes.length) sheet.append(el("section", {}, el("h3", { text: "Map notes" }), el("ul", {}, level.notes.map((n) => el("li", { text: (n.proposed ? "Proposed: " : "") + n.text })))));
+  if (edit.on && getDraft(level)) {
+    const draft = getDraft(level);
+    const notes = el("section", {}, el("h3", { text: "Map notes (edit)" }));
+    draft.notes.forEach((n, i) => {
+      const area = el("textarea", { rows: "2", "aria-label": `Note ${i + 1}`, oninput: (ev) => { n.text = ev.target.value; persistDraft(level); redraw(); }, onchange: commit });
+      area.value = n.text;
+      const prop = el("input", { type: "checkbox", onchange: (ev) => { n.proposed = ev.target.checked; redraw(); commit(); } }); prop.checked = !!n.proposed;
+      notes.append(el("div", { class: "note-edit" }, area, el("div", { class: "row" },
+        el("label", { class: "hint" }, prop, " proposed"),
+        el("button", { class: "btn", onclick: () => { draft.notes.splice(i, 1); commit(); route(true); }, text: "Delete" }))));
+    });
+    notes.append(el("button", { class: "btn", onclick: () => { draft.notes.push({ text: "New note", at: [...draft.start] }); commit(); route(true); }, text: "Add note at the start" }));
+    sheet.append(notes);
+  } else if (level.notes.length) sheet.append(el("section", {}, el("h3", { text: "Map notes" }), el("ul", {}, level.notes.map((n) => el("li", { text: (n.proposed ? "Proposed: " : "") + n.text })))));
 
   main.replaceChildren(el("div", { class: "inspect" }, mapwrap, sheet));
   redraw();
@@ -610,11 +1111,11 @@ function renderInspect(level) {
 
 let currentRedraw = null;
 function openLevel(id) { state.level = id; location.hash = id.replace(/\//g, "."); route(); }
-function route() {
+function route(keepScroll) {
   renderTabs();
   currentRedraw = null;
   const level = DATA.levels.find((l) => l.id === state.level);
-  if (level) { state.stage = level.stage; currentRedraw = renderInspect(level); window.scrollTo(0, 0); }
+  if (level) { state.stage = level.stage; currentRedraw = renderInspect(level); if (!keepScroll) window.scrollTo(0, 0); }
   else { if (location.hash) history.replaceState(null, "", location.pathname); renderPanel(); }
 }
 

@@ -16,6 +16,9 @@
 //!   `layout::validate`.
 //! - `cargo levels bake` writes `target/levels/viewer.html` (all levels, open it
 //!   in a browser) and one PNG per level.
+//! - `cargo levels serve` serves the viewer with an edit mode that saves and
+//!   re-bakes a level. `cargo levels new vents/mine --from vents/classic` copies
+//!   a level as a starting point.
 //! - `cargo levels ascii vents/classic heat` prints a channel as text.
 //! - `cargo levels probe vents/classic 120 -40` prints the channels at a point.
 //!
@@ -39,7 +42,8 @@
 //! | `shelters` | `{ "at", "radius" }`. |
 //! | `chamber` | The gate room: `{ "x", "y", "pores", "wall", "lit" }` (grid cells, pores in the south wall). |
 //! | `lines` | Wall lines `{ "kind", "vertical", "at", "span", "pores" }`. |
-//! | `tiles` | Free tiles as text, one string per row, top row first. `.` open, `#` tough rock, `W` wall, `o` pore, `~` mat, `x` waxy wall. Exactly `height` rows of `width` characters. |
+//! | `tiles` | Free tiles as text, one string per row, top row first. `.` open, `#` tough rock, `W` wall, `o` pore, `~` mat, `x` waxy wall, `R` rock (shapes make these; `R` in a file is for hand edits). Exactly `height` rows of `width` characters. |
+//! | `shapes` | Free-form rock, membrane and mat shapes: `{ "kind", "at", "rotation", "scale", "geometry" }`. `kind` is `Rock`, `Membrane` or `Mat`; `rotation` is in degrees; `geometry` is a `polygon`, `boulder`, `chimney`, `ridge` or `segment`. Details: the doc comment of `shapes`. Their tiles go in the wall map and the grid mask. `cargo levels ascii` shows them as `R` (rock) and `~` (mat). |
 //! | `mobs` | The creature catalog: id -> `{ "label", "archetype", "signature", "sprite", "proposed", "notes" }`. `archetype` (`Prey`, `Predator`, `Symbiont`) is what the engine runs now; `proposed` is the behaviour the creature should get. |
 //! | `spawns` | `{ "mob", "at" }`: one creature of a catalog entry. |
 //! | `viruses` | Start points of viruses. |
@@ -79,6 +83,29 @@ pub const LEVEL_ARG: &str = "--level";
 /// Sprites that a gate cell can use. The world keeps sprite names as static
 /// text, so a file can only pick one of these.
 pub const GATE_SPRITES: [&str; 2] = ["gate_cell_phototroph", "gate_cell_proteobacterium"];
+
+/// The levels of the first stage, built into the program so that tests,
+/// release builds and the web build need no file access. A run picks one
+/// from its stage seed (see `Stage::level_def`). A test checks that these
+/// equal the files on disk.
+pub const VENT_LEVELS: [(&str, &str); 5] = [
+    ("vents/chimney_forest", include_str!("../assets/levels/vents/chimney_forest.json")),
+    ("vents/plume_river", include_str!("../assets/levels/vents/plume_river.json")),
+    ("vents/caldera", include_str!("../assets/levels/vents/caldera.json")),
+    ("vents/mat_terraces", include_str!("../assets/levels/vents/mat_terraces.json")),
+    ("vents/oasis_chain", include_str!("../assets/levels/vents/oasis_chain.json")),
+];
+
+/// The first-stage level for a stage seed: the same seed gives the same level.
+pub fn vent_level(stage_seed: u64) -> LevelDef {
+    // The seed is mixed first: stage seeds differ in their high bits.
+    let mixed = (stage_seed ^ (stage_seed >> 32)).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33;
+    let (id, text) = VENT_LEVELS[mixed as usize % VENT_LEVELS.len()];
+    LevelFile::from_json(text)
+        .map_err(|e| e.to_string())
+        .and_then(|f| f.to_def())
+        .unwrap_or_else(|e| panic!("built-in level {id}: {e}"))
+}
 
 type Point = [f32; 2];
 type Span = [usize; 2];
@@ -123,6 +150,9 @@ pub struct LevelFile {
     pub lines: Vec<LineFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tiles: Vec<String>,
+    /// Free-form rock, membrane and mat shapes (see `shapes`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<crate::shapes::Shape>,
     #[serde(default)]
     pub mobs: BTreeMap<String, MobFile>,
     #[serde(default)]
@@ -321,6 +351,7 @@ pub fn tile_char(kind: WallKind) -> char {
         WallKind::Pore => 'o',
         WallKind::Mat => '~',
         WallKind::Waxy => 'x',
+        WallKind::Rock => 'R',
     }
 }
 
@@ -333,6 +364,7 @@ pub fn tile_kind(c: char) -> Result<Option<WallKind>, String> {
         'o' => WallKind::Pore,
         '~' => WallKind::Mat,
         'x' => WallKind::Waxy,
+        'R' => WallKind::Rock,
         other => return Err(format!("unknown tile character {other:?}")),
     }))
 }
@@ -518,6 +550,7 @@ impl LevelFile {
                 .map(|l| WallLine { kind: l.kind, vertical: l.vertical, at: l.at, span: span(l.span), pores: l.pores.clone() })
                 .collect(),
             tiles: parse_tiles(&self.tiles, width, height)?,
+            shapes: self.shapes.clone(),
             npcs,
             viruses: self.viruses.iter().copied().map(Vec2::from).collect(),
             food_zones: self.food_zones.iter().map(|z| (Vec2::from(z.at), z.radius)).collect(),
@@ -598,6 +631,7 @@ impl LevelFile {
                 })
                 .collect(),
             tiles: paint_tiles(&def.tiles, def.width, def.height),
+            shapes: def.shapes.clone(),
             mobs,
             spawns,
             viruses: def.viruses.iter().map(|v| v.to_array()).collect(),

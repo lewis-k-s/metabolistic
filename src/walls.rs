@@ -5,7 +5,7 @@
 //! world (see `world::walls_view`), and a wall cell in the grid, so it blocks
 //! movement, drift and diffusion (see `envgrid`).
 //!
-//! Five kinds of tile:
+//! Six kinds of tile:
 //!
 //! - **Wall** (`wall_membrane`): solid.
 //! - **Pore** (`wall_membrane_pore`): a wall with a transporter. A cell passes
@@ -19,6 +19,8 @@
 //! - **Waxy** (M8, a plant-like wall): solid like a wall (lysis costs the plain
 //!   price). In the grid it is open, except to water: it blocks `Channel::Water`
 //!   and lets O2 and the other channels through (`WAXY_WATER_FACTOR`).
+//! - **Rock**: a solid tile of a rock shape (`shapes`). The grid sees it as a wall.
+//!   A lysis ignores it. Its physics body is the exact shape, not the tile.
 //! - **Tough** (M7): a solid wall that fights back. A lysis costs `TOUGH_LYSE_METALS`
 //!   Metals more, and the attacker's membrane takes `TOUGH_RECOIL` damage.
 //!
@@ -76,6 +78,8 @@ pub enum WallKind {
     Tough,
     /// A solid, waxy wall (plant-like). It blocks water in the grid, not O2.
     Waxy,
+    /// Solid rock (from a `Rock` shape). It cannot be lysed.
+    Rock,
 }
 
 impl WallKind {
@@ -141,7 +145,7 @@ pub fn pore_passable(proteome: &Proteome) -> bool {
 /// or ghosts.
 pub fn solid_for(kind: WallKind, proteome: &Proteome, ghosting: bool) -> bool {
     match kind {
-        WallKind::Wall | WallKind::Tough | WallKind::Waxy => !ghosting,
+        WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Rock => !ghosting,
         WallKind::Pore => !ghosting && !pore_passable(proteome),
         WallKind::Mat => false,
     }
@@ -208,7 +212,7 @@ pub fn lyse_target(
     let ahead = position + aim.normalize_or_zero() * radius;
     tiles_in_contact(map, origin, position, radius)
         .into_iter()
-        .filter(|(tile, _)| map.get(*tile) != Some(WallKind::Mat))
+        .filter(|(tile, _)| !matches!(map.get(*tile), Some(WallKind::Mat | WallKind::Rock)))
         .map(|(tile, _)| (tile, distance_to_tile(origin, tile, ahead)))
         .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
         .map(|(tile, _)| tile)
@@ -342,6 +346,19 @@ mod tests {
             map.insert(tile, kind);
         }
         map
+    }
+
+    #[test]
+    fn rock_is_solid_and_a_lysis_does_not_cut_it() {
+        let bare = Proteome::default();
+        assert!(solid_for(WallKind::Rock, &bare, false));
+        assert!(!solid_for(WallKind::Rock, &bare, true), "an adhesin crawl passes, as it passes a wall");
+        assert!(WallKind::Rock.blocks_grid());
+        let map = map_with(&[((3, 3), WallKind::Rock)]);
+        let origin = ORIGIN;
+        let next_to_it = tile_center(origin, (3, 3)) - Vec2::new(CELL_SIZE * 0.5 + 10.0, 0.0);
+        assert!(touching_wall(&map, origin, next_to_it, 20.0));
+        assert_eq!(lyse_target(&map, origin, next_to_it, 20.0, Vec2::X), None, "rock cannot be lysed");
     }
 
     #[test]

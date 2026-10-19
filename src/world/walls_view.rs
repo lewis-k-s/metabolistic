@@ -22,6 +22,7 @@ use bevy::prelude::*;
 use crate::envgrid::{CELL_SIZE, EnvGrid};
 use crate::walls::{TileLysed, WallKind, WallMap, tile_center};
 use crate::world::Layer;
+use crate::world::shapes_view::{MembraneMaterial, membrane_params};
 use crate::InRun;
 
 /// Z of the wall sprites: above the grid, below the creatures.
@@ -36,7 +37,7 @@ pub fn tile_tint(kind: WallKind) -> Color {
         WallKind::Tough => Color::srgb(0.75, 0.35, 0.35),
         // A waxy, plant-like green-yellow. Stand-in for the **art owner**.
         WallKind::Waxy => Color::srgb(0.62, 0.78, 0.38),
-        WallKind::Wall | WallKind::Pore => Color::WHITE,
+        WallKind::Wall | WallKind::Pore | WallKind::Rock => Color::WHITE,
     }
 }
 
@@ -63,15 +64,26 @@ pub fn is_vertical(map: &WallMap, tile: (usize, usize)) -> bool {
 pub fn spawn_walls(
     commands: &mut Commands,
     asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    membranes: &mut Assets<MembraneMaterial>,
     map: &WallMap,
     grid: &EnvGrid,
+    def: &crate::level::LevelDef,
 ) {
+    // Tiles of shapes are drawn and, for rock, made solid by `shapes_view`.
+    let shape_tiles: std::collections::HashSet<(usize, usize)> =
+        def.shapes.iter().flat_map(|s| s.tiles(def.width, def.height)).map(|(t, _)| t).collect();
     let wall = asset_server.load("sprites/wall_membrane.png");
-    let pore = asset_server.load("sprites/wall_membrane_pore.png");
+    let quad = meshes.add(Rectangle::new(CELL_SIZE, CELL_SIZE));
+    // One shared material for each way a tile can look.
+    let mut shared: std::collections::HashMap<(u8, bool, u8), Handle<MembraneMaterial>> = Default::default();
     for (tile, kind) in map.tiles() {
+        if kind == WallKind::Rock || (shape_tiles.contains(&tile) && matches!(kind, WallKind::Mat)) {
+            continue;
+        }
         let centre = tile_center(grid.origin(), tile).round();
         let layer = match kind {
-            WallKind::Wall | WallKind::Tough | WallKind::Waxy => Layer::Wall,
+            WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Rock => Layer::Wall,
             WallKind::Pore => Layer::Pore,
             // A mat has no body: the layer is only a label.
             WallKind::Mat => Layer::Default,
@@ -82,6 +94,7 @@ pub fn spawn_walls(
         } else {
             Quat::IDENTITY
         };
+        let orientation = tile_orientation(map, tile);
         let mut entity = commands.spawn((
             Name::new(format!("{kind:?} tile")),
             WallTile(tile),
@@ -97,13 +110,22 @@ pub fn spawn_walls(
             ));
         }
         match kind {
-            WallKind::Pore => {
+            // A membrane tile: the shader draws the bilayer (and the pore).
+            WallKind::Pore | WallKind::Wall | WallKind::Tough | WallKind::Waxy => {
+                let pore = kind == WallKind::Pore;
+                let key = (orientation as u8, pore, kind as u8);
+                let material = shared
+                    .entry(key)
+                    .or_insert_with(|| membranes.add(MembraneMaterial { params: membrane_params(orientation, pore, tile_tint(kind)) }))
+                    .clone();
                 entity.with_child((
-                    Sprite::from_image(pore.clone()),
-                    Transform::from_translation(Vec3::new(0.0, 0.0, WALL_Z)).with_rotation(rotation),
+                    Mesh2d(quad.clone()),
+                    MeshMaterial2d(material),
+                    Transform::from_translation(Vec3::new(0.0, 0.0, WALL_Z)),
                 ));
             }
-            WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Mat => {
+            // A mat tile of the tile map keeps the tinted sprite.
+            WallKind::Mat | WallKind::Rock => {
                 for side in [-0.5, 0.5] {
                     // Along the wall: x for a horizontal tile, y for a vertical one.
                     let offset = side * PIECE_WIDTH;
@@ -118,6 +140,23 @@ pub fn spawn_walls(
                 }
             }
         }
+    }
+}
+
+/// How the membrane runs through a tile: 0 horizontal, 1 vertical, 2 a corner
+/// or a junction (both).
+pub fn tile_orientation(map: &WallMap, tile: (usize, usize)) -> f32 {
+    let (x, y) = tile;
+    let has = |dx: isize, dy: isize| {
+        let (nx, ny) = (x as isize + dx, y as isize + dy);
+        nx >= 0 && ny >= 0 && matches!(map.get((nx as usize, ny as usize)), Some(k) if k != WallKind::Mat && k != WallKind::Rock)
+    };
+    let horizontal = has(-1, 0) || has(1, 0);
+    let vertical = has(0, -1) || has(0, 1);
+    match (horizontal, vertical) {
+        (true, true) => 2.0,
+        (false, true) => 1.0,
+        _ => 0.0,
     }
 }
 
@@ -175,7 +214,7 @@ mod tests {
             Duration::from_secs_f64(1.0 / 64.0),
         ));
         let layer = match kind {
-            WallKind::Wall | WallKind::Tough | WallKind::Waxy => Layer::Wall,
+            WallKind::Wall | WallKind::Tough | WallKind::Waxy | WallKind::Rock => Layer::Wall,
             WallKind::Pore => Layer::Pore,
             // A mat has no body: the layer is only a label.
             WallKind::Mat => Layer::Default,
