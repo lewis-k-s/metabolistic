@@ -15,9 +15,21 @@
 //! still work. Each camera that targets the primary window renders to one
 //! image (`OffscreenTarget`) instead, and each `Screenshot::primary_window()`
 //! captures that image. So the smoke test and the playtest need no changes.
-//! The cursor position is `None`.
 //!
-//! A launch with no script (no smoke test, no playtest) saves one frame every
+//! The cursor: `VirtualCursor` (logical pixels, `None` = no cursor) sets the
+//! cursor of the primary window and sends `CursorMoved`, so aim, hover and
+//! picking work as with a mouse. Scripts set it (see `agent_script`).
+//!
+//! Time: each frame is exactly 1/60 s (`TimeUpdateStrategy::ManualDuration`),
+//! for virtual, fixed and real time. A slow frame makes the game slower, not
+//! less precise. With the same seed and script, the events, positions and aim
+//! repeat; pools can differ a little (the NPC and gene RNGs use entropy, and
+//! the number of loading frames changes the phase of the metabolic tick).
+//!
+//! Assets: no hot reload, so edits by other sessions do not reach a running
+//! game.
+//!
+//! A launch with no script (no smoke test, no playtest, no agent script) saves one frame every
 //! 2 s to `METABOLISTIC_OFFSCREEN_DIR` (default `target/offscreen`) and exits
 //! after `METABOLISTIC_OFFSCREEN_SECS` (default 20). Thus an agent launch never
 //! runs forever.
@@ -34,9 +46,13 @@ use bevy::camera::RenderTarget;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
+use bevy::time::TimeUpdateStrategy;
 use bevy::ui::{IsDefaultUiCamera, UiSystems};
-use bevy::window::{PrimaryWindow, WindowRef, WindowResolution};
+use bevy::window::{CursorMoved, PrimaryWindow, WindowRef, WindowResolution};
 use bevy::winit::WinitPlugin;
+
+/// The length of one frame in offscreen mode.
+pub const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 /// The size of the image, and of the primary `Window` entity.
 pub const WIDTH: u32 = 1280;
@@ -81,13 +97,18 @@ pub fn window(title: &str) -> Window {
     }
 }
 
-/// Removes winit from the default plugins and runs the loop at 60 Hz.
+/// Removes winit from the default plugins, runs the loop at 60 Hz, and turns
+/// off asset hot reload: another session can edit a shader while this run
+/// draws, and a run must use the files as they were at start (a half-edited
+/// `lighting.wgsl` froze one run).
 pub fn configure(plugins: PluginGroupBuilder) -> PluginGroupBuilder {
     plugins
         .disable::<WinitPlugin>()
-        .add(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
-            1.0 / 60.0,
-        )))
+        .set(AssetPlugin {
+            watch_for_changes_override: Some(false),
+            ..default()
+        })
+        .add(ScheduleRunnerPlugin::run_loop(FRAME))
 }
 
 /// The image that replaces the primary window.
@@ -110,11 +131,14 @@ pub fn plugin(app: &mut App) {
         .expect("offscreen::plugin needs the default plugins first")
         .add(image);
     app.insert_resource(OffscreenTarget(handle))
+        .insert_resource(TimeUpdateStrategy::ManualDuration(FRAME))
         .add_observer(retarget_camera)
         .add_observer(retarget_screenshot)
         .add_systems(PostUpdate, pick_ui_camera.before(UiSystems::Prepare));
+    cursor_plugin(app);
 
     let scripted = crate::smoke_test::requested()
+        || crate::agent_script::requested()
         || std::env::var_os("METABOLISTIC_PLAYTEST").is_some_and(|v| !v.is_empty() && v != "0");
     if !scripted {
         app.insert_resource(AutoFrames::from_env())
@@ -125,6 +149,48 @@ pub fn plugin(app: &mut App) {
          METABOLISTIC_OFFSCREEN=0 opens a window.",
         reason()
     );
+}
+
+/// The cursor of the primary window in offscreen mode, in logical pixels.
+/// `None` is no cursor. Scripts set it; `apply_virtual_cursor` copies it to the
+/// window at the start of the next frame.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq)]
+pub struct VirtualCursor(pub Option<Vec2>);
+
+/// Adds `VirtualCursor` once (the offscreen plugin and scripts both call it).
+/// Call it as a function: a function plugin can be added only once.
+pub fn cursor_plugin(app: &mut App) {
+    if app.world().contains_resource::<VirtualCursor>() {
+        return;
+    }
+    app.init_resource::<VirtualCursor>()
+        .add_systems(First, apply_virtual_cursor);
+}
+
+/// Sets the window cursor and, when it moved, sends `CursorMoved` (picking
+/// reads the messages, the game reads the window).
+fn apply_virtual_cursor(
+    cursor: Res<VirtualCursor>,
+    mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
+    mut moved: MessageWriter<CursorMoved>,
+    mut last: Local<Option<Vec2>>,
+) {
+    let Ok((entity, mut window)) = windows.single_mut() else {
+        return;
+    };
+    if window.cursor_position() != cursor.0 {
+        window.set_cursor_position(cursor.0);
+    }
+    if *last != cursor.0 {
+        if let Some(position) = cursor.0 {
+            moved.write(CursorMoved {
+                window: entity,
+                position,
+                delta: last.map(|old| position - old),
+            });
+        }
+        *last = cursor.0;
+    }
 }
 
 fn target_image() -> Image {

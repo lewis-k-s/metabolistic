@@ -45,6 +45,8 @@ pub mod tui;
 
 // Graphical modules: only in `full` builds.
 #[cfg(feature = "full")]
+pub mod agent_script;
+#[cfg(feature = "full")]
 pub mod debug;
 #[cfg(feature = "full")]
 pub mod dev_tools;
@@ -182,6 +184,9 @@ impl MetabolisticApp {
             }
             if playtest::requested() {
                 app.add_plugins(playtest::plugin);
+            }
+            if agent_script::requested() {
+                app.add_plugins(agent_script::plugin);
             }
         }
 

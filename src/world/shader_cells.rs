@@ -187,6 +187,13 @@ pub fn canvas_cursor_world(window: &Window, camera: &GlobalTransform) -> Option<
     Some(camera.translation().truncate() + Vec2::new(offset.x, -offset.y) / PIXEL_SCALE)
 }
 
+/// The inverse of `canvas_cursor_world`: the window cursor (logical pixels)
+/// that points at `world` while the canvas is open.
+pub fn canvas_world_to_cursor(window_size: Vec2, camera: &GlobalTransform, world: Vec2) -> Vec2 {
+    let offset = (world - camera.translation().truncate()) * PIXEL_SCALE;
+    window_size / 2.0 + Vec2::new(offset.x, -offset.y)
+}
+
 fn toggle_keys(
     keys: Res<ButtonInput<KeyCode>>,
     mut shader: ResMut<ShaderCells>,
@@ -541,6 +548,18 @@ mod tests {
         for radius in [20.0, 25.0, 30.0] {
             assert!(quad_half_extent(radius) >= radius * 1.12 * 1.15 + 1.0);
         }
+    }
+
+    #[test]
+    fn the_canvas_cursor_maps_back_to_the_same_world_point() {
+        let mut window = Window::default();
+        window.resolution.set(1280.0, 720.0);
+        let camera = GlobalTransform::from_xyz(300.0, -40.0, 0.0);
+        let world = Vec2::new(355.0, 12.0);
+        let cursor = canvas_world_to_cursor(window.size(), &camera, world);
+        window.set_cursor_position(Some(cursor));
+        let back = canvas_cursor_world(&window, &camera).unwrap();
+        assert!(back.distance(world) < 1e-3, "{back} != {world}");
     }
 
     #[test]

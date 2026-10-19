@@ -187,6 +187,25 @@ fn cursor_world(
     camera.viewport_to_world_2d(transform, window.cursor_position()?).ok()
 }
 
+/// The window cursor (logical pixels) that points at `world`: the inverse of
+/// `cursor_world`. Scripts use it to aim (see `agent_script`).
+pub fn world_to_cursor(
+    window: &Window,
+    camera: (&Camera, &GlobalTransform),
+    canvas: &crate::world::shader_cells::Canvas,
+    world: Vec2,
+) -> Option<Vec2> {
+    let (camera, transform) = camera;
+    if canvas.is_open() {
+        return Some(crate::world::shader_cells::canvas_world_to_cursor(
+            window.size(),
+            transform,
+            world,
+        ));
+    }
+    camera.world_to_viewport(transform, world.extend(0.0)).ok()
+}
+
 /// Points the aim of the player's cell at the cursor.
 fn mouse_aim(
     windows: Query<&Window>,

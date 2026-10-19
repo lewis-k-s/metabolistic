@@ -2,7 +2,7 @@
 
 This file provides essential context for cloud-based LLM agents working on the Metabolistic3D project. Use this as a reference for understanding the project structure, patterns, and best practices.
 
-> **No game windows for agents:** when an agent starts the game (`cargo run`, the smoke test, a scenario or the playtest), it renders offscreen to an image: no OS window, and it works with the screen locked. Screenshots go to PNG files; read them with your file tool. A launch with no script saves frames to `target/offscreen/` and exits after 20 s. Do not set `METABOLISTIC_OFFSCREEN=0` (a window) unless the user asks. Details: `CLAUDE.md`, "Agents: the Game Runs Offscreen".
+> **No game windows for agents:** when an agent starts the game (`cargo run`, the smoke test, a scenario or the playtest), it renders offscreen to an image: no OS window, and it works with the screen locked. Screenshots go to PNG files; read them with your file tool. A launch with no script saves frames to `target/offscreen/` and exits after 20 s. To test aim, clicks or keys, write a JSON script and run `METABOLISTIC_SCRIPT=<name> cargo run` (example: `assets/scripts/pilus_aim.json`); its `expect` steps set the exit code. Do not set `METABOLISTIC_OFFSCREEN=0` (a window) unless the user asks. Details: `CLAUDE.md`, "Agents: the Game Runs Offscreen".
 
 ## Project Overview
 
