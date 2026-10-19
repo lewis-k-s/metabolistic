@@ -18,10 +18,12 @@ name = "metabolistic3d"
 path = "src/main.rs"
 test = false
 
-# `cargo test` does not build the example.
+# The spike opens a render app, so it needs the full build. Without this,
+# `cargo th` tries to build it headless and fails. (`cargo test` builds
+# examples to check that they compile, also with `test = false`.)
 [[example]]
 name = "offscreen_spike"
-test = false
+required-features = ["full"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
