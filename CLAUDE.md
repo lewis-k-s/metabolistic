@@ -63,6 +63,8 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Web-optimized build**: `cargo build --release`
 - **Headless build**: `cargo build --no-default-features --features headless` (no graphics/audio)
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
+- **New worktree**: `scripts/seed-target` clones the main checkout's `target/debug` (APFS clone, about 40 s, no disk space) so that the first build does not compile Bevy again (4-8 min). The `SessionStart` hook in `.claude/settings.json` runs it in the background for Claude worktrees; run it by hand in a Codex worktree before the first build.
+- **Debug info**: our crate builds with `debug = "line-tables-only"` (backtraces have lines; no variables in a debugger). Set `debug = true` locally to debug.
 
 ### Smoke Test (full game)
 - `METABOLISTIC_SMOKE_TEST=1 cargo run` runs for about 60 s (offscreen for agents, a window otherwise), checks that `Loading` opens the menu, visits every screen and menu page, holds W on the Run screen, saves one screenshot per step to `target/smoke/` (or `METABOLISTIC_SMOKE_DIR`), logs the player cell's position and pools, and exits. A panic fails the run (non-zero exit), also if the player dies or does not move while W is held.
@@ -78,7 +80,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Scripted playtest**: add `METABOLISTIC_PLAYTEST=1` to a scenario launch (`METABOLISTIC_SCENARIO=vent_chemist METABOLISTIC_PLAYTEST=1 cargo run`). It presses Q, E and W on a fixed script, logs pools, cloud levels and nearby NPCs each second, saves screenshots to `METABOLISTIC_PLAYTEST_DIR` (default `target/playtest`) and exits after 20 s (`src/playtest.rs`). Like the smoke test, it exits on its own. Use an `"invulnerable": true` scenario so the run does not end early.
 
 ### Testing
-- **Run all tests**: `cargo test` (full build, about 10 s after an edit)
+- **Run all tests**: `cargo test` (full build, 20-45 s after an edit). It does not build doctests, the binary's test harness or the example. For one area, `cargo test --test it <module>::` or `cargo test --lib <path>` is faster
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
 - **Integration test layout**: all integration tests are modules of one binary, `tests/it/main.rs` (one link step instead of one per file). Add a new test file to `tests/it/` and a `mod` line to `main.rs`. Only the `tui_*` tests stay separate binaries. Run one file with `cargo test --test it <module>::`. Proptest seeds are in `tests/proptest-regressions/`.
