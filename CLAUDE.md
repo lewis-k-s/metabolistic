@@ -69,9 +69,9 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Web-optimized build**: `cargo build --release`
 - **Headless build**: `cargo build --no-default-features --features headless` (no graphics/audio)
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
-- **New worktree**: `scripts/seed-target` clones the main checkout's `target/debug` (APFS clone, about 40 s, no disk space) so that the first build does not compile Bevy again (4-8 min). The `SessionStart` hook in `.claude/settings.json` runs it in the background for Claude worktrees; run it by hand in a Codex worktree before the first build.
+- **New worktree**: `scripts/seed-target` clones the main checkout's `target/debug` (APFS clone, no disk space) so that the first build does not compile Bevy again. The `SessionStart` hook in `.claude/settings.json` runs it in the background for Claude worktrees; run it by hand in a Codex worktree before the first build.
 - **sccache** (macsimus only, user-wide in `~/.cargo/config.toml`): one cache of compiled dependencies for the main checkout and all worktrees, in `/Volumes/HUBSSD/tmp/lewis/sccache` (60 GiB). It does not cache our own crate, proc macros, build scripts or the Bevy dylib. `sccache --show-stats` shows hits and misses; if the server cannot be reached, cargo compiles without the cache.
-- **Build jobs** (macsimus only, user-wide in `~/.cargo/config.toml`): `jobs = 4` (of 10 cores), so that a build leaves cores for other work. A warm rebuild of our crate is as fast as with 10 jobs; a cold dependency build is slower. For a fast cold build, use `cargo build -j 10`. Do not share one `CARGO_TARGET_DIR` between worktrees: our crate has the same file names in each worktree, so the builds overwrite each other.
+- **Build jobs** (macsimus only, user-wide in `~/.cargo/config.toml`): `jobs = 4` (of 10 cores), so that a build leaves cores for other work. To use all cores for one build, use `cargo build -j 10`. To measure build times (cold and warm, 4 and 10 jobs), run `scripts/bench-build`. Do not share one `CARGO_TARGET_DIR` between worktrees: our crate has the same file names in each worktree, so the builds overwrite each other.
 - **Debug info**: our crate builds with `debug = "line-tables-only"` (backtraces have lines; no variables in a debugger). Set `debug = true` locally to debug.
 
 ### Smoke Test (full game)
@@ -101,7 +101,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - The viewer template is `tools/level-viewer/viewer.html`; the bin is `src/bin/levels/`. Format: the doc comment of `src/level_file.rs`.
 
 ### Testing
-- **Run all tests**: `cargo test` (full build, 20-45 s after an edit). It does not build doctests, the binary's test harness or the example. For one area, `cargo test --test it <module>::` or `cargo test --lib <path>` is faster
+- **Run all tests**: `cargo test` (full build). It does not build doctests, the binary's test harness or the example. For one area, `cargo test --test it <module>::` or `cargo test --lib <path>` is faster
 - **Headless tests**: `cargo th` (alias for `cargo test --no-default-features --features headless`). Use this loop for simulation work.
 - **Run specific test**: `cargo test <test_name>`
 - **Integration test layout**: all integration tests are modules of one binary, `tests/it/main.rs` (one link step instead of one per file). Add a new test file to `tests/it/` and a `mod` line to `main.rs`. Only the `tui_*` tests stay separate binaries. Run one file with `cargo test --test it <module>::`. Proptest seeds are in `tests/proptest-regressions/`.

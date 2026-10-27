@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Measure full-feature build times with 4 and 10 compile jobs:
+#   cold-nocache  empty target dir, sccache off (pure compile cost)
+#   cold-sccache  after `cargo clean`, sccache on (a cold build on macsimus)
+#   warm          touch src/lib.rs, rebuild (the edit loop), 4/10 alternate
+# Each line gives the time, the system CPU (avg and peak, from top) and the
+# peak RSS of the compiler processes.
+#
+# CAUTION: it runs `cargo clean` in this checkout. At the end, target/debug
+# is built again. It takes a long time; it uses caffeinate so the Mac does
+# not sleep. Do other heavy work at another time: it changes the numbers.
+#
+# Results: $BENCH_DIR/results.txt (default /Volumes/HUBSSD/tmp/lewis/bench-build).
+# Usage: scripts/bench-build
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+dir=${BENCH_DIR:-/Volumes/HUBSSD/tmp/lewis/bench-build}
+tmp_target="$dir/target"
+out="$dir/results.txt"
+mkdir -p "$dir"
+: > "$out"
+
+[[ -z ${CAFFEINATED:-} ]] && exec env CAFFEINATED=1 caffeinate -i "$0" "$@"
+
+now() { python3 -c 'import time; print(time.time())'; }
+
+# run <label> <jobs> <cmd...>
+run() {
+  local label=$1 jobs=$2
+  shift 2
+  top -l 0 -s 2 -n 0 | awk '/CPU usage/ {u=$3; s=$5; sub("%","",u); sub("%","",s); print u+s; fflush()}' > "$dir/cpu.txt" &
+  local top_pid=$!
+  (while true; do
+    ps -A -o rss=,comm= | awk '/rustc|\/ld|clang|cc1/ {m+=$1} END {printf "%.0f\n", m/1024}'
+    sleep 1
+  done) > "$dir/mem.txt" &
+  local mem_pid=$!
+  local t0 t1 rc
+  t0=$(now)
+  "$@" -j "$jobs" -q > /dev/null 2> "$dir/err_${label}_$jobs.txt"
+  rc=$?
+  t1=$(now)
+  kill "$top_pid" "$mem_pid" 2> /dev/null
+  wait "$top_pid" "$mem_pid" 2> /dev/null
+  local cpu mem
+  cpu=$(awk '{s+=$1; if ($1>p) p=$1; n++} END {if (n) printf "avg %.0f%% peak %.0f%%", s/n, p; else print "n/a"}' "$dir/cpu.txt")
+  mem=$(sort -n "$dir/mem.txt" | tail -1)
+  printf "%-14s jobs=%-2s rc=%s %7.1f s  cpu(system) %s  compiler RAM peak %s MB\n" \
+    "$label" "$jobs" "$rc" "$(python3 -c "print($t1 - $t0)")" "$cpu" "$mem" | tee -a "$out"
+}
+
+echo "$(date '+%F %T')  $(git rev-parse --short HEAD)  swap: $(sysctl -n vm.swapusage)" | tee -a "$out"
+
+for j in 10 4; do
+  rm -rf "$tmp_target"
+  RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= CARGO_TARGET_DIR="$tmp_target" run cold-nocache "$j" cargo build
+done
+rm -rf "$tmp_target"
+
+for j in 4 10; do
+  cargo clean -q
+  run cold-sccache "$j" cargo build
+done
+
+for j in 4 10 4 10 4 10; do
+  touch src/lib.rs
+  run warm "$j" cargo build
+done
+
+echo "swap after: $(sysctl -n vm.swapusage)" | tee -a "$out"

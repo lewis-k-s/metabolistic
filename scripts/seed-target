@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Seed the target/debug of a new worktree with an APFS clone of the main
 # checkout's target/debug, so that the first build does not compile all of
-# Bevy again (4-8 min). A clone uses no disk space until a file changes.
+# Bevy again. A clone uses no disk space until a file changes.
 #
 # It does nothing in the main checkout, or when target/debug already exists.
 # `--background` returns at once and clones in a detached process (the
