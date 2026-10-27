@@ -71,6 +71,7 @@ The app uses a plugin-based architecture where each major system is implemented 
 - **Headless check**: `cargo ch` (alias, see `.cargo/config.toml`)
 - **New worktree**: `scripts/seed-target` clones the main checkout's `target/debug` (APFS clone, about 40 s, no disk space) so that the first build does not compile Bevy again (4-8 min). The `SessionStart` hook in `.claude/settings.json` runs it in the background for Claude worktrees; run it by hand in a Codex worktree before the first build.
 - **sccache** (macsimus only, user-wide in `~/.cargo/config.toml`): one cache of compiled dependencies for the main checkout and all worktrees, in `/Volumes/HUBSSD/tmp/lewis/sccache` (60 GiB). It does not cache our own crate, proc macros, build scripts or the Bevy dylib. `sccache --show-stats` shows hits and misses; if the server cannot be reached, cargo compiles without the cache.
+- **Build jobs** (macsimus only, user-wide in `~/.cargo/config.toml`): `jobs = 4` (of 10 cores), so that a build leaves cores for other work. A warm rebuild of our crate is as fast as with 10 jobs; a cold dependency build is slower. For a fast cold build, use `cargo build -j 10`. Do not share one `CARGO_TARGET_DIR` between worktrees: our crate has the same file names in each worktree, so the builds overwrite each other.
 - **Debug info**: our crate builds with `debug = "line-tables-only"` (backtraces have lines; no variables in a debugger). Set `debug = true` locally to debug.
 
 ### Smoke Test (full game)
